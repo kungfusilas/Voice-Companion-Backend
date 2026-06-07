@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Sparkles, Plus } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { AriaAvatar } from "@/components/avatars/AriaAvatar";
 import { LunaAvatar } from "@/components/avatars/LunaAvatar";
 import { EmberAvatar } from "@/components/avatars/EmberAvatar";
@@ -62,10 +62,9 @@ const COMPANIONS: CompanionConfig[] = [
 
 interface CompanionSelectProps {
   onSelect: (persona: Persona) => void;
-  onCustom: () => void;
 }
 
-export function CompanionSelect({ onSelect, onCustom }: CompanionSelectProps) {
+export function CompanionSelect({ onSelect }: CompanionSelectProps) {
   const handlePick = async (companion: CompanionConfig) => {
     // Build a minimal Persona object from the companion config.
     // The full Persona (with system prompt) lives on the backend.
@@ -166,17 +165,6 @@ export function CompanionSelect({ onSelect, onCustom }: CompanionSelectProps) {
           })}
         </div>
 
-        {/* Custom companion option */}
-        <motion.button
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.35 }}
-          onClick={onCustom}
-          className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm text-white/40 hover:text-white/60 transition-all border border-white/8 hover:border-white/15 hover:bg-white/[0.03]"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Create a custom companion
-        </motion.button>
       </div>
     </motion.div>
   );

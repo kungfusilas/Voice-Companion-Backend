@@ -1,33 +1,13 @@
 import { useState } from "react";
 import { AnimatePresence } from "framer-motion";
 import { CompanionSelect } from "@/pages/CompanionSelect";
-import { PersonaSetup } from "@/components/PersonaSetup";
 import { ChatPage } from "@/pages/Chat";
 import type { Persona } from "@/lib/api";
 
-type Screen = "select" | "setup" | "chat";
-
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("select");
   const [persona, setPersona] = useState<Persona | null>(null);
 
-  const handleSelect = (p: Persona) => {
-    setPersona(p);
-    setScreen("chat");
-  };
-
-  const handleCreated = (p: Persona) => {
-    setPersona(p);
-    setScreen("chat");
-  };
-
-  const handleBack = () => {
-    setPersona(null);
-    setScreen("select");
-  };
-
-  // Select screen gets a wider, taller layout; chat/setup use the card layout
-  if (screen === "select") {
+  if (!persona) {
     return (
       <div
         className="min-h-screen flex items-center justify-center p-4"
@@ -46,11 +26,7 @@ export default function App() {
           }}
         >
           <AnimatePresence mode="wait">
-            <CompanionSelect
-              key="select"
-              onSelect={handleSelect}
-              onCustom={() => setScreen("setup")}
-            />
+            <CompanionSelect key="select" onSelect={setPersona} />
           </AnimatePresence>
         </div>
       </div>
@@ -74,17 +50,11 @@ export default function App() {
         }}
       >
         <AnimatePresence mode="wait">
-          {screen === "setup" ? (
-            <div key="setup" className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/10">
-              <PersonaSetup onCreated={handleCreated} />
-            </div>
-          ) : persona ? (
-            <ChatPage
-              key={`chat-${persona.id}`}
-              persona={persona}
-              onBack={handleBack}
-            />
-          ) : null}
+          <ChatPage
+            key={`chat-${persona.id}`}
+            persona={persona}
+            onBack={() => setPersona(null)}
+          />
         </AnimatePresence>
       </div>
     </div>
