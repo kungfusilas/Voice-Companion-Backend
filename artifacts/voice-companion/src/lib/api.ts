@@ -14,6 +14,7 @@ export interface Persona {
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  proactive?: boolean;
 }
 
 export interface ChatResponse {
@@ -138,4 +139,28 @@ export async function speakText(text: string, persona_id: string): Promise<Blob>
   });
   if (!res.ok) throw new Error(await res.text());
   return res.blob();
+}
+
+// ── Proactive messages ────────────────────────────────────────────────────────
+
+export interface ProactiveMessage {
+  id: string;
+  message: string;
+  sent_at: string;
+}
+
+export interface ProactiveMessagesResponse {
+  user_id: string;
+  companion_id: string;
+  messages: ProactiveMessage[];
+  count: number;
+}
+
+export async function fetchProactiveMessages(
+  user_id: string,
+  companion_id: string,
+): Promise<ProactiveMessagesResponse> {
+  const res = await fetch(`${BASE}/proactive-messages/${user_id}/${companion_id}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }

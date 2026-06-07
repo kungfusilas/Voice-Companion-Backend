@@ -25,8 +25,8 @@ const COMPANIONS: CompanionConfig[] = [
   {
     id: "companion-aeva",
     name: "Aeva",
-    tagline: "Mysterious & poetic",
-    traits: ["deep", "introspective", "gentle"],
+    tagline: "Confident & a little possessive",
+    traits: ["expressive", "jealous", "needy"],
     glow: "rgba(167,139,250,0.25)",
     border: "rgba(167,139,250,0.3)",
     avatar: "/companion/avatars/aeva.jpg",

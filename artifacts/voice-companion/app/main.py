@@ -1,14 +1,20 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.routers import chat, personas, sessions, tts, stt, memories
+from app.routers import proactive as proactive_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
+from app import proactive
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -17,7 +23,22 @@ async def lifespan(app: FastAPI):
     for companion in COMPANIONS:
         companion.system_prompt_override = build_system_prompt(companion)
         store.create_persona(companion)
+
+    # Start the proactive messaging scheduler (runs every hour)
+    scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        proactive.check_and_send_proactive_messages,
+        "interval",
+        hours=1,
+        id="proactive_messages",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("Proactive message scheduler started")
+
     yield
+
+    scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
@@ -42,6 +63,11 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(tts.router, prefix="/api/tts", tags=["tts"])
 app.include_router(stt.router, prefix="/api/stt", tags=["stt"])
 app.include_router(memories.router, prefix="/api/memories", tags=["memories"])
+app.include_router(
+    proactive_router.router,
+    prefix="/api/proactive-messages",
+    tags=["proactive"],
+)
 
 
 @app.get("/api/healthz")

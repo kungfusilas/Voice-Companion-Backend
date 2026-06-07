@@ -6,14 +6,20 @@ that shapes how each companion speaks to the user.
 
 Run this SQL once in the Supabase SQL editor:
 
-    create table if not exists relationship_stats (
+    CREATE TABLE IF NOT EXISTS relationship_stats (
         id           uuid primary key default gen_random_uuid(),
         user_id      text not null,
         companion_id text not null,
         message_count int not null default 0,
         updated_at   timestamptz not null default now(),
+        last_active_at timestamptz,
         unique(user_id, companion_id)
     );
+
+If the table already exists without last_active_at, run:
+
+    ALTER TABLE relationship_stats
+        ADD COLUMN IF NOT EXISTS last_active_at timestamptz;
 """
 import os
 from supabase import create_client, Client
@@ -115,7 +121,10 @@ async def get_message_count(user_id: str, companion_id: str) -> int:
 
 
 async def increment_message_count(user_id: str, companion_id: str) -> None:
-    """Increment the message count by 1. Fire-and-forget safe — swallows all errors."""
+    """
+    Increment the message count by 1 and update last_active_at to now.
+    Fire-and-forget safe — swallows all errors.
+    """
     try:
         client = _get_client()
         current = await get_message_count(user_id, companion_id)
@@ -127,6 +136,7 @@ async def increment_message_count(user_id: str, companion_id: str) -> None:
                     "companion_id": companion_id,
                     "message_count": current + 1,
                     "updated_at": "now()",
+                    "last_active_at": "now()",
                 },
                 on_conflict="user_id,companion_id",
             )

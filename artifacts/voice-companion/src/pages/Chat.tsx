@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useId } from "react";
+import { useState, useCallback, useRef, useId, useEffect } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, Volume2, VolumeX } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
@@ -8,7 +8,7 @@ import { TextInput } from "@/components/TextInput";
 import { MemoriesPanel } from "@/components/MemoriesPanel";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { chatStream, transcribeAudio, speakText } from "@/lib/api";
+import { chatStream, transcribeAudio, speakText, fetchProactiveMessages } from "@/lib/api";
 import type { Persona, ChatMessage } from "@/lib/api";
 
 interface ChatPageProps {
@@ -35,15 +35,43 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [proactiveLabel, setProactiveLabel] = useState<string | null>(null);
   const busyRef = useRef(false);
 
   const { playing: speaking, play: playAudio } = useAudioPlayer();
+
+  // On mount: load any pending proactive messages and prepend them
+  useEffect(() => {
+    let cancelled = false;
+    async function loadProactive() {
+      try {
+        const data = await fetchProactiveMessages(USER_ID, persona.id);
+        if (cancelled || !data.messages.length) return;
+        const proactiveMessages: ChatMessage[] = data.messages.map((m) => ({
+          role: "assistant",
+          content: m.message,
+          proactive: true,
+        }));
+        setMessages(proactiveMessages);
+        setProactiveLabel(
+          `💭 ${persona.name} was thinking about you while you were away`,
+        );
+      } catch {
+        // Proactive fetch is non-fatal
+      }
+    }
+    loadProactive();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [persona.id]);
 
   const sendMessage = useCallback(async (userText: string) => {
     if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError("");
+    // Clear the proactive label once the user starts chatting
+    setProactiveLabel(null);
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setStreamingText("");
 
@@ -157,6 +185,15 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
           {persona.nsfw_mode ? "Venice.ai · uncensored" : "Claude · standard"}
         </span>
       </div>
+
+      {/* Proactive label — shown above the transcript when messages arrived while away */}
+      {proactiveLabel && (
+        <div className="flex justify-center px-4 mb-1 shrink-0">
+          <span className="text-[11px] text-violet-300/60 italic bg-violet-950/30 border border-violet-800/20 px-3 py-1 rounded-full">
+            {proactiveLabel}
+          </span>
+        </div>
+      )}
 
       {/* Transcript */}
       <ChatTranscript
