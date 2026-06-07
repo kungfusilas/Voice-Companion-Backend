@@ -3,17 +3,44 @@ import asyncio
 from typing import AsyncGenerator
 from elevenlabs.client import ElevenLabs, AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError
+from elevenlabs.types import VoiceSettings
 
-# Fall back to Rachel (built-in) if no env var is set
 _FALLBACK_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 DEFAULT_MODEL_ID = "eleven_turbo_v2_5"
 
 _sync_client: ElevenLabs | None = None
 _async_client: AsyncElevenLabs | None = None
 
+# Per-companion voice tuning — keyed by companion ID
+COMPANION_VOICE_SETTINGS: dict[str, VoiceSettings] = {
+    "companion-aria": VoiceSettings(
+        stability=0.75,
+        similarity_boost=0.85,
+        style=0.30,
+        use_speaker_boost=True,
+    ),
+    "companion-aeva": VoiceSettings(
+        stability=0.55,
+        similarity_boost=0.80,
+        style=0.50,
+        use_speaker_boost=True,
+    ),
+    "companion-ember": VoiceSettings(
+        stability=0.45,
+        similarity_boost=0.75,
+        style=0.65,
+        use_speaker_boost=True,
+    ),
+    "companion-kai": VoiceSettings(
+        stability=0.60,
+        similarity_boost=0.85,
+        style=0.40,
+        use_speaker_boost=True,
+    ),
+}
+
 
 def get_default_voice_id() -> str:
-    """Returns ELEVENLABS_VOICE_ID env var if set, otherwise the built-in fallback."""
     return os.environ.get("ELEVENLABS_VOICE_ID") or _FALLBACK_VOICE_ID
 
 
@@ -39,7 +66,6 @@ def get_async_client() -> AsyncElevenLabs:
 
 
 def _friendly_error(e: ApiError) -> str:
-    """Extract a clean, human-readable message from an ElevenLabs ApiError."""
     try:
         body = e.body
         if isinstance(body, dict):
@@ -63,6 +89,7 @@ async def synthesize(
     text: str,
     voice_id: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
+    voice_settings: VoiceSettings | None = None,
 ) -> bytes:
     """Convert text to speech and return the full audio as bytes (mp3)."""
     voice_id = voice_id or get_default_voice_id()
@@ -70,12 +97,15 @@ async def synthesize(
     def _run() -> bytes:
         client = get_sync_client()
         try:
-            chunks = client.text_to_speech.convert(
+            kwargs: dict = dict(
                 voice_id=voice_id,
                 text=text,
                 model_id=model_id,
                 output_format="mp3_44100_128",
             )
+            if voice_settings is not None:
+                kwargs["voice_settings"] = voice_settings
+            chunks = client.text_to_speech.convert(**kwargs)
             return b"".join(chunks)
         except ApiError as e:
             raise ElevenLabsError(_friendly_error(e), e.status_code)
@@ -87,17 +117,21 @@ async def synthesize_stream(
     text: str,
     voice_id: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
+    voice_settings: VoiceSettings | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Stream audio chunks as they arrive from ElevenLabs."""
     voice_id = voice_id or get_default_voice_id()
     client = get_async_client()
     try:
-        async for chunk in await client.text_to_speech.convert(
+        kwargs: dict = dict(
             voice_id=voice_id,
             text=text,
             model_id=model_id,
             output_format="mp3_44100_128",
-        ):
+        )
+        if voice_settings is not None:
+            kwargs["voice_settings"] = voice_settings
+        async for chunk in await client.text_to_speech.convert(**kwargs):
             if chunk:
                 yield chunk
     except ApiError as e:

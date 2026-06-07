@@ -7,6 +7,7 @@ from app.models import ChatMessage, ChatRequest, ChatResponse
 from app import store, claude, venice_client
 from app import memory as mem_store
 from app import memory_extractor
+from app import relationship
 
 router = APIRouter()
 
@@ -22,13 +23,35 @@ def _inject_date(prompt: str) -> str:
     return f"Today's date is {today}.\n\n{prompt}"
 
 
-async def _build_system_prompt_with_memory(persona, user_id: str) -> str:
-    """Fetch recent memories and inject them into the persona's system prompt."""
+async def _build_system_prompt(persona, user_id: str, user_message: str) -> str:
+    """
+    Build the full system prompt:
+    1. Base persona prompt + date injection
+    2. Long-term memories (up to 10 recent)
+    3. Emotionally relevant memories for this specific message
+    4. Relationship level context
+    """
     base_prompt = persona.build_system_prompt()
     try:
-        memories = await mem_store.fetch_memories(user_id, persona.id, limit=10)
-        memory_block = memory_extractor.format_memories_for_prompt(memories)
-        return _inject_date(base_prompt + memory_block)
+        # Fetch memories and message count in parallel
+        memories, message_count = await asyncio.gather(
+            mem_store.fetch_memories(user_id, persona.id, limit=30),
+            relationship.get_message_count(user_id, persona.id),
+        )
+
+        # Standard recent memories block (most recent 10)
+        memory_block = memory_extractor.format_memories_for_prompt(memories[:10])
+
+        # Emotionally relevant memories surfaced for this specific message
+        emotional_block = memory_extractor.format_emotional_memories_for_prompt(
+            user_message, memories
+        )
+
+        # Relationship level
+        rel_context = relationship.build_relationship_context(persona.id, message_count)
+
+        return _inject_date(base_prompt + memory_block + emotional_block + rel_context)
+
     except Exception:
         return _inject_date(base_prompt)
 
@@ -41,7 +64,7 @@ async def chat(request: ChatRequest):
 
     user_id = request.user_id or _DEFAULT_USER
     history = store.get_or_create_session(request.session_id, request.persona_id)
-    system_prompt = await _build_system_prompt_with_memory(persona, user_id)
+    system_prompt = await _build_system_prompt(persona, user_id, request.message)
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     if use_venice:
@@ -60,8 +83,12 @@ async def chat(request: ChatRequest):
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
 
+    # Fire-and-forget: memory extraction + relationship increment
     asyncio.create_task(
         memory_extractor.extract_and_save(user_id, persona.id, request.message, reply)
+    )
+    asyncio.create_task(
+        relationship.increment_message_count(user_id, persona.id)
     )
 
     return ChatResponse(
@@ -90,7 +117,7 @@ async def chat_stream(request: ChatRequest):
 
     user_id = request.user_id or _DEFAULT_USER
     history = store.get_or_create_session(request.session_id, request.persona_id)
-    system_prompt = await _build_system_prompt_with_memory(persona, user_id)
+    system_prompt = await _build_system_prompt(persona, user_id, request.message)
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
@@ -116,8 +143,12 @@ async def chat_stream(request: ChatRequest):
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
                     yield f"data: {json.dumps(payload)}\n\n"
+                    # Fire-and-forget after stream completes
                     asyncio.create_task(
                         memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
+                    )
+                    asyncio.create_task(
+                        relationship.increment_message_count(user_id, persona.id)
                     )
                     return
             except Exception:

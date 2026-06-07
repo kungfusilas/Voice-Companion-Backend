@@ -3,7 +3,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from app import store
 from app import elevenlabs_client
-from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError
+from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError, COMPANION_VOICE_SETTINGS
 
 router = APIRouter()
 
@@ -15,7 +15,7 @@ def _elevenlabs_http_error(e: ElevenLabsError) -> HTTPException:
 
 class TTSRequest(BaseModel):
     text: str
-    voice_id: str | None = None   # None → uses ELEVENLABS_VOICE_ID env var or built-in fallback
+    voice_id: str | None = None
     model_id: str = DEFAULT_MODEL_ID
 
 
@@ -27,10 +27,7 @@ class PersonaSpeakRequest(BaseModel):
 
 @router.get("/voices")
 async def get_voices():
-    """
-    List all ElevenLabs voices on your account.
-    `is_default: true` marks the voice currently set via ELEVENLABS_VOICE_ID.
-    """
+    """List all ElevenLabs voices on your account."""
     try:
         voices = await elevenlabs_client.list_voices()
         return {"voices": voices, "total": len(voices)}
@@ -40,12 +37,7 @@ async def get_voices():
 
 @router.post("", response_class=Response)
 async def text_to_speech(request: TTSRequest):
-    """
-    Convert text to speech. Returns the full audio file as **audio/mpeg**.
-
-    `voice_id` is optional — omit to use the voice configured via
-    `ELEVENLABS_VOICE_ID` (or the built-in fallback if unset).
-    """
+    """Convert text to speech. Returns full audio as audio/mpeg."""
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
 
@@ -67,10 +59,7 @@ async def text_to_speech(request: TTSRequest):
 
 @router.post("/stream")
 async def text_to_speech_stream(request: TTSRequest):
-    """
-    Stream audio chunks as they arrive from ElevenLabs (lower latency).
-    Use with the Web Audio API or MediaSource Extensions on the frontend.
-    """
+    """Stream audio chunks from ElevenLabs (lower latency)."""
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
 
@@ -99,9 +88,9 @@ async def text_to_speech_stream(request: TTSRequest):
 @router.post("/speak")
 async def persona_speak(request: PersonaSpeakRequest):
     """
-    Speak text using the voice assigned to a persona.
-    Falls back to ELEVENLABS_VOICE_ID (or built-in) if the persona has no voice set.
-    Returns full audio as **audio/mpeg**.
+    Speak text using the voice assigned to a persona, with per-companion
+    voice tuning (stability, style, similarity_boost).
+    Returns full audio as audio/mpeg.
     """
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -110,11 +99,14 @@ async def persona_speak(request: PersonaSpeakRequest):
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
 
+    voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
+
     try:
         audio = await elevenlabs_client.synthesize(
             text=request.text,
-            voice_id=persona.voice_id,  # None → uses env var default
+            voice_id=persona.voice_id,
             model_id=request.model_id,
+            voice_settings=voice_settings,
         )
     except ElevenLabsError as e:
         raise _elevenlabs_http_error(e)
