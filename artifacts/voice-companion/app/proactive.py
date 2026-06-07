@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 _RESEND_URL = "https://api.resend.com/emails"
 _PLACEHOLDER_EMAIL = "shsteroids@gmail.com"
-_FROM_EMAIL = "companion@yourvoiceapp.com"
+_FROM_EMAIL = "onboarding@resend.dev"
 
 _client: Client | None = None
 
