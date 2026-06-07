@@ -10,6 +10,7 @@ class Persona(BaseModel):
     personality_traits: list[str]
     backstory: str = ""
     custom_relationship: str = ""
+    voice_id: str | None = None  # ElevenLabs voice ID; None = use default
 
     def build_system_prompt(self) -> str:
         relationship = (
@@ -59,6 +60,7 @@ class CreatePersonaRequest(BaseModel):
     personality_traits: list[str] = Field(default_factory=list)
     backstory: str = ""
     custom_relationship: str = ""
+    voice_id: str | None = None  # ElevenLabs voice ID to assign to this persona
 
 
 class SessionInfo(BaseModel):
