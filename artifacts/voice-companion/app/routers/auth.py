@@ -149,27 +149,43 @@ async def oauth_verify(req: OAuthVerifyRequest):
     """
     Verify a Supabase OAuth access_token (issued after Google / Apple sign-in
     handled client-side by @supabase/supabase-js). Validates the JWT signature
-    and returns the user's id and email.
+    via the JWKS endpoint and returns the user's id and email.
     """
-    jwt_secret = os.environ.get("SUPABASE_JWT_SECRET", "")
-    if not jwt_secret:
-        raise HTTPException(500, "SUPABASE_JWT_SECRET not configured")
+    from app.auth_middleware import _get_public_keys
+    import jwt as _jwt
+
+    keys = _get_public_keys()
+    if not keys:
+        raise HTTPException(500, "No public keys available for token verification")
+
     try:
-        payload = jwt.decode(
-            req.access_token,
-            jwt_secret,
-            algorithms=["HS256"],
-            audience="authenticated",
-        )
-        return {
-            "user_id": payload.get("sub"),
-            "email": payload.get("email"),
-            "role": payload.get("role"),
-        }
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
+        header = _jwt.get_unverified_header(req.access_token)
     except Exception:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
+
+    kid = header.get("kid")
+    alg = header.get("alg", "ES256")
+    candidates = [k for k_id, k in keys if k_id == kid] or [k for _, k in keys]
+
+    for public_key in candidates:
+        try:
+            payload = _jwt.decode(
+                req.access_token,
+                public_key,
+                algorithms=[alg],
+                audience="authenticated",
+            )
+            return {
+                "user_id": payload.get("sub"),
+                "email": payload.get("email"),
+                "role": payload.get("role"),
+            }
+        except _jwt.ExpiredSignatureError:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Token expired")
+        except Exception:
+            continue
+
+    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
 
 
 @router.get("/me")
