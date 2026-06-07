@@ -3,9 +3,15 @@ import { createClient } from "@supabase/supabase-js";
 // Fallback placeholders allow the module to load even before env vars are set.
 // The app detects the unconfigured state via SUPABASE_CONFIGURED and shows a
 // setup screen rather than crashing.
-const supabaseUrl =
-  (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
-  "https://placeholder.supabase.co";
+const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) || "";
+
+// Normalize: ensure URL has https:// prefix (guards against accidentally
+// pasting just the subdomain without the scheme).
+const supabaseUrl = rawUrl
+  ? rawUrl.startsWith("http")
+    ? rawUrl
+    : `https://${rawUrl}`
+  : "https://placeholder.supabase.co";
 
 const supabaseAnonKey =
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
