@@ -93,23 +93,40 @@ async def save_memory(
     importance: int = 5,
 ) -> dict:
     """
-    Embed content and insert into the pgvector memories table.
-    Silently returns {} on any error so it never breaks chat flow.
+    Embed content and POST directly to /rest/v1/memories via httpx.
+    Using raw httpx (not supabase-py) gives full transparency and avoids
+    any client-side caching layers. Returns {} silently on any error.
     """
     try:
         embedding = await embed(content)
-        # PostgreSQL vector literal: "[x,y,z,...]"
+        # PostgreSQL vector literal expected by pgvector: "[x,y,z,...]"
         vec_str = "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
-        client = _get_client()
-        result = client.table("memories").insert({
-            "user_id": user_id,
-            "companion_id": companion_id,
-            "content": content,
-            "memory_type": memory_type,
-            "embedding": vec_str,
-            "importance": max(1, min(10, int(importance))),
-        }).execute()
-        return result.data[0] if result.data else {}
+
+        supabase_url = os.environ.get("SUPABASE_URL", "")
+        service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.post(
+                f"{supabase_url}/rest/v1/memories",
+                headers={
+                    "Authorization": f"Bearer {service_key}",
+                    "apikey": service_key,
+                    "Content-Type": "application/json",
+                    "Prefer": "return=representation",
+                },
+                json={
+                    "user_id": user_id,
+                    "companion_id": companion_id,
+                    "content": content,
+                    "memory_type": memory_type,
+                    "embedding": vec_str,
+                    "importance": max(1, min(10, int(importance))),
+                },
+            )
+            if resp.status_code in (200, 201):
+                rows = resp.json()
+                return rows[0] if rows else {}
+            return {}
     except Exception:
         return {}
 
