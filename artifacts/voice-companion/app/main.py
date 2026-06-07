@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.routers import chat, personas, sessions, tts, stt, memories
+from app.routers import auth as auth_router
 from app.routers import proactive as proactive_router
 from app.routers import selfie as selfie_router
 from app.routers import relationship as relationship_router
@@ -84,7 +85,8 @@ app.include_router(proactive_router.router,   prefix="/api/proactive-messages", 
 app.include_router(selfie_router.router,      prefix="/api/selfie",             tags=["selfie"])
 app.include_router(relationship_router.router,prefix="/api/relationship",       tags=["relationship"])
 app.include_router(activities_router.router,  prefix="/api/activity",           tags=["activities"])
-app.include_router(romantic_router.router,       prefix="/api/romantic-mode",      tags=["romantic"])
+app.include_router(auth_router.router,          prefix="/api/auth",              tags=["auth"])
+app.include_router(romantic_router.router,      prefix="/api/romantic-mode",      tags=["romantic"])
 app.include_router(daily_checkin_router.router, prefix="/api/daily-checkin",      tags=["daily-checkin"])
 
 

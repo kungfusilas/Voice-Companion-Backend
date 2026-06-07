@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, LogOut } from "lucide-react";
 import type { Persona } from "@/lib/api";
 
 interface CompanionConfig {
@@ -53,9 +53,10 @@ const COMPANIONS: CompanionConfig[] = [
 
 interface CompanionSelectProps {
   onSelect: (persona: Persona) => void;
+  onSignOut?: () => void;
 }
 
-export function CompanionSelect({ onSelect }: CompanionSelectProps) {
+export function CompanionSelect({ onSelect, onSignOut }: CompanionSelectProps) {
   const handlePick = (companion: CompanionConfig) => {
     const persona: Persona = {
       id: companion.id,
@@ -79,11 +80,23 @@ export function CompanionSelect({ onSelect }: CompanionSelectProps) {
     >
       {/* Header */}
       <div className="px-6 pt-6 pb-4 shrink-0">
-        <div className="flex items-center gap-2 mb-1">
-          <Sparkles className="w-4 h-4 text-violet-400" />
-          <span className="text-xs text-violet-400 font-medium tracking-wider uppercase">
-            AI Companions
-          </span>
+        <div className="flex items-center justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-violet-400" />
+            <span className="text-xs text-violet-400 font-medium tracking-wider uppercase">
+              AI Companions
+            </span>
+          </div>
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              title="Sign out"
+              className="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition-colors text-xs"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign out</span>
+            </button>
+          )}
         </div>
         <h1 className="text-2xl font-bold text-white">
           Who do you want to<br />talk to today?

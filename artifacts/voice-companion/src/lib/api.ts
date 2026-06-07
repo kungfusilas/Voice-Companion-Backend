@@ -1,4 +1,29 @@
+import { supabase } from "@/lib/supabase";
+
 const BASE = "/companion/api";
+
+// ── Auth helper ───────────────────────────────────────────────────────────────
+
+/**
+ * Central fetch wrapper — automatically attaches the Supabase Bearer token
+ * to every request.  Falls back gracefully if no session exists yet.
+ */
+async function apiFetch(input: RequestInfo, init: RequestInit = {}): Promise<Response> {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  return fetch(input, {
+    ...init,
+    headers: {
+      ...(init.headers as Record<string, string> | undefined),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Persona {
   id: string;
@@ -88,7 +113,7 @@ export type ActivityData = WordGameActivity | TriviaActivity | WouldYouRatherAct
 // ── Personas ──────────────────────────────────────────────────────────────────
 
 export async function listPersonas(): Promise<Persona[]> {
-  const res = await fetch(`${BASE}/personas`);
+  const res = await apiFetch(`${BASE}/personas`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -104,7 +129,7 @@ export async function getRelationshipStats(
   userId: string,
   companionId: string,
 ): Promise<RelationshipStats> {
-  const res = await fetch(`${BASE}/relationship/${userId}/${companionId}`);
+  const res = await apiFetch(`${BASE}/relationship/${userId}/${companionId}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -114,7 +139,7 @@ export async function setRelationshipType(
   companionId: string,
   relType: string,
 ): Promise<void> {
-  const res = await fetch(`${BASE}/relationship/type`, {
+  const res = await apiFetch(`${BASE}/relationship/type`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, companion_id: companionId, relationship_type: relType }),
@@ -129,7 +154,7 @@ export async function setRomanticMode(
   companionId: string,
   enabled: boolean,
 ): Promise<{ success: boolean; companion_reaction: string }> {
-  const res = await fetch(`${BASE}/romantic-mode`, {
+  const res = await apiFetch(`${BASE}/romantic-mode`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id: userId, companion_id: companionId, enabled }),
@@ -161,13 +186,13 @@ export async function* chatStream(
   session_id: string,
   persona_id: string,
   message: string,
-  user_id?: string,
+  _user_id?: string,        // kept for call-site compat; user_id now comes from JWT
   romantic_mode?: boolean,
 ): AsyncGenerator<StreamEvent> {
-  const res = await fetch(`${BASE}/chat/stream`, {
+  const res = await apiFetch(`${BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id, persona_id, message, user_id, romantic_mode: romantic_mode ?? false }),
+    body: JSON.stringify({ session_id, persona_id, message, romantic_mode: romantic_mode ?? false }),
   });
   if (!res.ok || !res.body) throw new Error(await res.text());
 
@@ -195,9 +220,10 @@ export interface MemoriesResponse {
   user_id: string; persona_id: string; memories: Memory[]; count: number;
 }
 
-export async function fetchMemories(user_id: string, persona_id: string): Promise<MemoriesResponse> {
-  const params = new URLSearchParams({ user_id, persona_id });
-  const res = await fetch(`${BASE}/memories?${params}`);
+export async function fetchMemories(_user_id: string, persona_id: string): Promise<MemoriesResponse> {
+  // user_id param kept for call-site compat; backend now reads it from JWT
+  const params = new URLSearchParams({ persona_id });
+  const res = await apiFetch(`${BASE}/memories?${params}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -207,7 +233,7 @@ export async function fetchMemories(user_id: string, persona_id: string): Promis
 export async function transcribeAudio(blob: Blob): Promise<string> {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
-  const res = await fetch(`${BASE}/stt`, { method: "POST", body: form });
+  const res = await apiFetch(`${BASE}/stt`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()).transcript as string;
 }
@@ -215,7 +241,7 @@ export async function transcribeAudio(blob: Blob): Promise<string> {
 // ── TTS ───────────────────────────────────────────────────────────────────────
 
 export async function speakText(text: string, persona_id: string): Promise<Blob> {
-  const res = await fetch(`${BASE}/tts/speak`, {
+  const res = await apiFetch(`${BASE}/tts/speak`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, persona_id }),
@@ -242,7 +268,7 @@ export async function fetchProactiveMessages(
   user_id: string,
   companion_id: string,
 ): Promise<ProactiveMessagesResponse> {
-  const res = await fetch(`${BASE}/proactive-messages/${user_id}/${companion_id}`);
+  const res = await apiFetch(`${BASE}/proactive-messages/${user_id}/${companion_id}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -250,7 +276,7 @@ export async function fetchProactiveMessages(
 // ── Selfie ────────────────────────────────────────────────────────────────────
 
 export async function requestSelfie(companion_id: string, user_id: string): Promise<string> {
-  const res = await fetch(`${BASE}/selfie`, {
+  const res = await apiFetch(`${BASE}/selfie`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ companion_id, user_id }),
@@ -266,7 +292,7 @@ export async function startActivity(
   user_id: string,
   activity_type: ActivityType,
 ): Promise<ActivityData> {
-  const res = await fetch(`${BASE}/activity`, {
+  const res = await apiFetch(`${BASE}/activity`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ companion_id, user_id, activity_type }),
@@ -281,21 +307,9 @@ export async function saveActivityResult(
   activity_type: string,
   result: "won" | "lost" | "completed",
 ): Promise<void> {
-  await fetch(`${BASE}/activity/result`, {
+  await apiFetch(`${BASE}/activity/result`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id, companion_id, activity_type, result }),
   }).catch(() => {});
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-export function getOrCreateUserId(): string {
-  const key = "vc_user_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    localStorage.setItem(key, id);
-  }
-  return id;
 }

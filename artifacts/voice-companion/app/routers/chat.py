@@ -1,7 +1,7 @@
 import json
 import asyncio
 from datetime import date
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
 from app import store, claude, venice_client
@@ -10,10 +10,9 @@ from app import memory_extractor
 from app import relationship
 from app import scoring
 from app.companions import ROMANTIC_MODE_PROMPTS
+from app.auth_middleware import verify_token
 
 router = APIRouter()
-
-_DEFAULT_USER = "default_user"
 
 
 def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
@@ -74,12 +73,10 @@ async def _build_system_prompt(
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
-
-    user_id = request.user_id or _DEFAULT_USER
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = await _build_system_prompt(persona, user_id, request.message, request.romantic_mode)
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
@@ -135,7 +132,7 @@ async def chat(request: ChatRequest):
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)):
     """
     Stream the companion reply as SSE.
 
@@ -151,8 +148,6 @@ async def chat_stream(request: ChatRequest):
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
-
-    user_id = request.user_id or _DEFAULT_USER
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = await _build_system_prompt(persona, user_id, request.message, request.romantic_mode)
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
