@@ -3,28 +3,19 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from app import store
 from app import elevenlabs_client
-from app.elevenlabs_client import DEFAULT_VOICE_ID, DEFAULT_MODEL_ID, ElevenLabsError
+from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError
 
 router = APIRouter()
 
-_PLAN_HINT = (
-    "ElevenLabs free accounts cannot use premade/library voices via the API. "
-    "Options: (1) upgrade your ElevenLabs plan, or (2) create a personal voice "
-    "at elevenlabs.io/voice-lab and pass its voice_id instead."
-)
-
 
 def _elevenlabs_http_error(e: ElevenLabsError) -> HTTPException:
-    """Map an ElevenLabsError to a clean FastAPI HTTPException."""
-    # 402 = plan required → surface the hint
-    detail = f"{e} — {_PLAN_HINT}" if e.status_code == 402 else str(e)
-    status = 402 if e.status_code == 402 else 502
-    return HTTPException(status_code=status, detail=detail)
+    status = e.status_code if e.status_code in (400, 401, 402, 404, 422) else 502
+    return HTTPException(status_code=status, detail=str(e))
 
 
 class TTSRequest(BaseModel):
     text: str
-    voice_id: str = DEFAULT_VOICE_ID
+    voice_id: str | None = None   # None → uses ELEVENLABS_VOICE_ID env var or built-in fallback
     model_id: str = DEFAULT_MODEL_ID
 
 
@@ -38,7 +29,7 @@ class PersonaSpeakRequest(BaseModel):
 async def get_voices():
     """
     List all ElevenLabs voices on your account.
-    `requires_paid_plan: true` means the voice cannot be used on the free tier.
+    `is_default: true` marks the voice currently set via ELEVENLABS_VOICE_ID.
     """
     try:
         voices = await elevenlabs_client.list_voices()
@@ -52,11 +43,8 @@ async def text_to_speech(request: TTSRequest):
     """
     Convert text to speech. Returns the full audio file as **audio/mpeg**.
 
-    For lower latency, use `POST /api/tts/stream` to begin playback as the
-    audio is generated.
-
-    **Free-tier note:** premade voices require an ElevenLabs paid plan.
-    Create a personal voice at elevenlabs.io/voice-lab and pass its `voice_id`.
+    `voice_id` is optional — omit to use the voice configured via
+    `ELEVENLABS_VOICE_ID` (or the built-in fallback if unset).
     """
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
@@ -82,8 +70,6 @@ async def text_to_speech_stream(request: TTSRequest):
     """
     Stream audio chunks as they arrive from ElevenLabs (lower latency).
     Use with the Web Audio API or MediaSource Extensions on the frontend.
-
-    **Free-tier note:** premade voices require an ElevenLabs paid plan.
     """
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
@@ -97,7 +83,6 @@ async def text_to_speech_stream(request: TTSRequest):
             ):
                 yield chunk
         except ElevenLabsError as e:
-            # Can't raise HTTP exceptions mid-stream; raise so uvicorn closes cleanly
             raise RuntimeError(str(e))
 
     return StreamingResponse(
@@ -114,15 +99,13 @@ async def text_to_speech_stream(request: TTSRequest):
 @router.post("/speak")
 async def persona_speak(request: PersonaSpeakRequest):
     """
-    Speak text using the voice assigned to a specific persona.
-    Falls back to the default voice if the persona has no `voice_id` set.
+    Speak text using the voice assigned to a persona.
+    Falls back to ELEVENLABS_VOICE_ID (or built-in) if the persona has no voice set.
     Returns full audio as **audio/mpeg**.
     """
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
-
-    voice_id = persona.voice_id or DEFAULT_VOICE_ID
 
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
@@ -130,7 +113,7 @@ async def persona_speak(request: PersonaSpeakRequest):
     try:
         audio = await elevenlabs_client.synthesize(
             text=request.text,
-            voice_id=voice_id,
+            voice_id=persona.voice_id,  # None → uses env var default
             model_id=request.model_id,
         )
     except ElevenLabsError as e:

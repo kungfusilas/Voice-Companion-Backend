@@ -4,12 +4,17 @@ from typing import AsyncGenerator
 from elevenlabs.client import ElevenLabs, AsyncElevenLabs
 from elevenlabs.core.api_error import ApiError
 
-# Default to "Rachel" — a built-in ElevenLabs voice
-DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+# Fall back to Rachel (built-in) if no env var is set
+_FALLBACK_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 DEFAULT_MODEL_ID = "eleven_turbo_v2_5"
 
 _sync_client: ElevenLabs | None = None
 _async_client: AsyncElevenLabs | None = None
+
+
+def get_default_voice_id() -> str:
+    """Returns ELEVENLABS_VOICE_ID env var if set, otherwise the built-in fallback."""
+    return os.environ.get("ELEVENLABS_VOICE_ID") or _FALLBACK_VOICE_ID
 
 
 def _api_key() -> str:
@@ -40,7 +45,7 @@ def _friendly_error(e: ApiError) -> str:
         if isinstance(body, dict):
             detail = body.get("detail", {})
             if isinstance(detail, dict):
-                return detail.get("message", str(e.body))
+                return detail.get("message", str(body))
             if isinstance(detail, str):
                 return detail
         return str(body)
@@ -49,7 +54,6 @@ def _friendly_error(e: ApiError) -> str:
 
 
 class ElevenLabsError(Exception):
-    """Raised when ElevenLabs returns an API error, with a clean message."""
     def __init__(self, message: str, status_code: int = 502):
         super().__init__(message)
         self.status_code = status_code
@@ -57,10 +61,12 @@ class ElevenLabsError(Exception):
 
 async def synthesize(
     text: str,
-    voice_id: str = DEFAULT_VOICE_ID,
+    voice_id: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
 ) -> bytes:
     """Convert text to speech and return the full audio as bytes (mp3)."""
+    voice_id = voice_id or get_default_voice_id()
+
     def _run() -> bytes:
         client = get_sync_client()
         try:
@@ -79,10 +85,11 @@ async def synthesize(
 
 async def synthesize_stream(
     text: str,
-    voice_id: str = DEFAULT_VOICE_ID,
+    voice_id: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
 ) -> AsyncGenerator[bytes, None]:
     """Stream audio chunks as they arrive from ElevenLabs."""
+    voice_id = voice_id or get_default_voice_id()
     client = get_async_client()
     try:
         async for chunk in await client.text_to_speech.convert(
@@ -103,6 +110,7 @@ async def list_voices() -> list[dict]:
         client = get_sync_client()
         try:
             response = client.voices.get_all()
+            default_voice_id = get_default_voice_id()
             return [
                 {
                     "voice_id": v.voice_id,
@@ -111,7 +119,7 @@ async def list_voices() -> list[dict]:
                     "description": getattr(v, "description", None),
                     "labels": v.labels or {},
                     "preview_url": v.preview_url,
-                    "requires_paid_plan": v.category in ("premade", "professional"),
+                    "is_default": v.voice_id == default_voice_id,
                 }
                 for v in response.voices
             ]
