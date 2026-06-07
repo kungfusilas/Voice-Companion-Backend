@@ -32,15 +32,14 @@ async def _build_system_prompt(
     Build the full system prompt:
     1. Base persona prompt
     2. Romantic Mode overlay (if enabled)
-    3. Long-term memories (most recent 10)
-    4. Emotionally relevant memories for this message
-    5. Relationship level context
-    6. One-time drift notice (if triggered)
+    3. Semantically relevant long-term memories (vector search, top-5)
+    4. Relationship level context
+    5. One-time drift notice (if triggered)
     """
     base_prompt = persona.build_system_prompt()
     try:
         memories, stats, needs_drift = await asyncio.gather(
-            mem_store.fetch_memories(user_id, persona.id, limit=30),
+            mem_store.retrieve_memories(user_id, persona.id, user_message, top_k=5),
             relationship.get_stats(user_id, persona.id),
             relationship.needs_drift_inject(user_id, persona.id),
         )
@@ -48,10 +47,7 @@ async def _build_system_prompt(
         message_count = stats.get("message_count", 0)
         # romantic_mode comes from request (client-owned state via localStorage)
 
-        memory_block = memory_extractor.format_memories_for_prompt(memories[:10])
-        emotional_block = memory_extractor.format_emotional_memories_for_prompt(
-            user_message, memories
-        )
+        memory_block = memory_extractor.format_memories_for_prompt(memories)
         rel_context = relationship.build_relationship_context(persona.id, message_count)
 
         romantic_block = ""
@@ -70,7 +66,7 @@ async def _build_system_prompt(
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
         return _inject_date(
-            base_prompt + romantic_block + memory_block + emotional_block + rel_context + drift_block
+            base_prompt + romantic_block + memory_block + rel_context + drift_block
         )
 
     except Exception:
