@@ -12,9 +12,10 @@ from app.routers import selfie as selfie_router
 from app.routers import relationship as relationship_router
 from app.routers import activities as activities_router
 from app.routers import romantic as romantic_router
+from app.routers import daily_checkin as daily_checkin_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
-from app import proactive
+from app import proactive, daily_checkin
 
 load_dotenv()
 
@@ -42,8 +43,16 @@ async def lifespan(app: FastAPI):
         id="daily_activity",
         replace_existing=True,
     )
+    scheduler.add_job(
+        daily_checkin.run_daily_checkins,
+        "cron",
+        hour=9,
+        minute=0,
+        id="daily_morning_checkin",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Schedulers started: proactive check-in + daily activity")
+    logger.info("Schedulers started: proactive check-in + daily activity + daily morning check-in")
 
     yield
 
@@ -75,7 +84,8 @@ app.include_router(proactive_router.router,   prefix="/api/proactive-messages", 
 app.include_router(selfie_router.router,      prefix="/api/selfie",             tags=["selfie"])
 app.include_router(relationship_router.router,prefix="/api/relationship",       tags=["relationship"])
 app.include_router(activities_router.router,  prefix="/api/activity",           tags=["activities"])
-app.include_router(romantic_router.router,    prefix="/api/romantic-mode",      tags=["romantic"])
+app.include_router(romantic_router.router,       prefix="/api/romantic-mode",      tags=["romantic"])
+app.include_router(daily_checkin_router.router, prefix="/api/daily-checkin",      tags=["daily-checkin"])
 
 
 @app.get("/api/healthz")
