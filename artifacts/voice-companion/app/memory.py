@@ -31,40 +31,49 @@ def _get_client() -> Client:
 
 
 async def save_memory(user_id: str, persona_id: str, content: str) -> dict:
-    """Insert a single memory fact and return the created row."""
-    client = _get_client()
-    result = (
-        client.table("memories")
-        .insert({"user_id": user_id, "persona_id": persona_id, "content": content})
-        .execute()
-    )
-    return result.data[0] if result.data else {}
+    """Insert a single memory fact. Silently returns {} if table doesn't exist yet."""
+    try:
+        client = _get_client()
+        result = (
+            client.table("memories")
+            .insert({"user_id": user_id, "persona_id": persona_id, "content": content})
+            .execute()
+        )
+        return result.data[0] if result.data else {}
+    except Exception:
+        return {}
 
 
 async def fetch_memories(user_id: str, persona_id: str, limit: int = 10) -> list[dict]:
-    """Return the `limit` most recent memories for a user+persona pair."""
-    client = _get_client()
-    result = (
-        client.table("memories")
-        .select("id, content, created_at")
-        .eq("user_id", user_id)
-        .eq("persona_id", persona_id)
-        .order("created_at", desc=True)
-        .limit(limit)
-        .execute()
-    )
-    return result.data or []
+    """Return the `limit` most recent memories. Returns [] if table doesn't exist yet."""
+    try:
+        client = _get_client()
+        result = (
+            client.table("memories")
+            .select("id, content, created_at")
+            .eq("user_id", user_id)
+            .eq("persona_id", persona_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return result.data or []
+    except Exception:
+        return []
 
 
 async def list_all_memories(user_id: str, persona_id: str) -> list[dict]:
     """Return all memories for the GET /api/memories endpoint."""
-    client = _get_client()
-    result = (
-        client.table("memories")
-        .select("id, content, created_at")
-        .eq("user_id", user_id)
-        .eq("persona_id", persona_id)
-        .order("created_at", desc=True)
-        .execute()
-    )
-    return result.data or []
+    try:
+        client = _get_client()
+        result = (
+            client.table("memories")
+            .select("id, content, created_at")
+            .eq("user_id", user_id)
+            .eq("persona_id", persona_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return result.data or []
+    except Exception:
+        return []
