@@ -1,5 +1,6 @@
 import json
 import asyncio
+from datetime import date
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
@@ -9,12 +10,16 @@ from app import memory_extractor
 
 router = APIRouter()
 
-# Default user_id when no auth exists — single-user mode
 _DEFAULT_USER = "default_user"
 
 
 def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
     return persona_nsfw or request_nsfw
+
+
+def _inject_date(prompt: str) -> str:
+    today = date.today().strftime("%B %d, %Y")
+    return f"Today's date is {today}.\n\n{prompt}"
 
 
 async def _build_system_prompt_with_memory(persona, user_id: str) -> str:
@@ -23,10 +28,9 @@ async def _build_system_prompt_with_memory(persona, user_id: str) -> str:
     try:
         memories = await mem_store.fetch_memories(user_id, persona.id, limit=10)
         memory_block = memory_extractor.format_memories_for_prompt(memories)
-        return base_prompt + memory_block
+        return _inject_date(base_prompt + memory_block)
     except Exception:
-        # If Supabase is unreachable, fall back to base prompt
-        return base_prompt
+        return _inject_date(base_prompt)
 
 
 @router.post("", response_model=ChatResponse)
@@ -56,7 +60,6 @@ async def chat(request: ChatRequest):
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
 
-    # Extract memories asynchronously — don't block the response
     asyncio.create_task(
         memory_extractor.extract_and_save(user_id, persona.id, request.message, reply)
     )
@@ -75,10 +78,11 @@ async def chat_stream(request: ChatRequest):
     """
     Stream the companion's reply as Server-Sent Events.
 
-    Each event `data` field contains JSON:
-        {"type": "token",  "text": "..."}
-        {"type": "done",   "full_text": "...", "message_count": N, "model_backend": "claude"|"venice"}
-        {"type": "error",  "message": "..."}
+    Each event data field contains JSON:
+        {"type": "token",     "text": "..."}
+        {"type": "searching", "query": "..."}
+        {"type": "done",      "full_text": "...", "message_count": N, "model_backend": "..."}
+        {"type": "error",     "message": "..."}
     """
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -112,7 +116,6 @@ async def chat_stream(request: ChatRequest):
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
                     yield f"data: {json.dumps(payload)}\n\n"
-                    # Extract memories in background after stream completes
                     asyncio.create_task(
                         memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
                     )
