@@ -2,9 +2,14 @@ import json
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
-from app import store, claude
+from app import store, claude, venice_client
 
 router = APIRouter()
+
+
+def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
+    """Venice is used when either the persona or the per-request flag is True."""
+    return persona_nsfw or request_nsfw
 
 
 @router.post("", response_model=ChatResponse)
@@ -15,12 +20,20 @@ async def chat(request: ChatRequest):
 
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = persona.build_system_prompt()
+    use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
-    reply = await claude.send_message(
-        system_prompt=system_prompt,
-        history=history,
-        user_message=request.message,
-    )
+    if use_venice:
+        reply = await venice_client.send_message(
+            system_prompt=system_prompt,
+            history=history,
+            user_message=request.message,
+        )
+    else:
+        reply = await claude.send_message(
+            system_prompt=system_prompt,
+            history=history,
+            user_message=request.message,
+        )
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
@@ -30,6 +43,7 @@ async def chat(request: ChatRequest):
         persona_id=request.persona_id,
         reply=reply,
         message_count=len(store.get_history(request.session_id)),
+        model_backend="venice" if use_venice else "claude",
     )
 
 
@@ -38,15 +52,10 @@ async def chat_stream(request: ChatRequest):
     """
     Stream the companion's reply as Server-Sent Events.
 
-    Connect with EventSource or fetch + ReadableStream. Each event has a `data`
-    field containing JSON:
-
-        {"type": "token",  "text": "..."}          — partial text chunk
-        {"type": "done",   "full_text": "..."}      — stream finished; full reply included
-        {"type": "error",  "message": "..."}        — something went wrong
-
-    The user message is appended to history immediately. The assistant turn is
-    committed once the full reply is assembled (on the "done" event).
+    Each event `data` field contains JSON:
+        {"type": "token",  "text": "..."}
+        {"type": "done",   "full_text": "...", "message_count": N, "model_backend": "claude"|"venice"}
+        {"type": "error",  "message": "..."}
     """
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -54,17 +63,18 @@ async def chat_stream(request: ChatRequest):
 
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = persona.build_system_prompt()
+    use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
 
+    stream_fn = venice_client.stream_message if use_venice else claude.stream_message
+
     async def event_generator():
-        full_text = ""
-        async for chunk in claude.stream_message(
+        async for chunk in stream_fn(
             system_prompt=system_prompt,
             history=history,
             user_message=request.message,
         ):
-            # Parse the payload to detect "done" and persist the assistant turn
             try:
                 raw = chunk.removeprefix("data: ").strip()
                 payload = json.loads(raw)
@@ -74,8 +84,8 @@ async def chat_stream(request: ChatRequest):
                         request.session_id,
                         ChatMessage(role="assistant", content=full_text),
                     )
-                    # Enrich the done event with message_count
                     payload["message_count"] = len(store.get_history(request.session_id))
+                    payload["model_backend"] = "venice" if use_venice else "claude"
                     yield f"data: {json.dumps(payload)}\n\n"
                     return
             except Exception:
@@ -85,8 +95,5 @@ async def chat_stream(request: ChatRequest):
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

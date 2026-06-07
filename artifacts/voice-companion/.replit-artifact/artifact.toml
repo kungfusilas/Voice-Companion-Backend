@@ -1,6 +1,6 @@
 kind = "web"
 previewPath = "/companion/"
-title = "Voice Companion API"
+title = "Voice Companion"
 version = "1.0.0"
 id = "artifacts/voice-companion"
 
@@ -11,10 +11,11 @@ version = "1.0.0"
 [[services]]
 name = "web"
 paths = ["/companion/"]
-localPort = 8000
+localPort = 3000
 
 [services.development]
-run = "python /home/runner/workspace/artifacts/voice-companion/run.py"
+run = "pnpm --filter @workspace/voice-companion run dev"
 
 [services.env]
-PORT = "8000"
+PORT = "3000"
+BASE_PATH = "/companion/"

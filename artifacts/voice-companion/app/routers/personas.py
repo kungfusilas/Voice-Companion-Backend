@@ -13,6 +13,8 @@ async def create_persona(body: CreatePersonaRequest):
         personality_traits=body.personality_traits,
         backstory=body.backstory,
         custom_relationship=body.custom_relationship,
+        voice_id=body.voice_id,
+        nsfw_mode=body.nsfw_mode,
     )
     return store.create_persona(persona)
 

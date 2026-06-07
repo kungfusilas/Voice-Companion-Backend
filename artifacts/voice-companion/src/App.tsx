@@ -1,42 +1,42 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import NotFound from "@/pages/not-found";
+import { useState } from "react";
+import { AnimatePresence } from "framer-motion";
+import { PersonaSetup } from "@/components/PersonaSetup";
+import { ChatPage } from "@/pages/Chat";
+import type { Persona } from "@/lib/api";
 
-const queryClient = new QueryClient();
+export default function App() {
+  const [persona, setPersona] = useState<Persona | null>(null);
 
-function Home() {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold text-gray-900">Replit Agent is building...</h1>
-        <p className="mt-2 text-sm text-gray-600">Your app will appear here once it's ready.</p>
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{
+        background: "linear-gradient(145deg, #0d0d1a 0%, #0f0720 50%, #0d0d1a 100%)",
+      }}
+    >
+      <div
+        className="w-full max-w-md h-[680px] flex flex-col rounded-3xl overflow-hidden relative"
+        style={{
+          background: "rgba(255,255,255,0.03)",
+          backdropFilter: "blur(20px)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 30px 80px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)",
+        }}
+      >
+        <AnimatePresence mode="wait">
+          {!persona ? (
+            <div key="setup" className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-white/10">
+              <PersonaSetup onCreated={setPersona} />
+            </div>
+          ) : (
+            <ChatPage
+              key={`chat-${persona.id}`}
+              persona={persona}
+              onBack={() => setPersona(null)}
+            />
+          )}
+        </AnimatePresence>
       </div>
     </div>
   );
 }
-
-function Router() {
-  return (
-    <Switch>
-      <Route path="/" component={Home} />
-      <Route component={NotFound} />
-    </Switch>
-  );
-}
-
-function App() {
-  return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <Router />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
-    </QueryClientProvider>
-  );
-}
-
-export default App;

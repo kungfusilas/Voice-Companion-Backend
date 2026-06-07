@@ -10,7 +10,8 @@ class Persona(BaseModel):
     personality_traits: list[str]
     backstory: str = ""
     custom_relationship: str = ""
-    voice_id: str | None = None  # ElevenLabs voice ID; None = use default
+    voice_id: str | None = None
+    nsfw_mode: bool = False  # True = route to Venice instead of Claude
 
     def build_system_prompt(self) -> str:
         relationship = (
@@ -45,6 +46,7 @@ class ChatRequest(BaseModel):
     session_id: str
     persona_id: str
     message: str
+    nsfw_mode: bool = False  # Override per-request; persona setting takes precedence if True
 
 
 class ChatResponse(BaseModel):
@@ -52,6 +54,7 @@ class ChatResponse(BaseModel):
     persona_id: str
     reply: str
     message_count: int
+    model_backend: Literal["claude", "venice"] = "claude"
 
 
 class CreatePersonaRequest(BaseModel):
@@ -60,7 +63,8 @@ class CreatePersonaRequest(BaseModel):
     personality_traits: list[str] = Field(default_factory=list)
     backstory: str = ""
     custom_relationship: str = ""
-    voice_id: str | None = None  # ElevenLabs voice ID to assign to this persona
+    voice_id: str | None = None
+    nsfw_mode: bool = False
 
 
 class SessionInfo(BaseModel):
