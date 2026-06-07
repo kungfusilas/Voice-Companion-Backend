@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-from app.routers import chat, personas, sessions, tts, stt
+from app.routers import chat, personas, sessions, tts, stt, memories
 
 load_dotenv()
 
@@ -27,6 +27,7 @@ app.include_router(personas.router, prefix="/api/personas", tags=["personas"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(tts.router, prefix="/api/tts", tags=["tts"])
 app.include_router(stt.router, prefix="/api/stt", tags=["stt"])
+app.include_router(memories.router, prefix="/api/memories", tags=["memories"])
 
 
 @app.get("/api/healthz")

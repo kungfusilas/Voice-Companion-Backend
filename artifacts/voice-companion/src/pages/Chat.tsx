@@ -5,6 +5,7 @@ import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
 import { TextInput } from "@/components/TextInput";
+import { MemoriesPanel } from "@/components/MemoriesPanel";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
 import { chatStream, transcribeAudio, speakText } from "@/lib/api";
@@ -14,6 +15,17 @@ interface ChatPageProps {
   persona: Persona;
   onBack: () => void;
 }
+
+// Stable user_id scoped to this browser session
+const USER_ID = (() => {
+  const key = "vc_user_id";
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
+})();
 
 export function ChatPage({ persona, onBack }: ChatPageProps) {
   const rawId = useId();
@@ -101,17 +113,25 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
           <ArrowLeft className="w-4 h-4" />
           Back
         </button>
-        <button
-          onClick={() => setTtsEnabled((v) => !v)}
-          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
-            ttsEnabled
-              ? "border-white/20 text-white/70 bg-white/5 hover:bg-white/10"
-              : "border-white/10 text-white/30 hover:text-white/50"
-          }`}
-        >
-          {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-          {ttsEnabled ? "Voice on" : "Voice off"}
-        </button>
+        <div className="flex items-center gap-2">
+          <MemoriesPanel
+            userId={USER_ID}
+            personaId={persona.id}
+            personaName={persona.name}
+            nsfw={persona.nsfw_mode}
+          />
+          <button
+            onClick={() => setTtsEnabled((v) => !v)}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
+              ttsEnabled
+                ? "border-white/20 text-white/70 bg-white/5 hover:bg-white/10"
+                : "border-white/10 text-white/30 hover:text-white/50"
+            }`}
+          >
+            {ttsEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+            {ttsEnabled ? "Voice on" : "Voice off"}
+          </button>
+        </div>
       </div>
 
       {/* Avatar */}

@@ -47,6 +47,7 @@ class ChatRequest(BaseModel):
     persona_id: str
     message: str
     nsfw_mode: bool = False  # Override per-request; persona setting takes precedence if True
+    user_id: str | None = None  # Optional; defaults to "default_user" in single-user mode
 
 
 class ChatResponse(BaseModel):

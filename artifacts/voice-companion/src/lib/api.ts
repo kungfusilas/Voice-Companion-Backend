@@ -91,6 +91,31 @@ export async function* chatStream(
   }
 }
 
+// ── Memories ──────────────────────────────────────────────────────────────────
+
+export interface Memory {
+  id: string;
+  content: string;
+  created_at: string;
+}
+
+export interface MemoriesResponse {
+  user_id: string;
+  persona_id: string;
+  memories: Memory[];
+  count: number;
+}
+
+export async function fetchMemories(
+  user_id: string,
+  persona_id: string,
+): Promise<MemoriesResponse> {
+  const params = new URLSearchParams({ user_id, persona_id });
+  const res = await fetch(`${BASE}/memories?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 // ── STT ───────────────────────────────────────────────────────────────────────
 
 export async function transcribeAudio(blob: Blob): Promise<string> {
