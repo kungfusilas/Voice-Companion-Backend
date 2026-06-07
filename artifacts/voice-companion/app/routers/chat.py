@@ -14,6 +14,18 @@ from app.auth_middleware import verify_token
 
 router = APIRouter()
 
+_WAITLIST_TRIGGERS = [
+    "being unlocked",
+    "door between us",
+    "lock on me right now",
+    "heading somewhere real",
+]
+
+
+def _should_prompt_waitlist(text: str) -> bool:
+    lower = text.lower()
+    return any(phrase in lower for phrase in _WAITLIST_TRIGGERS)
+
 
 def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
     return persona_nsfw or request_nsfw
@@ -212,6 +224,9 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)
                     })
 
                     yield f"data: {json.dumps(payload)}\n\n"
+
+                    if _should_prompt_waitlist(full_text):
+                        yield f"data: {json.dumps({'type': 'waitlist_prompt', 'companion_id': persona.id})}\n\n"
 
                     asyncio.create_task(
                         memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)

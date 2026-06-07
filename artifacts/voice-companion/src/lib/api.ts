@@ -166,7 +166,7 @@ export async function setRomanticMode(
 // ── Chat (streaming) ──────────────────────────────────────────────────────────
 
 export interface StreamEvent {
-  type: "token" | "done" | "error" | "searching";
+  type: "token" | "done" | "error" | "searching" | "waitlist_prompt";
   text?: string;
   query?: string;
   full_text?: string;
@@ -180,6 +180,7 @@ export interface StreamEvent {
   stage_min?: number;
   stage_max?: number;
   stage_up_text?: string;
+  companion_id?: string;
 }
 
 export async function* chatStream(
@@ -312,4 +313,17 @@ export async function saveActivityResult(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_id, companion_id, activity_type, result }),
   }).catch(() => {});
+}
+
+export async function submitWaitlist(
+  email: string,
+  companionId: string,
+  userId?: string,
+): Promise<void> {
+  const resp = await fetch(`${BASE}/waitlist`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, companion_id: companionId, user_id: userId ?? null }),
+  });
+  if (!resp.ok) throw new Error("Waitlist submission failed");
 }

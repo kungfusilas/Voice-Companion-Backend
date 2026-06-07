@@ -18,6 +18,7 @@ import {
   getRelationshipStats,
   startActivity,
   setRomanticMode,
+  submitWaitlist,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
@@ -66,6 +67,11 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
   );
   const [showAgeGate, setShowAgeGate] = useState(false);
   const [romanticLoading, setRomanticLoading] = useState(false);
+
+  const [waitlistPrompt, setWaitlistPrompt] = useState<string | null>(null);
+  const [waitlistSubmitted, setWaitlistSubmitted] = useState(false);
+  const [waitlistEmail, setWaitlistEmail] = useState("");
+  const [waitlistLoading, setWaitlistLoading] = useState(false);
 
   const busyRef = useRef(false);
   const { playing: speaking, play: playAudio } = useAudioPlayer();
@@ -147,6 +153,8 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
           if (ttsEnabled && fullReply) {
             try { await playAudio(await speakText(fullReply, persona.id)); } catch {}
           }
+        } else if (event.type === "waitlist_prompt") {
+          setWaitlistPrompt(event.companion_id ?? persona.id);
         } else if (event.type === "error") {
           setError(event.message ?? "Unknown error");
           setStreamingText("");
@@ -212,6 +220,20 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
       setActivityLoading(null);
     }
   }, [persona.id, userId, activityLoading, busy]);
+
+  const handleWaitlistSubmit = useCallback(async () => {
+    if (!waitlistEmail.trim() || !waitlistPrompt) return;
+    setWaitlistLoading(true);
+    try {
+      await submitWaitlist(waitlistEmail.trim(), waitlistPrompt, userId);
+      setWaitlistSubmitted(true);
+    } catch {
+      // Silently succeed — don't block the user experience on a waitlist error
+      setWaitlistSubmitted(true);
+    } finally {
+      setWaitlistLoading(false);
+    }
+  }, [waitlistEmail, waitlistPrompt, userId]);
 
   const handleSelfie = useCallback(async () => {
     if (selfieLoading || busy) return;
@@ -385,6 +407,64 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         userId={userId}
         onChatContinue={sendMessage}
       />
+
+      {/* ── Waitlist card ── */}
+      <AnimatePresence>
+        {waitlistPrompt && (
+          <motion.div
+            key="waitlist"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            className="mx-4 mb-2 shrink-0"
+          >
+            {waitlistSubmitted ? (
+              <div
+                className="flex items-center gap-2 px-4 py-3 rounded-2xl text-sm text-emerald-400"
+                style={{
+                  background: "rgba(16,185,129,0.08)",
+                  border: "1px solid rgba(16,185,129,0.2)",
+                }}
+              >
+                <span>✓</span>
+                <span>You&apos;re on the list</span>
+              </div>
+            ) : (
+              <div
+                className="px-4 py-3 rounded-2xl space-y-2.5"
+                style={{
+                  background: "rgba(139,92,246,0.07)",
+                  border: "1px solid rgba(139,92,246,0.2)",
+                }}
+              >
+                <p className="text-xs text-white/60 leading-relaxed">
+                  Want to be first when <span className="text-white/80 font-medium">{persona.name}</span> unlocks? Drop your email.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="email"
+                    value={waitlistEmail}
+                    onChange={(e) => setWaitlistEmail(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && waitlistEmail.trim()) handleWaitlistSubmit();
+                    }}
+                    placeholder="your@email.com"
+                    className="flex-1 min-w-0 bg-white/5 border border-white/10 rounded-xl px-3 py-1.5 text-xs text-white placeholder-white/30 outline-none focus:border-violet-500/50 transition"
+                  />
+                  <button
+                    onClick={handleWaitlistSubmit}
+                    disabled={!waitlistEmail.trim() || waitlistLoading}
+                    className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-medium text-white transition disabled:opacity-40"
+                    style={{ background: "linear-gradient(135deg, #7c3aed, #6d28d9)" }}
+                  >
+                    {waitlistLoading ? "…" : "Notify Me"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Error ── */}
       {error && (
