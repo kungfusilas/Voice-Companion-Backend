@@ -46,10 +46,6 @@ async def speech_to_text(
     };
     ```
     """
-    content_type = (audio.content_type or "").lower().split(";")[0].strip()
-    # Be liberal: if the type isn't in our known list, try anyway
-    mimetype = audio.content_type or "audio/webm"
-
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=422, detail="Uploaded audio file is empty")
@@ -60,7 +56,6 @@ async def speech_to_text(
     try:
         result = await deepgram_client.transcribe(
             audio_bytes=audio_bytes,
-            mimetype=mimetype,
             model=model,
             language=language,
             diarize=diarize,
