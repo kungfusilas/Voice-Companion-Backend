@@ -138,6 +138,7 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
       <div className="flex justify-center py-4 shrink-0">
         <Avatar
           name={persona.name}
+          personaId={persona.id}
           speaking={speaking}
           listening={recorderState === "recording"}
           nsfw={persona.nsfw_mode}
