@@ -30,18 +30,37 @@ export function ChatTranscript({ messages, streamingText, personaName, nsfw }: C
             transition={{ duration: 0.2 }}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
-            <div
-              className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed border ${
-                msg.role === "user"
-                  ? "bg-white/10 border-white/10 text-white/90 rounded-br-sm"
-                  : `${accentBg} ${accentText} rounded-bl-sm`
-              }`}
-            >
-              {msg.role === "assistant" && (
-                <span className="text-xs font-medium opacity-60 block mb-1">{personaName}</span>
-              )}
-              {msg.content}
-            </div>
+            {msg.imageUrl ? (
+              /* ── Selfie / image message ── */
+              <div className={`max-w-[72%] rounded-2xl rounded-bl-sm overflow-hidden border ${accentBg}`}>
+                <div className={`px-3 pt-2.5 pb-1 text-xs font-medium opacity-60 ${accentText}`}>
+                  {personaName}
+                </div>
+                <img
+                  src={msg.imageUrl}
+                  alt={`${personaName} selfie`}
+                  className="w-full max-w-[250px] block"
+                  style={{ maxHeight: 250, objectFit: "cover" }}
+                />
+                <p className={`px-3 py-2 text-xs ${accentText} opacity-70`}>
+                  {msg.content}
+                </p>
+              </div>
+            ) : (
+              /* ── Regular text message ── */
+              <div
+                className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed border ${
+                  msg.role === "user"
+                    ? "bg-white/10 border-white/10 text-white/90 rounded-br-sm"
+                    : `${accentBg} ${accentText} rounded-bl-sm`
+                }`}
+              >
+                {msg.role === "assistant" && (
+                  <span className="text-xs font-medium opacity-60 block mb-1">{personaName}</span>
+                )}
+                {msg.content}
+              </div>
+            )}
           </motion.div>
         ))}
 

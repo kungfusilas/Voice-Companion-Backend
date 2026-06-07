@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.routers import chat, personas, sessions, tts, stt, memories
 from app.routers import proactive as proactive_router
+from app.routers import selfie as selfie_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive
@@ -68,6 +69,7 @@ app.include_router(
     prefix="/api/proactive-messages",
     tags=["proactive"],
 )
+app.include_router(selfie_router.router, prefix="/api/selfie", tags=["selfie"])
 
 
 @app.get("/api/healthz")

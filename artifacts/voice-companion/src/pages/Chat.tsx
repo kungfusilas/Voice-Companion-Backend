@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useId, useEffect } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Volume2, VolumeX } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Camera, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
@@ -8,7 +8,13 @@ import { TextInput } from "@/components/TextInput";
 import { MemoriesPanel } from "@/components/MemoriesPanel";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
 import { useAudioPlayer } from "@/hooks/useAudioPlayer";
-import { chatStream, transcribeAudio, speakText, fetchProactiveMessages } from "@/lib/api";
+import {
+  chatStream,
+  transcribeAudio,
+  speakText,
+  fetchProactiveMessages,
+  requestSelfie,
+} from "@/lib/api";
 import type { Persona, ChatMessage } from "@/lib/api";
 
 interface ChatPageProps {
@@ -34,6 +40,7 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
   const [streamingText, setStreamingText] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [selfieLoading, setSelfieLoading] = useState(false);
   const [error, setError] = useState("");
   const [proactiveLabel, setProactiveLabel] = useState<string | null>(null);
   const busyRef = useRef(false);
@@ -53,11 +60,9 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
           proactive: true,
         }));
         setMessages(proactiveMessages);
-        setProactiveLabel(
-          `💭 ${persona.name} was thinking about you while you were away`,
-        );
+        setProactiveLabel(`💭 ${persona.name} was thinking about you while you were away`);
       } catch {
-        // Proactive fetch is non-fatal
+        // non-fatal
       }
     }
     loadProactive();
@@ -70,7 +75,6 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
     busyRef.current = true;
     setBusy(true);
     setError("");
-    // Clear the proactive label once the user starts chatting
     setProactiveLabel(null);
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setStreamingText("");
@@ -90,7 +94,7 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
               const blob = await speakText(fullReply, persona.id);
               await playAudio(blob);
             } catch {
-              // TTS failure is non-fatal — text is still shown
+              // TTS failure is non-fatal
             }
           }
         } else if (event.type === "error") {
@@ -106,6 +110,27 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
       setBusy(false);
     }
   }, [sessionId, persona.id, ttsEnabled, playAudio]);
+
+  const handleSelfie = useCallback(async () => {
+    if (selfieLoading || busy) return;
+    setSelfieLoading(true);
+    setError("");
+    try {
+      const imageUrl = await requestSelfie(persona.id, USER_ID);
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "assistant",
+          content: `${persona.name} sent you a photo 📸`,
+          imageUrl,
+        },
+      ]);
+    } catch {
+      setError("Couldn't generate selfie — try again");
+    } finally {
+      setSelfieLoading(false);
+    }
+  }, [persona.id, persona.name, selfieLoading, busy]);
 
   const handleAudio = useCallback(async (blob: Blob) => {
     try {
@@ -124,6 +149,10 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
   const { state: recorderState, start, stop, reset: resetRecorder } = useVoiceRecorder(handleAudio);
 
   const isBusy = busy || recorderState === "processing";
+
+  const cameraColor = persona.nsfw_mode
+    ? "border-red-800/40 text-red-400 hover:bg-red-900/30"
+    : "border-violet-800/40 text-violet-400 hover:bg-violet-900/30";
 
   return (
     <motion.div
@@ -186,7 +215,7 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
         </span>
       </div>
 
-      {/* Proactive label — shown above the transcript when messages arrived while away */}
+      {/* Proactive label */}
       {proactiveLabel && (
         <div className="flex justify-center px-4 mb-1 shrink-0">
           <span className="text-[11px] text-violet-300/60 italic bg-violet-950/30 border border-violet-800/20 px-3 py-1 rounded-full">
@@ -208,11 +237,28 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
         <p className="text-center text-xs text-red-400 px-4 pb-1 shrink-0">{error}</p>
       )}
 
-      {/* Controls — text input + push-to-talk */}
+      {/* Controls */}
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
           <TextInput onSend={sendMessage} disabled={isBusy} nsfw={persona.nsfw_mode} />
         </div>
+
+        {/* Camera / selfie button */}
+        <motion.button
+          onClick={handleSelfie}
+          disabled={isBusy || selfieLoading}
+          whileTap={{ scale: 0.93 }}
+          title="Ask for a selfie 📸"
+          className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${cameraColor}`}
+          style={{ background: "rgba(255,255,255,0.04)" }}
+        >
+          {selfieLoading ? (
+            <Loader2 className="w-5 h-5 animate-spin" />
+          ) : (
+            <Camera className="w-5 h-5" />
+          )}
+        </motion.button>
+
         <PushToTalkButton
           state={recorderState}
           onStart={start}

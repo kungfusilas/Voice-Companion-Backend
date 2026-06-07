@@ -15,6 +15,7 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   proactive?: boolean;
+  imageUrl?: string;
 }
 
 export interface ChatResponse {
@@ -163,4 +164,24 @@ export async function fetchProactiveMessages(
   const res = await fetch(`${BASE}/proactive-messages/${user_id}/${companion_id}`);
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// ── Selfie ────────────────────────────────────────────────────────────────────
+
+/**
+ * Request an AI-generated selfie from a companion.
+ * Returns a blob URL pointing to the image (valid for this browser session).
+ */
+export async function requestSelfie(
+  companion_id: string,
+  user_id: string,
+): Promise<string> {
+  const res = await fetch(`${BASE}/selfie`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companion_id, user_id }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
