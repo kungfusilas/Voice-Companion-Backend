@@ -8,6 +8,7 @@ from app import store, claude, venice_client
 from app import memory as mem_store
 from app import memory_extractor
 from app import relationship
+from app import scoring
 
 router = APIRouter()
 
@@ -26,31 +27,39 @@ def _inject_date(prompt: str) -> str:
 async def _build_system_prompt(persona, user_id: str, user_message: str) -> str:
     """
     Build the full system prompt:
-    1. Base persona prompt + date injection
-    2. Long-term memories (up to 10 recent)
-    3. Emotionally relevant memories for this specific message
+    1. Base persona prompt + date
+    2. Long-term memories (most recent 10)
+    3. Emotionally relevant memories for this message
     4. Relationship level context
+    5. One-time drift notice (if triggered)
     """
     base_prompt = persona.build_system_prompt()
     try:
-        # Fetch memories and message count in parallel
-        memories, message_count = await asyncio.gather(
+        memories, message_count, needs_drift = await asyncio.gather(
             mem_store.fetch_memories(user_id, persona.id, limit=30),
             relationship.get_message_count(user_id, persona.id),
+            relationship.needs_drift_inject(user_id, persona.id),
         )
 
-        # Standard recent memories block (most recent 10)
         memory_block = memory_extractor.format_memories_for_prompt(memories[:10])
-
-        # Emotionally relevant memories surfaced for this specific message
         emotional_block = memory_extractor.format_emotional_memories_for_prompt(
             user_message, memories
         )
-
-        # Relationship level
         rel_context = relationship.build_relationship_context(persona.id, message_count)
 
-        return _inject_date(base_prompt + memory_block + emotional_block + rel_context)
+        drift_block = ""
+        if needs_drift:
+            drift_block = (
+                "\n\n## One-time message (say this now, in your own voice)\n"
+                "Open your response by expressing — naturally and in your own personality — "
+                "that you've noticed a little distance between you lately. "
+                "Make it clear you're okay with it: they can use you as a brilliant assistant or talk personally, "
+                "no pressure either way. Keep it to 1-2 sentences, then continue with your normal reply."
+            )
+            # Acknowledge immediately so it never fires again
+            asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
+
+        return _inject_date(base_prompt + memory_block + emotional_block + rel_context + drift_block)
 
     except Exception:
         return _inject_date(base_prompt)
@@ -83,13 +92,24 @@ async def chat(request: ChatRequest):
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
 
-    # Fire-and-forget: memory extraction + relationship increment
+    # Scoring
+    stats = await relationship.get_stats(user_id, persona.id)
+    rel_type = stats.get("relationship_type") or "romance"
+    old_score = stats.get("connection_score") or 50
+    delta = await scoring.score_user_message(request.message, rel_type, persona.name)
+    new_score = await relationship.apply_score_delta(user_id, persona.id, delta)
+    old_stage, _, _ = scoring.get_stage(old_score, rel_type)
+    new_stage_name, stage_min, stage_max = scoring.get_stage(new_score, rel_type)
+    stage_up_text = ""
+    if old_stage != new_stage_name:
+        stage_up_text = await scoring.generate_stage_up_reaction(
+            persona.name, persona.build_system_prompt(), new_stage_name, rel_type
+        )
+
     asyncio.create_task(
         memory_extractor.extract_and_save(user_id, persona.id, request.message, reply)
     )
-    asyncio.create_task(
-        relationship.increment_message_count(user_id, persona.id)
-    )
+    asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
 
     return ChatResponse(
         session_id=request.session_id,
@@ -97,18 +117,28 @@ async def chat(request: ChatRequest):
         reply=reply,
         message_count=len(store.get_history(request.session_id)),
         model_backend="venice" if use_venice else "claude",
+        connection_score=new_score,
+        score_delta=delta,
+        relationship_type=rel_type,
+        stage_name=new_stage_name,
+        stage_min=stage_min,
+        stage_max=stage_max,
+        stage_up_text=stage_up_text,
     )
 
 
 @router.post("/stream")
 async def chat_stream(request: ChatRequest):
     """
-    Stream the companion's reply as Server-Sent Events.
+    Stream the companion reply as SSE.
 
-    Each event data field contains JSON:
+    Token events:
         {"type": "token",     "text": "..."}
         {"type": "searching", "query": "..."}
-        {"type": "done",      "full_text": "...", "message_count": N, "model_backend": "..."}
+        {"type": "done",      "full_text": "...", "message_count": N,
+         "model_backend": "...", "connection_score": N, "score_delta": N,
+         "relationship_type": "...", "stage_name": "...",
+         "stage_min": N, "stage_max": N, "stage_up_text": "..."}
         {"type": "error",     "message": "..."}
     """
     persona = store.get_persona(request.persona_id)
@@ -134,6 +164,7 @@ async def chat_stream(request: ChatRequest):
             try:
                 raw = chunk.removeprefix("data: ").strip()
                 payload = json.loads(raw)
+
                 if payload.get("type") == "done":
                     full_text = payload.get("full_text", "")
                     store.append_message(
@@ -142,8 +173,45 @@ async def chat_stream(request: ChatRequest):
                     )
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
+
+                    # ── Scoring ──────────────────────────────────────────────
+                    stats = await relationship.get_stats(user_id, persona.id)
+                    rel_type: str = stats.get("relationship_type") or "romance"
+                    old_score: int = stats.get("connection_score") or 50
+
+                    delta = await scoring.score_user_message(user_message, rel_type, persona.name)
+                    new_score = await relationship.apply_score_delta(user_id, persona.id, delta)
+
+                    old_stage_name, _, _ = scoring.get_stage(old_score, rel_type)
+                    new_stage_name, stage_min, stage_max = scoring.get_stage(new_score, rel_type)
+
+                    # Stage-up reaction
+                    stage_up_text = ""
+                    if old_stage_name != new_stage_name:
+                        stage_up_text = await scoring.generate_stage_up_reaction(
+                            persona.name, persona.build_system_prompt(), new_stage_name, rel_type
+                        )
+
+                    # ── Drift detection every 10 messages ────────────────────
+                    msg_count_before: int = stats.get("message_count") or 0
+                    if (msg_count_before + 1) % 10 == 0:
+                        full_history = store.get_history(request.session_id)
+                        user_msgs = [m.content for m in full_history if m.role == "user"]
+                        if relationship.check_drift_condition(user_msgs):
+                            asyncio.create_task(relationship.mark_drift(user_id, persona.id))
+
+                    payload.update({
+                        "connection_score": new_score,
+                        "score_delta": delta,
+                        "relationship_type": rel_type,
+                        "stage_name": new_stage_name,
+                        "stage_min": stage_min,
+                        "stage_max": stage_max,
+                        "stage_up_text": stage_up_text,
+                    })
+
                     yield f"data: {json.dumps(payload)}\n\n"
-                    # Fire-and-forget after stream completes
+
                     asyncio.create_task(
                         memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
                     )
@@ -151,8 +219,10 @@ async def chat_stream(request: ChatRequest):
                         relationship.increment_message_count(user_id, persona.id)
                     )
                     return
+
             except Exception:
                 pass
+
             yield chunk
 
     return StreamingResponse(

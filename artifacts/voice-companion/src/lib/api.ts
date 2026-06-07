@@ -24,27 +24,26 @@ export interface ChatResponse {
   reply: string;
   message_count: number;
   model_backend: "claude" | "venice";
+  connection_score: number;
+  score_delta: number;
+  relationship_type: string;
+  stage_name: string;
+  stage_min: number;
+  stage_max: number;
+  stage_up_text: string;
+}
+
+export interface RelationshipStats {
+  user_id: string;
+  companion_id: string;
+  message_count: number;
+  relationship_type: string | null;
+  connection_score: number;
+  drift_flag: boolean;
+  drift_acknowledged_at: string | null;
 }
 
 // ── Personas ──────────────────────────────────────────────────────────────────
-
-export async function createPersona(data: {
-  name: string;
-  relationship_type: string;
-  personality_traits: string[];
-  backstory?: string;
-  custom_relationship?: string;
-  voice_id?: string | null;
-  nsfw_mode?: boolean;
-}): Promise<Persona> {
-  const res = await fetch(`${BASE}/personas`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
 
 export async function listPersonas(): Promise<Persona[]> {
   const res = await fetch(`${BASE}/personas`);
@@ -52,26 +51,60 @@ export async function listPersonas(): Promise<Persona[]> {
   return res.json();
 }
 
+// ── Relationship ──────────────────────────────────────────────────────────────
+
+export async function getRelationshipStats(
+  userId: string,
+  companionId: string,
+): Promise<RelationshipStats> {
+  const res = await fetch(`${BASE}/relationship/${userId}/${companionId}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function setRelationshipType(
+  userId: string,
+  companionId: string,
+  relType: string,
+): Promise<void> {
+  const res = await fetch(`${BASE}/relationship/type`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, companion_id: companionId, relationship_type: relType }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+}
+
 // ── Chat (streaming) ──────────────────────────────────────────────────────────
 
 export interface StreamEvent {
-  type: "token" | "done" | "error";
+  type: "token" | "done" | "error" | "searching";
   text?: string;
+  query?: string;
   full_text?: string;
   message_count?: number;
   model_backend?: "claude" | "venice";
   message?: string;
+  // Scoring fields (present on "done")
+  connection_score?: number;
+  score_delta?: number;
+  relationship_type?: string;
+  stage_name?: string;
+  stage_min?: number;
+  stage_max?: number;
+  stage_up_text?: string;
 }
 
 export async function* chatStream(
   session_id: string,
   persona_id: string,
   message: string,
+  user_id?: string,
 ): AsyncGenerator<StreamEvent> {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id, persona_id, message }),
+    body: JSON.stringify({ session_id, persona_id, message, user_id }),
   });
   if (!res.ok || !res.body) throw new Error(await res.text());
 
@@ -168,10 +201,6 @@ export async function fetchProactiveMessages(
 
 // ── Selfie ────────────────────────────────────────────────────────────────────
 
-/**
- * Request an AI-generated selfie from a companion.
- * Returns a blob URL pointing to the image (valid for this browser session).
- */
 export async function requestSelfie(
   companion_id: string,
   user_id: string,
@@ -184,4 +213,17 @@ export async function requestSelfie(
   if (!res.ok) throw new Error(await res.text());
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Stable user ID for this browser session */
+export function getOrCreateUserId(): string {
+  const key = "vc_user_id";
+  let id = localStorage.getItem(key);
+  if (!id) {
+    id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+    localStorage.setItem(key, id);
+  }
+  return id;
 }

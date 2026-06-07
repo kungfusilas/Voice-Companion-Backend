@@ -11,11 +11,10 @@ class Persona(BaseModel):
     backstory: str = ""
     custom_relationship: str = ""
     voice_id: str | None = None
-    nsfw_mode: bool = False  # True = route to Venice instead of Claude
-    system_prompt_override: str | None = None  # Pre-built companions use this
+    nsfw_mode: bool = False
+    system_prompt_override: str | None = None
 
     def build_system_prompt(self) -> str:
-        # Pre-built companions supply their own rich system prompt
         if self.system_prompt_override:
             return self.system_prompt_override
 
@@ -51,8 +50,8 @@ class ChatRequest(BaseModel):
     session_id: str
     persona_id: str
     message: str
-    nsfw_mode: bool = False  # Override per-request; persona setting takes precedence if True
-    user_id: str | None = None  # Optional; defaults to "default_user" in single-user mode
+    nsfw_mode: bool = False
+    user_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -61,6 +60,13 @@ class ChatResponse(BaseModel):
     reply: str
     message_count: int
     model_backend: Literal["claude", "venice"] = "claude"
+    connection_score: int = 50
+    score_delta: int = 0
+    relationship_type: str = "romance"
+    stage_name: str = ""
+    stage_min: int = 0
+    stage_max: int = 100
+    stage_up_text: str = ""
 
 
 class CreatePersonaRequest(BaseModel):

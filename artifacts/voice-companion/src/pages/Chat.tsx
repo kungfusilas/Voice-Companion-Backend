@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { ArrowLeft, Volume2, VolumeX, Camera, Loader2 } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
+import { ConnectionMeter } from "@/components/ConnectionMeter";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
 import { TextInput } from "@/components/TextInput";
 import { MemoriesPanel } from "@/components/MemoriesPanel";
@@ -14,28 +15,23 @@ import {
   speakText,
   fetchProactiveMessages,
   requestSelfie,
+  getRelationshipStats,
 } from "@/lib/api";
+import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage } from "@/lib/api";
 
 interface ChatPageProps {
   persona: Persona;
+  relType: string;
+  userId: string;
   onBack: () => void;
+  onChangeRelType: () => void;
 }
 
-// Stable user_id scoped to this browser session
-const USER_ID = (() => {
-  const key = "vc_user_id";
-  let id = localStorage.getItem(key);
-  if (!id) {
-    id = `u_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    localStorage.setItem(key, id);
-  }
-  return id;
-})();
-
-export function ChatPage({ persona, onBack }: ChatPageProps) {
+export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: ChatPageProps) {
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(true);
@@ -43,32 +39,50 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
   const [selfieLoading, setSelfieLoading] = useState(false);
   const [error, setError] = useState("");
   const [proactiveLabel, setProactiveLabel] = useState<string | null>(null);
-  const busyRef = useRef(false);
 
+  // Connection meter state
+  const [connectionScore, setConnectionScore] = useState(50);
+  const [stageName, setStageName] = useState("");
+  const [stageMin, setStageMin] = useState(0);
+  const [stageMax, setStageMax] = useState(100);
+  const [scoreDelta, setScoreDelta] = useState<number | undefined>(undefined);
+
+  const busyRef = useRef(false);
   const { playing: speaking, play: playAudio } = useAudioPlayer();
 
-  // On mount: load any pending proactive messages and prepend them
+  // Initialize meter from DB on mount
   useEffect(() => {
     let cancelled = false;
-    async function loadProactive() {
-      try {
-        const data = await fetchProactiveMessages(USER_ID, persona.id);
+    getRelationshipStats(userId, persona.id)
+      .then((stats) => {
+        if (cancelled) return;
+        const score = stats.connection_score ?? 50;
+        setConnectionScore(score);
+        const [sName, sMin, sMax] = scoring.getStage(score, relType);
+        setStageName(sName);
+        setStageMin(sMin);
+        setStageMax(sMax);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [persona.id, relType, userId]);
+
+  // Load pending proactive messages on mount
+  useEffect(() => {
+    let cancelled = false;
+    fetchProactiveMessages(userId, persona.id)
+      .then((data) => {
         if (cancelled || !data.messages.length) return;
-        const proactiveMessages: ChatMessage[] = data.messages.map((m) => ({
-          role: "assistant",
+        setMessages(data.messages.map((m) => ({
+          role: "assistant" as const,
           content: m.message,
           proactive: true,
-        }));
-        setMessages(proactiveMessages);
+        })));
         setProactiveLabel(`💭 ${persona.name} was thinking about you while you were away`);
-      } catch {
-        // non-fatal
-      }
-    }
-    loadProactive();
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [persona.id]);
+  }, [persona.id, persona.name, userId]);
 
   const sendMessage = useCallback(async (userText: string) => {
     if (busyRef.current) return;
@@ -76,26 +90,43 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
     setBusy(true);
     setError("");
     setProactiveLabel(null);
+    setScoreDelta(undefined);
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setStreamingText("");
 
     let fullReply = "";
     try {
-      for await (const event of chatStream(sessionId, persona.id, userText)) {
+      for await (const event of chatStream(sessionId, persona.id, userText, userId)) {
         if (event.type === "token") {
           fullReply += event.text ?? "";
           setStreamingText(fullReply);
         } else if (event.type === "done") {
           fullReply = event.full_text ?? fullReply;
           setStreamingText("");
-          setMessages((prev) => [...prev, { role: "assistant", content: fullReply }]);
+
+          const newMessages: ChatMessage[] = [{ role: "assistant", content: fullReply }];
+
+          // Stage-up reaction — insert as extra companion message
+          if (event.stage_up_text) {
+            newMessages.push({ role: "assistant", content: event.stage_up_text });
+          }
+
+          setMessages((prev) => [...prev, ...newMessages]);
+
+          // Update meter
+          if (event.connection_score !== undefined) {
+            setConnectionScore(event.connection_score);
+            setScoreDelta(event.score_delta);
+            setStageName(event.stage_name ?? "");
+            setStageMin(event.stage_min ?? 0);
+            setStageMax(event.stage_max ?? 100);
+          }
+
           if (ttsEnabled && fullReply) {
             try {
               const blob = await speakText(fullReply, persona.id);
               await playAudio(blob);
-            } catch {
-              // TTS failure is non-fatal
-            }
+            } catch {}
           }
         } else if (event.type === "error") {
           setError(event.message ?? "Unknown error");
@@ -109,50 +140,49 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
       busyRef.current = false;
       setBusy(false);
     }
-  }, [sessionId, persona.id, ttsEnabled, playAudio]);
+  }, [sessionId, persona.id, userId, ttsEnabled, playAudio]);
 
   const handleSelfie = useCallback(async () => {
     if (selfieLoading || busy) return;
     setSelfieLoading(true);
     setError("");
     try {
-      const imageUrl = await requestSelfie(persona.id, USER_ID);
+      const imageUrl = await requestSelfie(persona.id, userId);
       setMessages((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          content: `${persona.name} sent you a photo 📸`,
-          imageUrl,
-        },
+        { role: "assistant", content: `${persona.name} sent you a photo 📸`, imageUrl },
       ]);
     } catch {
       setError("Couldn't generate selfie — try again");
     } finally {
       setSelfieLoading(false);
     }
-  }, [persona.id, persona.name, selfieLoading, busy]);
+  }, [persona.id, persona.name, userId, selfieLoading, busy]);
 
   const handleAudio = useCallback(async (blob: Blob) => {
     try {
       const transcript = await transcribeAudio(blob);
-      if (transcript.trim()) {
-        await sendMessage(transcript);
-      }
+      if (transcript.trim()) await sendMessage(transcript);
     } catch {
       setError("Transcription failed — try again");
     } finally {
       resetRecorder();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sendMessage]);
+  }, [sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { state: recorderState, start, stop, reset: resetRecorder } = useVoiceRecorder(handleAudio);
 
   const isBusy = busy || recorderState === "processing";
 
+  const typeColors: Record<string, string> = {
+    romance: "border-rose-800/40 text-rose-400 hover:bg-rose-900/30",
+    mentor: "border-violet-800/40 text-violet-400 hover:bg-violet-900/30",
+    friendship: "border-teal-800/40 text-teal-400 hover:bg-teal-900/30",
+    professional: "border-sky-800/40 text-sky-400 hover:bg-sky-900/30",
+  };
   const cameraColor = persona.nsfw_mode
     ? "border-red-800/40 text-red-400 hover:bg-red-900/30"
-    : "border-violet-800/40 text-violet-400 hover:bg-violet-900/30";
+    : (typeColors[relType] ?? typeColors.romance);
 
   return (
     <motion.div
@@ -172,7 +202,7 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
         </button>
         <div className="flex items-center gap-2">
           <MemoriesPanel
-            userId={USER_ID}
+            userId={userId}
             personaId={persona.id}
             personaName={persona.name}
             nsfw={persona.nsfw_mode}
@@ -192,7 +222,7 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
       </div>
 
       {/* Avatar */}
-      <div className="flex justify-center py-4 shrink-0">
+      <div className="flex justify-center py-3 shrink-0">
         <Avatar
           name={persona.name}
           personaId={persona.id}
@@ -205,15 +235,29 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
       {/* Backend badge */}
       <div className="flex justify-center mb-2 shrink-0">
         <span
-          className={`text-xs px-2.5 py-0.5 rounded-full border ${
+          className={`text-xs px-2.5 py-0.5 rounded-full border cursor-pointer ${
             persona.nsfw_mode
               ? "bg-red-950/40 border-red-800/40 text-red-400"
               : "bg-violet-950/40 border-violet-800/40 text-violet-400"
           }`}
+          onClick={onChangeRelType}
+          title="Change relationship type"
         >
           {persona.nsfw_mode ? "Venice.ai · uncensored" : "Claude · standard"}
         </span>
       </div>
+
+      {/* Connection Meter */}
+      {stageName && (
+        <ConnectionMeter
+          score={connectionScore}
+          stageName={stageName}
+          stageMin={stageMin}
+          stageMax={stageMax}
+          relType={relType}
+          scoreDelta={scoreDelta}
+        />
+      )}
 
       {/* Proactive label */}
       {proactiveLabel && (
@@ -243,7 +287,6 @@ export function ChatPage({ persona, onBack }: ChatPageProps) {
           <TextInput onSend={sendMessage} disabled={isBusy} nsfw={persona.nsfw_mode} />
         </div>
 
-        {/* Camera / selfie button */}
         <motion.button
           onClick={handleSelfie}
           disabled={isBusy || selfieLoading}
