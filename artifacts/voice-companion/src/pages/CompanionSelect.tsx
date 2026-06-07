@@ -1,9 +1,5 @@
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
-import { AriaAvatar } from "@/components/avatars/AriaAvatar";
-import { AevaAvatar } from "@/components/avatars/AevaAvatar";
-import { EmberAvatar } from "@/components/avatars/EmberAvatar";
-import { KaiAvatar } from "@/components/avatars/KaiAvatar";
 import type { Persona } from "@/lib/api";
 
 interface CompanionConfig {
@@ -11,10 +7,9 @@ interface CompanionConfig {
   name: string;
   tagline: string;
   traits: string[];
-  color: string;          // Tailwind color key
-  glow: string;           // box-shadow glow color
+  glow: string;
   border: string;
-  AvatarComponent: React.ComponentType<{ size?: number }>;
+  avatar: string;
 }
 
 const COMPANIONS: CompanionConfig[] = [
@@ -23,40 +18,36 @@ const COMPANIONS: CompanionConfig[] = [
     name: "Aria",
     tagline: "Sweet & romantic",
     traits: ["loving", "attentive", "warm"],
-    color: "rose",
     glow: "rgba(244,114,182,0.25)",
     border: "rgba(244,114,182,0.3)",
-    AvatarComponent: AriaAvatar,
+    avatar: "/companion/avatars/aria.jpg",
   },
   {
     id: "companion-aeva",
     name: "Aeva",
     tagline: "Mysterious & poetic",
     traits: ["deep", "introspective", "gentle"],
-    color: "violet",
     glow: "rgba(167,139,250,0.25)",
     border: "rgba(167,139,250,0.3)",
-    AvatarComponent: AevaAvatar,
+    avatar: "/companion/avatars/aeva.jpg",
   },
   {
     id: "companion-ember",
     name: "Ember",
     tagline: "Warm & nurturing",
     traits: ["caring", "empathetic", "genuine"],
-    color: "amber",
     glow: "rgba(251,191,36,0.2)",
     border: "rgba(251,191,36,0.3)",
-    AvatarComponent: EmberAvatar,
+    avatar: "/companion/avatars/ember.jpg",
   },
   {
     id: "companion-kai",
     name: "Kai",
     tagline: "Confident & charming",
     traits: ["direct", "witty", "grounded"],
-    color: "sky",
     glow: "rgba(56,189,248,0.2)",
     border: "rgba(56,189,248,0.3)",
-    AvatarComponent: KaiAvatar,
+    avatar: "/companion/avatars/kai.jpg",
   },
 ];
 
@@ -65,9 +56,7 @@ interface CompanionSelectProps {
 }
 
 export function CompanionSelect({ onSelect }: CompanionSelectProps) {
-  const handlePick = async (companion: CompanionConfig) => {
-    // Build a minimal Persona object from the companion config.
-    // The full Persona (with system prompt) lives on the backend.
+  const handlePick = (companion: CompanionConfig) => {
     const persona: Persona = {
       id: companion.id,
       name: companion.name,
@@ -104,36 +93,38 @@ export function CompanionSelect({ onSelect }: CompanionSelectProps) {
       {/* Companion grid */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
         <div className="grid grid-cols-2 gap-3">
-          {COMPANIONS.map((companion, i) => {
-            const { AvatarComponent } = companion;
-            return (
-              <motion.button
-                key={companion.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: i * 0.07 }}
-                whileHover={{ scale: 1.03, y: -2 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => handlePick(companion)}
-                className="relative flex flex-col items-center text-center rounded-2xl p-4 pt-5 transition-all duration-200"
+          {COMPANIONS.map((companion, i) => (
+            <motion.button
+              key={companion.id}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: i * 0.07 }}
+              whileHover={{ scale: 1.03, y: -2 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={() => handlePick(companion)}
+              className="relative flex flex-col items-stretch text-center rounded-2xl overflow-hidden transition-all duration-200"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: `1px solid ${companion.border}`,
+                boxShadow: `0 4px 24px ${companion.glow}`,
+              }}
+            >
+              {/* Portrait image */}
+              <img
+                src={companion.avatar}
+                alt={companion.name}
                 style={{
-                  background: "rgba(255,255,255,0.04)",
-                  border: `1px solid ${companion.border}`,
-                  boxShadow: `0 4px 24px ${companion.glow}`,
+                  width: "100%",
+                  height: 200,
+                  objectFit: "cover",
+                  objectPosition: "center top",
+                  borderRadius: "14px 14px 0 0",
+                  display: "block",
                 }}
-              >
-                {/* Avatar */}
-                <div className="mb-3 relative">
-                  <div
-                    className="rounded-full overflow-hidden"
-                    style={{
-                      boxShadow: `0 0 20px ${companion.glow}`,
-                    }}
-                  >
-                    <AvatarComponent size={80} />
-                  </div>
-                </div>
+              />
 
+              {/* Info section */}
+              <div className="px-3 py-3 flex flex-col items-center">
                 {/* Name */}
                 <p className="text-base font-semibold text-white leading-tight">
                   {companion.name}
@@ -145,13 +136,13 @@ export function CompanionSelect({ onSelect }: CompanionSelectProps) {
                 </p>
 
                 {/* Trait chips */}
-                <div className="flex flex-wrap justify-center gap-1 mt-2.5">
+                <div className="flex flex-wrap justify-center gap-1 mt-2">
                   {companion.traits.map((trait) => (
                     <span
                       key={trait}
                       className="text-[10px] px-2 py-0.5 rounded-full"
                       style={{
-                        background: `${companion.glow}`,
+                        background: companion.glow,
                         border: `1px solid ${companion.border}`,
                         color: "rgba(255,255,255,0.7)",
                       }}
@@ -160,11 +151,10 @@ export function CompanionSelect({ onSelect }: CompanionSelectProps) {
                     </span>
                   ))}
                 </div>
-              </motion.button>
-            );
-          })}
+              </div>
+            </motion.button>
+          ))}
         </div>
-
       </div>
     </motion.div>
   );
