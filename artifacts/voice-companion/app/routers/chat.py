@@ -9,6 +9,7 @@ from app import memory as mem_store
 from app import memory_extractor
 from app import relationship
 from app import scoring
+from app.companions import ROMANTIC_MODE_PROMPTS
 
 router = APIRouter()
 
@@ -24,28 +25,38 @@ def _inject_date(prompt: str) -> str:
     return f"Today's date is {today}.\n\n{prompt}"
 
 
-async def _build_system_prompt(persona, user_id: str, user_message: str) -> str:
+async def _build_system_prompt(
+    persona, user_id: str, user_message: str, romantic_mode: bool = False
+) -> str:
     """
     Build the full system prompt:
-    1. Base persona prompt + date
-    2. Long-term memories (most recent 10)
-    3. Emotionally relevant memories for this message
-    4. Relationship level context
-    5. One-time drift notice (if triggered)
+    1. Base persona prompt
+    2. Romantic Mode overlay (if enabled)
+    3. Long-term memories (most recent 10)
+    4. Emotionally relevant memories for this message
+    5. Relationship level context
+    6. One-time drift notice (if triggered)
     """
     base_prompt = persona.build_system_prompt()
     try:
-        memories, message_count, needs_drift = await asyncio.gather(
+        memories, stats, needs_drift = await asyncio.gather(
             mem_store.fetch_memories(user_id, persona.id, limit=30),
-            relationship.get_message_count(user_id, persona.id),
+            relationship.get_stats(user_id, persona.id),
             relationship.needs_drift_inject(user_id, persona.id),
         )
+
+        message_count = stats.get("message_count", 0)
+        # romantic_mode comes from request (client-owned state via localStorage)
 
         memory_block = memory_extractor.format_memories_for_prompt(memories[:10])
         emotional_block = memory_extractor.format_emotional_memories_for_prompt(
             user_message, memories
         )
         rel_context = relationship.build_relationship_context(persona.id, message_count)
+
+        romantic_block = ""
+        if romantic_mode:
+            romantic_block = ROMANTIC_MODE_PROMPTS.get(persona.id, "")
 
         drift_block = ""
         if needs_drift:
@@ -56,10 +67,11 @@ async def _build_system_prompt(persona, user_id: str, user_message: str) -> str:
                 "Make it clear you're okay with it: they can use you as a brilliant assistant or talk personally, "
                 "no pressure either way. Keep it to 1-2 sentences, then continue with your normal reply."
             )
-            # Acknowledge immediately so it never fires again
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
-        return _inject_date(base_prompt + memory_block + emotional_block + rel_context + drift_block)
+        return _inject_date(
+            base_prompt + romantic_block + memory_block + emotional_block + rel_context + drift_block
+        )
 
     except Exception:
         return _inject_date(base_prompt)
@@ -73,7 +85,7 @@ async def chat(request: ChatRequest):
 
     user_id = request.user_id or _DEFAULT_USER
     history = store.get_or_create_session(request.session_id, request.persona_id)
-    system_prompt = await _build_system_prompt(persona, user_id, request.message)
+    system_prompt = await _build_system_prompt(persona, user_id, request.message, request.romantic_mode)
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     if use_venice:
@@ -92,7 +104,6 @@ async def chat(request: ChatRequest):
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
 
-    # Scoring
     stats = await relationship.get_stats(user_id, persona.id)
     rel_type = stats.get("relationship_type") or "romance"
     old_score = stats.get("connection_score") or 50
@@ -132,7 +143,7 @@ async def chat_stream(request: ChatRequest):
     """
     Stream the companion reply as SSE.
 
-    Token events:
+    Events:
         {"type": "token",     "text": "..."}
         {"type": "searching", "query": "..."}
         {"type": "done",      "full_text": "...", "message_count": N,
@@ -147,7 +158,7 @@ async def chat_stream(request: ChatRequest):
 
     user_id = request.user_id or _DEFAULT_USER
     history = store.get_or_create_session(request.session_id, request.persona_id)
-    system_prompt = await _build_system_prompt(persona, user_id, request.message)
+    system_prompt = await _build_system_prompt(persona, user_id, request.message, request.romantic_mode)
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
@@ -185,7 +196,6 @@ async def chat_stream(request: ChatRequest):
                     old_stage_name, _, _ = scoring.get_stage(old_score, rel_type)
                     new_stage_name, stage_min, stage_max = scoring.get_stage(new_score, rel_type)
 
-                    # Stage-up reaction
                     stage_up_text = ""
                     if old_stage_name != new_stage_name:
                         stage_up_text = await scoring.generate_stage_up_reaction(

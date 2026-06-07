@@ -42,6 +42,8 @@ export interface RelationshipStats {
   connection_score: number;
   drift_flag: boolean;
   drift_acknowledged_at: string | null;
+  romantic_mode: boolean;
+  romantic_mode_unlocked: boolean;
 }
 
 // ── Activities ────────────────────────────────────────────────────────────────
@@ -91,6 +93,11 @@ export async function listPersonas(): Promise<Persona[]> {
   return res.json();
 }
 
+/** Stub — custom persona creation is not active in this build. */
+export async function createPersona(_data: unknown): Promise<Persona> {
+  throw new Error("Custom persona creation is not enabled.");
+}
+
 // ── Relationship ──────────────────────────────────────────────────────────────
 
 export async function getRelationshipStats(
@@ -113,6 +120,22 @@ export async function setRelationshipType(
     body: JSON.stringify({ user_id: userId, companion_id: companionId, relationship_type: relType }),
   });
   if (!res.ok) throw new Error(await res.text());
+}
+
+// ── Romantic Mode ─────────────────────────────────────────────────────────────
+
+export async function setRomanticMode(
+  userId: string,
+  companionId: string,
+  enabled: boolean,
+): Promise<{ success: boolean; companion_reaction: string }> {
+  const res = await fetch(`${BASE}/romantic-mode`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id: userId, companion_id: companionId, enabled }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 // ── Chat (streaming) ──────────────────────────────────────────────────────────
@@ -139,11 +162,12 @@ export async function* chatStream(
   persona_id: string,
   message: string,
   user_id?: string,
+  romantic_mode?: boolean,
 ): AsyncGenerator<StreamEvent> {
   const res = await fetch(`${BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id, persona_id, message, user_id }),
+    body: JSON.stringify({ session_id, persona_id, message, user_id, romantic_mode: romantic_mode ?? false }),
   });
   if (!res.ok || !res.body) throw new Error(await res.text());
 

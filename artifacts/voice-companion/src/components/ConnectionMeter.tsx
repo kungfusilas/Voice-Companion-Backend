@@ -54,6 +54,7 @@ export function ConnectionMeter({
       const t = setTimeout(() => setPulse(false), 1200);
       return () => clearTimeout(t);
     }
+    return undefined;
   }, [stageName]);
 
   const showDelta = scoreDelta !== undefined && scoreDelta !== 0;

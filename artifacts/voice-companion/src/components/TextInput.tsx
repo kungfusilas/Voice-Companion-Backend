@@ -5,9 +5,11 @@ interface TextInputProps {
   onSend: (text: string) => void;
   disabled: boolean;
   nsfw: boolean;
+  placeholder?: string;
+  romantic?: boolean;
 }
 
-export function TextInput({ onSend, disabled, nsfw }: TextInputProps) {
+export function TextInput({ onSend, disabled, nsfw, placeholder, romantic }: TextInputProps) {
   const [value, setValue] = useState("");
 
   const handleSend = () => {
@@ -24,7 +26,13 @@ export function TextInput({ onSend, disabled, nsfw }: TextInputProps) {
     }
   };
 
-  const ringColor = nsfw ? "focus:ring-red-500/50" : "focus:ring-violet-500/50";
+  const borderColor = romantic
+    ? "border-rose-500/40 focus:ring-rose-500/40"
+    : nsfw
+    ? "border-white/10 focus:ring-red-500/50"
+    : "border-white/10 focus:ring-violet-500/50";
+
+  const bg = romantic ? "bg-rose-950/20" : "bg-white/5";
 
   return (
     <div className="flex items-end gap-2">
@@ -33,9 +41,9 @@ export function TextInput({ onSend, disabled, nsfw }: TextInputProps) {
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKey}
         disabled={disabled}
-        placeholder="Type a message…"
+        placeholder={placeholder ?? "Type a message…"}
         rows={1}
-        className={`flex-1 resize-none bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-2 ${ringColor} transition-all max-h-32 scrollbar-thin scrollbar-thumb-white/10`}
+        className={`flex-1 resize-none border rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-2 transition-all max-h-32 scrollbar-thin scrollbar-thumb-white/10 ${bg} ${borderColor}`}
         style={{ fieldSizing: "content" } as React.CSSProperties}
       />
       <button

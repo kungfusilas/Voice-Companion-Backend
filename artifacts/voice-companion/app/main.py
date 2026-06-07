@@ -11,6 +11,7 @@ from app.routers import proactive as proactive_router
 from app.routers import selfie as selfie_router
 from app.routers import relationship as relationship_router
 from app.routers import activities as activities_router
+from app.routers import romantic as romantic_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive
@@ -64,16 +65,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(chat.router,              prefix="/api/chat",               tags=["chat"])
-app.include_router(personas.router,          prefix="/api/personas",           tags=["personas"])
-app.include_router(sessions.router,          prefix="/api/sessions",           tags=["sessions"])
-app.include_router(tts.router,               prefix="/api/tts",                tags=["tts"])
-app.include_router(stt.router,               prefix="/api/stt",                tags=["stt"])
-app.include_router(memories.router,          prefix="/api/memories",           tags=["memories"])
-app.include_router(proactive_router.router,  prefix="/api/proactive-messages", tags=["proactive"])
-app.include_router(selfie_router.router,     prefix="/api/selfie",             tags=["selfie"])
-app.include_router(relationship_router.router, prefix="/api/relationship",     tags=["relationship"])
-app.include_router(activities_router.router, prefix="/api/activity",           tags=["activities"])
+app.include_router(chat.router,               prefix="/api/chat",               tags=["chat"])
+app.include_router(personas.router,           prefix="/api/personas",           tags=["personas"])
+app.include_router(sessions.router,           prefix="/api/sessions",           tags=["sessions"])
+app.include_router(tts.router,                prefix="/api/tts",                tags=["tts"])
+app.include_router(stt.router,                prefix="/api/stt",                tags=["stt"])
+app.include_router(memories.router,           prefix="/api/memories",           tags=["memories"])
+app.include_router(proactive_router.router,   prefix="/api/proactive-messages", tags=["proactive"])
+app.include_router(selfie_router.router,      prefix="/api/selfie",             tags=["selfie"])
+app.include_router(relationship_router.router,prefix="/api/relationship",       tags=["relationship"])
+app.include_router(activities_router.router,  prefix="/api/activity",           tags=["activities"])
+app.include_router(romantic_router.router,    prefix="/api/romantic-mode",      tags=["romantic"])
 
 
 @app.get("/api/healthz")

@@ -52,6 +52,7 @@ class ChatRequest(BaseModel):
     message: str
     nsfw_mode: bool = False
     user_id: str | None = None
+    romantic_mode: bool = False
 
 
 class ChatResponse(BaseModel):

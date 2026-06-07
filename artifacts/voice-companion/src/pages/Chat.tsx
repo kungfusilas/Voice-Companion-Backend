@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useId, useEffect } from "react";
-import { motion } from "framer-motion";
-import { ArrowLeft, Volume2, VolumeX, Camera, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { ConnectionMeter } from "@/components/ConnectionMeter";
@@ -17,6 +17,7 @@ import {
   requestSelfie,
   getRelationshipStats,
   startActivity,
+  setRomanticMode,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
@@ -54,10 +55,22 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
   const [stageMax, setStageMax] = useState(100);
   const [scoreDelta, setScoreDelta] = useState<number | undefined>(undefined);
 
+  // Romantic mode — persisted in localStorage so it survives refreshes
+  const rmKey = `romantic_mode_${userId}_${persona.id}`;
+  const ruKey = `romantic_unlocked_${userId}_${persona.id}`;
+  const [romanticMode, setRomanticModeState] = useState(
+    () => localStorage.getItem(rmKey) === "true"
+  );
+  const [romanticUnlocked, setRomanticUnlocked] = useState(
+    () => localStorage.getItem(ruKey) === "true"
+  );
+  const [showAgeGate, setShowAgeGate] = useState(false);
+  const [romanticLoading, setRomanticLoading] = useState(false);
+
   const busyRef = useRef(false);
   const { playing: speaking, play: playAudio } = useAudioPlayer();
 
-  // Init meter from DB
+  // Init meter + romantic mode from DB
   useEffect(() => {
     let cancelled = false;
     getRelationshipStats(userId, persona.id)
@@ -69,12 +82,19 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         setStageName(sName);
         setStageMin(sMin);
         setStageMax(sMax);
+        // Only apply DB values if localStorage has no opinion (first-ever visit)
+        if (localStorage.getItem(rmKey) === null) {
+          setRomanticModeState(stats.romantic_mode ?? false);
+        }
+        if (localStorage.getItem(ruKey) === null) {
+          setRomanticUnlocked(stats.romantic_mode_unlocked ?? false);
+        }
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [persona.id, relType, userId]);
 
-  // Load proactive messages (including activity payloads)
+  // Load proactive messages
   useEffect(() => {
     let cancelled = false;
     fetchProactiveMessages(userId, persona.id)
@@ -105,7 +125,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
 
     let fullReply = "";
     try {
-      for await (const event of chatStream(sessionId, persona.id, userText, userId)) {
+      for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode)) {
         if (event.type === "token") {
           fullReply += event.text ?? "";
           setStreamingText(fullReply);
@@ -139,7 +159,41 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
       busyRef.current = false;
       setBusy(false);
     }
-  }, [sessionId, persona.id, userId, ttsEnabled, playAudio]);
+  }, [sessionId, persona.id, userId, ttsEnabled, playAudio, romanticMode]);
+
+  // Romantic mode toggle handler
+  const handleRomanticToggle = useCallback(() => {
+    if (romanticLoading) return;
+    if (!romanticUnlocked) {
+      setShowAgeGate(true);
+      return;
+    }
+    const next = !romanticMode;
+    setRomanticLoading(true);
+    setRomanticMode(userId, persona.id, next)
+      .then(({ companion_reaction }) => {
+        setRomanticModeState(next);
+        localStorage.setItem(rmKey, String(next));
+        setMessages((prev) => [...prev, { role: "assistant", content: companion_reaction }]);
+      })
+      .catch(() => setError("Could not change romantic mode — try again"))
+      .finally(() => setRomanticLoading(false));
+  }, [romanticLoading, romanticUnlocked, romanticMode, userId, persona.id]);
+
+  const handleAgeGateConfirm = useCallback(() => {
+    setShowAgeGate(false);
+    setRomanticLoading(true);
+    setRomanticMode(userId, persona.id, true)
+      .then(({ companion_reaction }) => {
+        setRomanticModeState(true);
+        setRomanticUnlocked(true);
+        localStorage.setItem(rmKey, "true");
+        localStorage.setItem(ruKey, "true");
+        setMessages((prev) => [...prev, { role: "assistant", content: companion_reaction }]);
+      })
+      .catch(() => setError("Could not enable romantic mode — try again"))
+      .finally(() => setRomanticLoading(false));
+  }, [userId, persona.id]);
 
   const handleActivity = useCallback(async (type: ActivityType) => {
     if (activityLoading || busy) return;
@@ -200,6 +254,8 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
     ? "border-red-800/40 text-red-400 hover:bg-red-900/30"
     : (typeColors[relType] ?? typeColors.romance);
 
+  const inputPlaceholder = romanticMode ? `Talk to ${persona.name}…` : undefined;
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 30 }}
@@ -207,7 +263,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
       exit={{ opacity: 0, x: -30 }}
       className="flex flex-col h-full"
     >
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
         <button
           onClick={onBack}
@@ -223,6 +279,36 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
             personaName={persona.name}
             nsfw={persona.nsfw_mode}
           />
+
+          {/* 🌙 Romantic Mode toggle */}
+          <motion.button
+            onClick={handleRomanticToggle}
+            disabled={romanticLoading}
+            title="Romantic Mode"
+            className="relative flex items-center justify-center w-8 h-8 rounded-full border transition disabled:opacity-50"
+            style={{
+              borderColor: romanticMode ? "rgba(251,113,133,0.5)" : "rgba(255,255,255,0.12)",
+              background: romanticMode ? "rgba(159,18,57,0.15)" : "rgba(255,255,255,0.04)",
+            }}
+            animate={romanticMode ? {
+              boxShadow: [
+                "0 0 6px rgba(251,113,133,0.3)",
+                "0 0 14px rgba(251,113,133,0.6)",
+                "0 0 6px rgba(251,113,133,0.3)",
+              ],
+            } : { boxShadow: "none" }}
+            transition={romanticMode ? { duration: 2, repeat: Infinity } : {}}
+          >
+            {romanticLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+            ) : (
+              <Moon
+                className="w-3.5 h-3.5 transition-colors"
+                style={{ color: romanticMode ? "#fb7185" : "rgba(255,255,255,0.3)" }}
+              />
+            )}
+          </motion.button>
+
           <button
             onClick={() => setTtsEnabled((v) => !v)}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
@@ -237,7 +323,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         </div>
       </div>
 
-      {/* Avatar */}
+      {/* ── Avatar ── */}
       <div className="flex justify-center py-3 shrink-0">
         <Avatar
           name={persona.name}
@@ -248,22 +334,28 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         />
       </div>
 
-      {/* Backend badge */}
+      {/* ── Backend badge ── */}
       <div className="flex justify-center mb-2 shrink-0">
         <span
-          className={`text-xs px-2.5 py-0.5 rounded-full border cursor-pointer ${
+          className={`text-xs px-2.5 py-0.5 rounded-full border cursor-pointer transition ${
             persona.nsfw_mode
               ? "bg-red-950/40 border-red-800/40 text-red-400"
+              : romanticMode
+              ? "bg-rose-950/40 border-rose-800/40 text-rose-400"
               : "bg-violet-950/40 border-violet-800/40 text-violet-400"
           }`}
           onClick={onChangeRelType}
           title="Change relationship type"
         >
-          {persona.nsfw_mode ? "Venice.ai · uncensored" : "Claude · standard"}
+          {persona.nsfw_mode
+            ? "Venice.ai · uncensored"
+            : romanticMode
+            ? "Claude · romantic mode 🌙"
+            : "Claude · standard"}
         </span>
       </div>
 
-      {/* Connection Meter */}
+      {/* ── Connection Meter ── */}
       {stageName && (
         <ConnectionMeter
           score={connectionScore}
@@ -275,7 +367,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         />
       )}
 
-      {/* Proactive label */}
+      {/* ── Proactive label ── */}
       {proactiveLabel && (
         <div className="flex justify-center px-4 mb-1 shrink-0">
           <span className="text-[11px] text-violet-300/60 italic bg-violet-950/30 border border-violet-800/20 px-3 py-1 rounded-full">
@@ -284,7 +376,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         </div>
       )}
 
-      {/* Transcript */}
+      {/* ── Transcript ── */}
       <ChatTranscript
         messages={messages}
         streamingText={streamingText}
@@ -294,12 +386,12 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         onChatContinue={sendMessage}
       />
 
-      {/* Error */}
+      {/* ── Error ── */}
       {error && (
         <p className="text-center text-xs text-red-400 px-4 pb-1 shrink-0">{error}</p>
       )}
 
-      {/* Activity toolbar */}
+      {/* ── Activity toolbar ── */}
       <div className="flex items-center gap-2 px-4 pb-1.5 shrink-0">
         <span className="text-white/20 text-[9px] uppercase tracking-widest mr-0.5">Play</span>
         {ACTIVITY_BUTTONS.map(({ type, icon, label }) => (
@@ -322,10 +414,16 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         ))}
       </div>
 
-      {/* Input row */}
+      {/* ── Input row ── */}
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
-          <TextInput onSend={sendMessage} disabled={isBusy} nsfw={persona.nsfw_mode} />
+          <TextInput
+            onSend={sendMessage}
+            disabled={isBusy}
+            nsfw={persona.nsfw_mode}
+            placeholder={inputPlaceholder}
+            romantic={romanticMode}
+          />
         </div>
 
         {/* Selfie button */}
@@ -351,6 +449,79 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
           nsfw={persona.nsfw_mode}
         />
       </div>
+
+      {/* ── Age Gate Modal ── */}
+      <AnimatePresence>
+        {showAgeGate && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center px-4"
+            style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(8px)" }}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 8 }}
+              className="relative w-full max-w-sm rounded-2xl overflow-hidden"
+              style={{
+                background: "linear-gradient(135deg, #1a0a1e, #1e0f2a)",
+                border: "1px solid rgba(251,113,133,0.2)",
+                boxShadow: "0 24px 60px rgba(0,0,0,0.6), 0 0 40px rgba(159,18,57,0.12)",
+              }}
+            >
+              {/* Subtle top gradient */}
+              <div
+                className="absolute top-0 inset-x-0 h-px"
+                style={{ background: "linear-gradient(90deg, transparent, rgba(251,113,133,0.4), transparent)" }}
+              />
+
+              <div className="px-6 pt-7 pb-6">
+                {/* Moon icon */}
+                <div className="flex justify-center mb-4">
+                  <div
+                    className="w-12 h-12 rounded-full flex items-center justify-center"
+                    style={{
+                      background: "rgba(159,18,57,0.2)",
+                      border: "1px solid rgba(251,113,133,0.3)",
+                      boxShadow: "0 0 20px rgba(251,113,133,0.15)",
+                    }}
+                  >
+                    <Moon className="w-5 h-5 text-rose-400" />
+                  </div>
+                </div>
+
+                <h2 className="text-center text-lg font-semibold text-white mb-2">
+                  Romantic Mode
+                </h2>
+                <p className="text-center text-sm text-white/55 leading-relaxed mb-7">
+                  More intimate conversations for 18+ users. By continuing, you confirm you are at least 18 years of age.
+                </p>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowAgeGate(false)}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-medium text-white/50 border border-white/10 hover:border-white/20 hover:text-white/70 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleAgeGateConfirm}
+                    className="flex-1 py-2.5 rounded-xl text-sm font-semibold text-white transition"
+                    style={{
+                      background: "linear-gradient(135deg, #9f1239, #be185d)",
+                      boxShadow: "0 4px 16px rgba(159,18,57,0.4)",
+                    }}
+                  >
+                    I'm 18+, Continue
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
