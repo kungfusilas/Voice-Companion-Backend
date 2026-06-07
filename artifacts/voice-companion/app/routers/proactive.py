@@ -7,7 +7,7 @@ router = APIRouter()
 @router.get("/{user_id}/{companion_id}")
 async def get_proactive_messages(user_id: str, companion_id: str):
     """
-    Return all unread proactive messages for a user+companion pair,
+    Return all unread proactive messages (with optional activity payloads),
     then mark them as read.
 
     GET /api/proactive-messages/{user_id}/{companion_id}

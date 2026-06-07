@@ -16,6 +16,7 @@ export interface ChatMessage {
   content: string;
   proactive?: boolean;
   imageUrl?: string;
+  activityData?: ActivityData;
 }
 
 export interface ChatResponse {
@@ -42,6 +43,45 @@ export interface RelationshipStats {
   drift_flag: boolean;
   drift_acknowledged_at: string | null;
 }
+
+// ── Activities ────────────────────────────────────────────────────────────────
+
+export type ActivityType = "word_game" | "trivia" | "would_you_rather";
+
+export interface WordGameActivity {
+  type: "word_game";
+  clue1: string;
+  clue2: string;
+  clue3: string;
+  answer: string;
+  companion_intro: string;
+  companion_id: string;
+  companion_name: string;
+}
+
+export interface TriviaActivity {
+  type: "trivia";
+  question: string;
+  options: { A: string; B: string; C: string; D: string };
+  correct: "A" | "B" | "C" | "D";
+  fun_fact: string;
+  companion_intro: string;
+  companion_id: string;
+  companion_name: string;
+}
+
+export interface WouldYouRatherActivity {
+  type: "would_you_rather";
+  optionA: string;
+  optionB: string;
+  companion_choice: "A" | "B";
+  companion_reason: string;
+  companion_intro: string;
+  companion_id: string;
+  companion_name: string;
+}
+
+export type ActivityData = WordGameActivity | TriviaActivity | WouldYouRatherActivity;
 
 // ── Personas ──────────────────────────────────────────────────────────────────
 
@@ -85,7 +125,6 @@ export interface StreamEvent {
   message_count?: number;
   model_backend?: "claude" | "venice";
   message?: string;
-  // Scoring fields (present on "done")
   connection_score?: number;
   score_delta?: number;
   relationship_type?: string;
@@ -120,32 +159,19 @@ export async function* chatStream(
     buf = lines.pop() ?? "";
     for (const line of lines) {
       if (!line.startsWith("data: ")) continue;
-      try {
-        yield JSON.parse(line.slice(6)) as StreamEvent;
-      } catch {}
+      try { yield JSON.parse(line.slice(6)) as StreamEvent; } catch {}
     }
   }
 }
 
 // ── Memories ──────────────────────────────────────────────────────────────────
 
-export interface Memory {
-  id: string;
-  content: string;
-  created_at: string;
-}
-
+export interface Memory { id: string; content: string; created_at: string; }
 export interface MemoriesResponse {
-  user_id: string;
-  persona_id: string;
-  memories: Memory[];
-  count: number;
+  user_id: string; persona_id: string; memories: Memory[]; count: number;
 }
 
-export async function fetchMemories(
-  user_id: string,
-  persona_id: string,
-): Promise<MemoriesResponse> {
+export async function fetchMemories(user_id: string, persona_id: string): Promise<MemoriesResponse> {
   const params = new URLSearchParams({ user_id, persona_id });
   const res = await fetch(`${BASE}/memories?${params}`);
   if (!res.ok) throw new Error(await res.text());
@@ -159,8 +185,7 @@ export async function transcribeAudio(blob: Blob): Promise<string> {
   form.append("audio", blob, "recording.webm");
   const res = await fetch(`${BASE}/stt`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await res.text());
-  const data = await res.json();
-  return data.transcript as string;
+  return (await res.json()).transcript as string;
 }
 
 // ── TTS ───────────────────────────────────────────────────────────────────────
@@ -181,13 +206,12 @@ export interface ProactiveMessage {
   id: string;
   message: string;
   sent_at: string;
+  activity_type?: string;
+  activity_data?: ActivityData;
 }
 
 export interface ProactiveMessagesResponse {
-  user_id: string;
-  companion_id: string;
-  messages: ProactiveMessage[];
-  count: number;
+  user_id: string; companion_id: string; messages: ProactiveMessage[]; count: number;
 }
 
 export async function fetchProactiveMessages(
@@ -201,23 +225,47 @@ export async function fetchProactiveMessages(
 
 // ── Selfie ────────────────────────────────────────────────────────────────────
 
-export async function requestSelfie(
-  companion_id: string,
-  user_id: string,
-): Promise<string> {
+export async function requestSelfie(companion_id: string, user_id: string): Promise<string> {
   const res = await fetch(`${BASE}/selfie`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ companion_id, user_id }),
   });
   if (!res.ok) throw new Error(await res.text());
-  const blob = await res.blob();
-  return URL.createObjectURL(blob);
+  return URL.createObjectURL(await res.blob());
+}
+
+// ── Activities ────────────────────────────────────────────────────────────────
+
+export async function startActivity(
+  companion_id: string,
+  user_id: string,
+  activity_type: ActivityType,
+): Promise<ActivityData> {
+  const res = await fetch(`${BASE}/activity`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companion_id, user_id, activity_type }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function saveActivityResult(
+  user_id: string,
+  companion_id: string,
+  activity_type: string,
+  result: "won" | "lost" | "completed",
+): Promise<void> {
+  await fetch(`${BASE}/activity/result`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_id, companion_id, activity_type, result }),
+  }).catch(() => {});
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Stable user ID for this browser session */
 export function getOrCreateUserId(): string {
   const key = "vc_user_id";
   let id = localStorage.getItem(key);

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { ActivityCard } from "@/components/ActivityCard";
 import type { ChatMessage } from "@/lib/api";
 
 interface ChatTranscriptProps {
@@ -7,9 +8,18 @@ interface ChatTranscriptProps {
   streamingText: string;
   personaName: string;
   nsfw: boolean;
+  userId: string;
+  onChatContinue?: (message: string) => void;
 }
 
-export function ChatTranscript({ messages, streamingText, personaName, nsfw }: ChatTranscriptProps) {
+export function ChatTranscript({
+  messages,
+  streamingText,
+  personaName,
+  nsfw,
+  userId,
+  onChatContinue,
+}: ChatTranscriptProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,8 +40,8 @@ export function ChatTranscript({ messages, streamingText, personaName, nsfw }: C
             transition={{ duration: 0.2 }}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
+            {/* ── Selfie / image message ── */}
             {msg.imageUrl ? (
-              /* ── Selfie / image message ── */
               <div className={`max-w-[72%] rounded-2xl rounded-bl-sm overflow-hidden border ${accentBg}`}>
                 <div className={`px-3 pt-2.5 pb-1 text-xs font-medium opacity-60 ${accentText}`}>
                   {personaName}
@@ -42,12 +52,22 @@ export function ChatTranscript({ messages, streamingText, personaName, nsfw }: C
                   className="w-full max-w-[250px] block"
                   style={{ maxHeight: 250, objectFit: "cover" }}
                 />
-                <p className={`px-3 py-2 text-xs ${accentText} opacity-70`}>
-                  {msg.content}
-                </p>
+                <p className={`px-3 py-2 text-xs ${accentText} opacity-70`}>{msg.content}</p>
               </div>
+
+            /* ── Activity card ── */
+            ) : msg.activityData ? (
+              <div className="max-w-[88%]">
+                <ActivityCard
+                  activity={msg.activityData}
+                  userId={userId}
+                  nsfw={nsfw}
+                  onChatContinue={onChatContinue}
+                />
+              </div>
+
+            /* ── Regular text message ── */
             ) : (
-              /* ── Regular text message ── */
               <div
                 className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed border ${
                   msg.role === "user"
@@ -64,6 +84,7 @@ export function ChatTranscript({ messages, streamingText, personaName, nsfw }: C
           </motion.div>
         ))}
 
+        {/* Streaming text bubble */}
         {streamingText && (
           <motion.div
             key="streaming"

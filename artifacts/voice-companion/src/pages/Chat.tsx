@@ -16,9 +16,10 @@ import {
   fetchProactiveMessages,
   requestSelfie,
   getRelationshipStats,
+  startActivity,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
-import type { Persona, ChatMessage } from "@/lib/api";
+import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
 
 interface ChatPageProps {
   persona: Persona;
@@ -27,6 +28,12 @@ interface ChatPageProps {
   onBack: () => void;
   onChangeRelType: () => void;
 }
+
+const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = [
+  { type: "word_game",        icon: "🔤", label: "Word Game"        },
+  { type: "trivia",           icon: "🧠", label: "Trivia"           },
+  { type: "would_you_rather", icon: "🤔", label: "Would You Rather" },
+];
 
 export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: ChatPageProps) {
   const rawId = useId();
@@ -37,10 +44,10 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [selfieLoading, setSelfieLoading] = useState(false);
+  const [activityLoading, setActivityLoading] = useState<ActivityType | null>(null);
   const [error, setError] = useState("");
   const [proactiveLabel, setProactiveLabel] = useState<string | null>(null);
 
-  // Connection meter state
   const [connectionScore, setConnectionScore] = useState(50);
   const [stageName, setStageName] = useState("");
   const [stageMin, setStageMin] = useState(0);
@@ -50,7 +57,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
   const busyRef = useRef(false);
   const { playing: speaking, play: playAudio } = useAudioPlayer();
 
-  // Initialize meter from DB on mount
+  // Init meter from DB
   useEffect(() => {
     let cancelled = false;
     getRelationshipStats(userId, persona.id)
@@ -67,17 +74,19 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
     return () => { cancelled = true; };
   }, [persona.id, relType, userId]);
 
-  // Load pending proactive messages on mount
+  // Load proactive messages (including activity payloads)
   useEffect(() => {
     let cancelled = false;
     fetchProactiveMessages(userId, persona.id)
       .then((data) => {
         if (cancelled || !data.messages.length) return;
-        setMessages(data.messages.map((m) => ({
+        const msgs: ChatMessage[] = data.messages.map((m) => ({
           role: "assistant" as const,
           content: m.message,
           proactive: true,
-        })));
+          activityData: m.activity_data ?? undefined,
+        }));
+        setMessages(msgs);
         setProactiveLabel(`💭 ${persona.name} was thinking about you while you were away`);
       })
       .catch(() => {});
@@ -103,17 +112,10 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         } else if (event.type === "done") {
           fullReply = event.full_text ?? fullReply;
           setStreamingText("");
+          const newMsgs: ChatMessage[] = [{ role: "assistant", content: fullReply }];
+          if (event.stage_up_text) newMsgs.push({ role: "assistant", content: event.stage_up_text });
+          setMessages((prev) => [...prev, ...newMsgs]);
 
-          const newMessages: ChatMessage[] = [{ role: "assistant", content: fullReply }];
-
-          // Stage-up reaction — insert as extra companion message
-          if (event.stage_up_text) {
-            newMessages.push({ role: "assistant", content: event.stage_up_text });
-          }
-
-          setMessages((prev) => [...prev, ...newMessages]);
-
-          // Update meter
           if (event.connection_score !== undefined) {
             setConnectionScore(event.connection_score);
             setScoreDelta(event.score_delta);
@@ -123,10 +125,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
           }
 
           if (ttsEnabled && fullReply) {
-            try {
-              const blob = await speakText(fullReply, persona.id);
-              await playAudio(blob);
-            } catch {}
+            try { await playAudio(await speakText(fullReply, persona.id)); } catch {}
           }
         } else if (event.type === "error") {
           setError(event.message ?? "Unknown error");
@@ -141,6 +140,24 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
       setBusy(false);
     }
   }, [sessionId, persona.id, userId, ttsEnabled, playAudio]);
+
+  const handleActivity = useCallback(async (type: ActivityType) => {
+    if (activityLoading || busy) return;
+    setActivityLoading(type);
+    setError("");
+    try {
+      const data = await startActivity(persona.id, userId, type);
+      setMessages((prev) => [...prev, {
+        role: "assistant",
+        content: data.companion_intro,
+        activityData: data,
+      }]);
+    } catch {
+      setError("Couldn't start activity — try again");
+    } finally {
+      setActivityLoading(null);
+    }
+  }, [persona.id, userId, activityLoading, busy]);
 
   const handleSelfie = useCallback(async () => {
     if (selfieLoading || busy) return;
@@ -171,16 +188,15 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
   }, [sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const { state: recorderState, start, stop, reset: resetRecorder } = useVoiceRecorder(handleAudio);
-
   const isBusy = busy || recorderState === "processing";
 
   const typeColors: Record<string, string> = {
-    romance: "border-rose-800/40 text-rose-400 hover:bg-rose-900/30",
-    mentor: "border-violet-800/40 text-violet-400 hover:bg-violet-900/30",
-    friendship: "border-teal-800/40 text-teal-400 hover:bg-teal-900/30",
+    romance:      "border-rose-800/40 text-rose-400 hover:bg-rose-900/30",
+    mentor:       "border-violet-800/40 text-violet-400 hover:bg-violet-900/30",
+    friendship:   "border-teal-800/40 text-teal-400 hover:bg-teal-900/30",
     professional: "border-sky-800/40 text-sky-400 hover:bg-sky-900/30",
   };
-  const cameraColor = persona.nsfw_mode
+  const accentColor = persona.nsfw_mode
     ? "border-red-800/40 text-red-400 hover:bg-red-900/30"
     : (typeColors[relType] ?? typeColors.romance);
 
@@ -274,6 +290,8 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         streamingText={streamingText}
         personaName={persona.name}
         nsfw={persona.nsfw_mode}
+        userId={userId}
+        onChatContinue={sendMessage}
       />
 
       {/* Error */}
@@ -281,25 +299,48 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
         <p className="text-center text-xs text-red-400 px-4 pb-1 shrink-0">{error}</p>
       )}
 
-      {/* Controls */}
+      {/* Activity toolbar */}
+      <div className="flex items-center gap-2 px-4 pb-1.5 shrink-0">
+        <span className="text-white/20 text-[9px] uppercase tracking-widest mr-0.5">Play</span>
+        {ACTIVITY_BUTTONS.map(({ type, icon, label }) => (
+          <motion.button
+            key={type}
+            onClick={() => handleActivity(type)}
+            disabled={isBusy || !!activityLoading}
+            whileTap={{ scale: 0.94 }}
+            title={label}
+            className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border transition disabled:opacity-40 ${accentColor}`}
+            style={{ background: "rgba(255,255,255,0.03)" }}
+          >
+            {activityLoading === type ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <span className="text-xs">{icon}</span>
+            )}
+            <span className="hidden xs:inline">{label}</span>
+          </motion.button>
+        ))}
+      </div>
+
+      {/* Input row */}
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
           <TextInput onSend={sendMessage} disabled={isBusy} nsfw={persona.nsfw_mode} />
         </div>
 
+        {/* Selfie button */}
         <motion.button
           onClick={handleSelfie}
           disabled={isBusy || selfieLoading}
           whileTap={{ scale: 0.93 }}
           title="Ask for a selfie 📸"
-          className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${cameraColor}`}
+          className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${accentColor}`}
           style={{ background: "rgba(255,255,255,0.04)" }}
         >
-          {selfieLoading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Camera className="w-5 h-5" />
-          )}
+          {selfieLoading
+            ? <Loader2 className="w-5 h-5 animate-spin" />
+            : <Camera className="w-5 h-5" />
+          }
         </motion.button>
 
         <PushToTalkButton
