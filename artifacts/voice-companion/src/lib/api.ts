@@ -31,6 +31,7 @@ export async function createPersona(data: {
   relationship_type: string;
   personality_traits: string[];
   backstory?: string;
+  custom_relationship?: string;
   voice_id?: string | null;
   nsfw_mode?: boolean;
 }): Promise<Persona> {
