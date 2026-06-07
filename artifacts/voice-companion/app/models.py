@@ -12,8 +12,13 @@ class Persona(BaseModel):
     custom_relationship: str = ""
     voice_id: str | None = None
     nsfw_mode: bool = False  # True = route to Venice instead of Claude
+    system_prompt_override: str | None = None  # Pre-built companions use this
 
     def build_system_prompt(self) -> str:
+        # Pre-built companions supply their own rich system prompt
+        if self.system_prompt_override:
+            return self.system_prompt_override
+
         relationship = (
             self.custom_relationship
             if self.relationship_type == "custom"
