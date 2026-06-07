@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { AriaAvatar } from "@/components/avatars/AriaAvatar";
-import { LunaAvatar } from "@/components/avatars/LunaAvatar";
+import { AevaAvatar } from "@/components/avatars/AevaAvatar";
 import { EmberAvatar } from "@/components/avatars/EmberAvatar";
 import { KaiAvatar } from "@/components/avatars/KaiAvatar";
 import type { Persona } from "@/lib/api";
@@ -29,14 +29,14 @@ const COMPANIONS: CompanionConfig[] = [
     AvatarComponent: AriaAvatar,
   },
   {
-    id: "companion-luna",
-    name: "Luna",
+    id: "companion-aeva",
+    name: "Aeva",
     tagline: "Mysterious & poetic",
     traits: ["deep", "introspective", "gentle"],
     color: "violet",
     glow: "rgba(167,139,250,0.25)",
     border: "rgba(167,139,250,0.3)",
-    AvatarComponent: LunaAvatar,
+    AvatarComponent: AevaAvatar,
   },
   {
     id: "companion-ember",
