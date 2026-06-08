@@ -23,6 +23,15 @@ async function apiFetch(input: RequestInfo, init: RequestInit = {}): Promise<Res
   });
 }
 
+// Exported for Hub pages that need authenticated fetch
+export { apiFetch };
+
+export async function apiFetchJSON<T>(input: RequestInfo, init: RequestInit = {}): Promise<T> {
+  const res = await apiFetch(input, init);
+  if (!res.ok) throw new Error(`API error ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Persona {

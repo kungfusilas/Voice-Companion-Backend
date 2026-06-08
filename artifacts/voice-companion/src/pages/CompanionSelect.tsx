@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Sparkles, LogOut } from "lucide-react";
+import { Sparkles, LogOut, LayoutGrid } from "lucide-react";
 import type { Persona } from "@/lib/api";
 
 interface CompanionConfig {
@@ -55,10 +55,11 @@ interface CompanionSelectProps {
   onSelect: (persona: Persona) => void;
   onSignOut?: () => void;
   onUpgrade?: () => void;
+  onHub?: () => void;
   subscriptionTier?: string;
 }
 
-export function CompanionSelect({ onSelect, onSignOut, onUpgrade, subscriptionTier }: CompanionSelectProps) {
+export function CompanionSelect({ onSelect, onSignOut, onUpgrade, onHub, subscriptionTier }: CompanionSelectProps) {
   const handlePick = (companion: CompanionConfig) => {
     const persona: Persona = {
       id: companion.id,
@@ -90,6 +91,16 @@ export function CompanionSelect({ onSelect, onSignOut, onUpgrade, subscriptionTi
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {onHub && (
+              <button
+                onClick={onHub}
+                title="BondAI Features"
+                className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border border-violet-500/30 text-violet-400/80 hover:text-violet-300 hover:border-violet-400/50 transition-colors"
+              >
+                <LayoutGrid className="w-3 h-3" />
+                Features
+              </button>
+            )}
             {onUpgrade && (
               <button
                 onClick={onUpgrade}

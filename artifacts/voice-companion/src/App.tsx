@@ -5,12 +5,13 @@ import { RelationshipSelect } from "@/pages/RelationshipSelect";
 import { ChatPage } from "@/pages/Chat";
 import { AuthPage } from "@/pages/Auth";
 import { PricingPage } from "@/pages/Pricing";
+import { Hub } from "@/pages/Hub";
 import { getRelationshipStats, getSubscriptionStatus } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "auth" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat" | "pricing";
+type Screen = "loading" | "auth" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat" | "pricing" | "hub";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -123,6 +124,8 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const handleOpenHub = () => setScreen("hub");
+
   // ── Missing env-var guard (dev only) ─────────────────────────────────────
   if (!SUPABASE_CONFIGURED) {
     return (
@@ -148,6 +151,17 @@ export default function App() {
   // ── Auth screen (full-page, no card wrapper) ──────────────────────────────
   if (screen === "auth") {
     return <AuthPage onAuth={() => setScreen("companion-select")} />;
+  }
+
+  // ── Hub (full-page, no card wrapper) ─────────────────────────────────────
+  if (screen === "hub") {
+    return (
+      <Hub
+        onBack={() => setScreen("companion-select")}
+        userId={userId ?? ""}
+        currentPersona={persona}
+      />
+    );
   }
 
   // ── Initial load spinner ──────────────────────────────────────────────────
@@ -190,6 +204,7 @@ export default function App() {
               onSelect={handleCompanionSelect}
               onSignOut={handleSignOut}
               onUpgrade={() => setScreen("pricing")}
+              onHub={handleOpenHub}
               subscriptionTier={subscriptionTier}
             />
           )}
