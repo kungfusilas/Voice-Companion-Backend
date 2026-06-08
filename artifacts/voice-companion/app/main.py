@@ -20,6 +20,7 @@ from app.routers import romantic as romantic_router
 from app.routers import daily_checkin as daily_checkin_router
 from app.routers import waitlist as waitlist_router
 from app.routers import payments as payments_router
+from app.routers import roleplay as roleplay_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -100,6 +101,7 @@ app.include_router(goals_router.router,        prefix="/api/goals",             
 app.include_router(bond_score_router.router,   prefix="/api/bond-score",         tags=["bond-score"])
 app.include_router(hearts_router.router,       prefix="/api/hearts",             tags=["hearts"])
 app.include_router(future_memory_router.router, prefix="/api/future-memory",     tags=["future-memory"])
+app.include_router(roleplay_router.router,      prefix="/api/roleplay",           tags=["roleplay"])
 
 
 @app.get("/api/healthz")
