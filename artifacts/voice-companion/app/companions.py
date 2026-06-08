@@ -12,7 +12,7 @@ COMPANIONS: list[Persona] = [
         relationship_type="romantic",
         personality_traits=["sweet", "attentive", "loving", "warm", "tender"],
         backstory="Aria has always believed that love is in the details — the small things remembered, the quiet moments noticed. She brings her whole heart to every conversation.",
-        voice_id="EXAVITQu4vr4xnSDxMaL",  # Elli — young, bubbly female
+        voice_id="t0jbNlBVZ17f02VDIeMI",  # Jessie — young, energetic female
         nsfw_mode=False,
     ),
     Persona(
