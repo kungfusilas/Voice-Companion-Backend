@@ -11,12 +11,26 @@ interface PricingPageProps {
 
 const PLANS = [
   {
+    key: "basic",
+    name: "Basic",
+    price: "$12.99",
+    period: "/mo",
+    description: "Perfect for getting started",
+    features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Daily check-ins"],
+    accent: "violet",
+    gradient: "from-violet-600/20 to-violet-900/10",
+    border: "border-violet-500/30",
+    buttonBg: "linear-gradient(135deg, #7c3aed, #6d28d9)",
+    glow: "rgba(124,58,237,0.3)",
+    highlight: false,
+  },
+  {
     key: "premium",
     name: "Premium",
     price: "$39.99",
     period: "/mo",
-    description: "The full BondAI experience",
-    features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Romantic Mode 🌙", "Companion selfies 📸", "Activity games", "Priority responses"],
+    description: "Deeper connections, more features",
+    features: ["Everything in Basic", "Romantic Mode 🌙", "Companion selfies 📸", "Activity games", "Priority responses"],
     accent: "rose",
     gradient: "from-rose-600/20 to-rose-900/10",
     border: "border-rose-500/30",
@@ -24,10 +38,26 @@ const PLANS = [
     glow: "rgba(225,29,72,0.3)",
     highlight: true,
   },
+  {
+    key: "power",
+    name: "Power",
+    price: "$89.99",
+    period: "/mo",
+    description: "The full experience, unlimited",
+    features: ["Everything in Premium", "Unlimited messages", "Advanced memory", "Earliest new features", "Power user badge"],
+    accent: "amber",
+    gradient: "from-amber-600/20 to-amber-900/10",
+    border: "border-amber-500/30",
+    buttonBg: "linear-gradient(135deg, #d97706, #b45309)",
+    glow: "rgba(217,119,6,0.3)",
+    highlight: false,
+  },
 ] as const;
 
 const TIER_COLORS: Record<string, string> = {
+  basic:   "text-violet-400",
   premium: "text-rose-400",
+  power:   "text-amber-400",
   free:    "text-white/40",
 };
 
