@@ -22,6 +22,7 @@ from app.routers import waitlist as waitlist_router
 from app.routers import payments as payments_router
 from app.routers import roleplay as roleplay_router
 from app.routers import onboarding as onboarding_router
+from app.routers import reports as reports_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -58,6 +59,15 @@ async def lifespan(app: FastAPI):
         hour=9,
         minute=0,
         id="daily_morning_checkin",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        reports_router.run_weekly_reports_for_all_users,
+        "cron",
+        day_of_week="mon",
+        hour=7,
+        minute=0,
+        id="weekly_insight_reports",
         replace_existing=True,
     )
     scheduler.start()
@@ -104,6 +114,7 @@ app.include_router(hearts_router.router,       prefix="/api/hearts",            
 app.include_router(future_memory_router.router, prefix="/api/future-memory",     tags=["future-memory"])
 app.include_router(roleplay_router.router,      prefix="/api/roleplay",           tags=["roleplay"])
 app.include_router(onboarding_router.router,   prefix="/api/onboarding",         tags=["onboarding"])
+app.include_router(reports_router.router,      prefix="/api/reports/weekly",      tags=["reports"])
 
 
 @app.get("/api/healthz")

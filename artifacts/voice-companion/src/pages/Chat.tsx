@@ -725,6 +725,7 @@ export function ChatPage({
           onStop={stop}
           disabled={busy || showUpgradeCard}
           nsfw={persona.nsfw_mode}
+          isPremium={isPremium}
         />
       </div>
 

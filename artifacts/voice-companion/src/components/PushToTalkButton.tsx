@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Mic, MicOff, Loader2 } from "lucide-react";
+import { Mic, MicOff, Loader2, Lock } from "lucide-react";
 import type { RecorderState } from "@/hooks/useVoiceRecorder";
 
 interface PushToTalkButtonProps {
@@ -8,9 +8,10 @@ interface PushToTalkButtonProps {
   onStop: () => void;
   disabled?: boolean;
   nsfw: boolean;
+  isPremium?: boolean;
 }
 
-export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw }: PushToTalkButtonProps) {
+export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPremium = true }: PushToTalkButtonProps) {
   const isRecording = state === "recording";
   const isProcessing = state === "processing";
 
@@ -21,6 +22,30 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw }: Pus
   const idleColor = nsfw
     ? "from-red-900/60 to-red-800/60 shadow-red-900/30"
     : "from-violet-900/60 to-violet-800/60 shadow-violet-900/30";
+
+  if (!isPremium) {
+    return (
+      <div className="flex flex-col items-center gap-2">
+        <div
+          className="relative w-16 h-16 rounded-full flex items-center justify-center cursor-not-allowed select-none"
+          style={{
+            background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.08)",
+          }}
+          title="Two-Way Voice requires Premium"
+        >
+          <Mic className="w-5 h-5 text-white/20" />
+          <div
+            className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center"
+            style={{ background: "rgba(139,92,246,0.85)", border: "1px solid rgba(139,92,246,0.4)" }}
+          >
+            <Lock className="w-2.5 h-2.5 text-white" />
+          </div>
+        </div>
+        <span className="text-[10px] font-medium text-violet-400/60">Premium</span>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col items-center gap-2">
