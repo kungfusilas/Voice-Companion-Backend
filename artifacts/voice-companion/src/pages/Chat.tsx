@@ -39,7 +39,7 @@ const ONBOARDING_QUESTIONS = [
   "Is there anything you'd want me to always remember about you?",
 ];
 
-const ONBOARDING_OPENER = `Hey! Before we really get into it, I'd love to ask you a few quick things — just to get to know you a little. Ready?`;
+const ONBOARDING_OPENER = `Hey! Before we get into it, I want to say something first. Most people edit themselves — even with their doctor. Not because they're bad people, just because it feels awkward or they worry about being judged. I get it. But here, I actually need the real you. The unfiltered version. I can only be genuinely useful to you if you give me that. So — no pressure, but honest answers matter here. Okay. Let's do this. What's your name?`;
 
 function getOnboardingContext(step: number): string {
   if (step >= ONBOARDING_QUESTIONS.length) return "";
@@ -111,7 +111,8 @@ export function ChatPage({
   const [waitlistLoading, setWaitlistLoading] = useState(false);
 
   // Guest onboarding state — refs to avoid stale closure issues
-  const guestMsgCountRef = useRef(0);
+  // Start at 1 because Q1 ("What's your name?") is already in the opener message
+  const guestMsgCountRef = useRef(isGuest ? 1 : 0);
   const wowDoneRef = useRef(false);
   const [showUpgradeCard, setShowUpgradeCard] = useState(false);
   const [wowGenerating, setWowGenerating] = useState(false);
