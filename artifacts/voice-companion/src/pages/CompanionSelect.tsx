@@ -16,8 +16,8 @@ const COMPANIONS: CompanionConfig[] = [
   {
     id: "companion-aria",
     name: "Aria",
-    tagline: "Shy & a little giggly",
-    traits: ["shy", "awkward", "giggly"],
+    tagline: "Bubbly & a little extra",
+    traits: ["bubbly", "energetic", "fun"],
     glow: "rgba(244,114,182,0.25)",
     border: "rgba(244,114,182,0.3)",
     avatar: "/companion/avatars/aria.jpg",
