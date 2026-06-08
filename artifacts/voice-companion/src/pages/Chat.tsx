@@ -39,10 +39,15 @@ const ONBOARDING_QUESTIONS = [
   "Is there anything you'd want me to always remember about you?",
 ];
 
+const ONBOARDING_OPENER = `Hey! Before we really get into it, I'd love to ask you a few quick things — just to get to know you a little. Ready?`;
+
 function getOnboardingContext(step: number): string {
   if (step >= ONBOARDING_QUESTIONS.length) return "";
   const q = ONBOARDING_QUESTIONS[step];
-  return `[GUIDE Q${step + 1}/10]: After your warm, genuine response to what they just shared, naturally ask: "${q}" — weave it in as real curiosity, not a questionnaire item.`;
+  if (step === 0) {
+    return `[ONBOARDING Q1/10 — KEEP IT SHORT]: The user just responded to your opener. Give ONE brief warm sentence of acknowledgment, then immediately ask: "${q}" Nothing more — no reflection, no depth, no poetry. Just the ack and the question.`;
+  }
+  return `[ONBOARDING Q${step + 1}/10 — KEEP IT SHORT]: Acknowledge what they just said in ONE sentence only (e.g. "Nice to meet you, [name]." / "Got it." / "That makes sense." / "I love that.") then immediately ask: "${q}" Max 2 sentences total. Save all depth and reflection for after onboarding is complete.`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -137,6 +142,15 @@ export function ChatPage({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [persona.id, relType, userId, isGuest]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Guest opener — pre-load a single warm intro message before any user input
+  useEffect(() => {
+    if (!isGuest) return;
+    setMessages([{ role: "assistant", content: ONBOARDING_OPENER }]);
+    speakText(ONBOARDING_OPENER, persona.id)
+      .then((url) => playAudio(url))
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load proactive messages (skip for guests)
   useEffect(() => {
