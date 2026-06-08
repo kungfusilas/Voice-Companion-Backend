@@ -33,8 +33,22 @@ export default function App() {
 
   // ── Auth session management ──────────────────────────────────────────────
   useEffect(() => {
-    // Check for checkout result URL params (Stripe redirect back)
     const params = new URLSearchParams(window.location.search);
+
+    // Detect PKCE OAuth callback — Supabase client (detectSessionInUrl: true)
+    // auto-exchanges the code asynchronously. If we call getSession() before
+    // the exchange finishes it returns null, which sends the user to auth.
+    // Solution: if a code is present, stay on "loading" and let
+    // onAuthStateChange navigate us forward once the exchange completes.
+    const hasOAuthCode = params.has("code");
+
+    // Clean up OAuth params from the URL immediately — the Supabase client
+    // already read them during initialization (before this effect runs).
+    if (hasOAuthCode) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    // Check for checkout result URL params (Stripe redirect back)
     if (params.get("checkout") === "success") {
       const plan = params.get("plan");
       setCheckoutMessage(plan ? `🎉 You're on ${plan.charAt(0).toUpperCase() + plan.slice(1)}!` : "🎉 Subscription activated!");
@@ -44,6 +58,10 @@ export default function App() {
     }
 
     supabase.auth.getSession().then(({ data: { session } }) => {
+      if (hasOAuthCode) {
+        // PKCE exchange still in flight — onAuthStateChange will navigate
+        return;
+      }
       setSession(session);
       setScreen(session ? "companion-select" : "auth");
     });
