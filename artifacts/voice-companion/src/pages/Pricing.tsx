@@ -44,7 +44,7 @@ const PLANS = [
     price: "$89.99",
     period: "/mo",
     description: "The full experience, unlimited",
-    features: ["Everything in Premium", "Unlimited messages", "Advanced memory", "Earliest new features", "Power user badge"],
+    features: ["Everything in Premium", "Unlimited messages", "Advanced memory", "Personality Map 🧠", "Earliest new features", "Power user badge"],
     accent: "amber",
     gradient: "from-amber-600/20 to-amber-900/10",
     border: "border-amber-500/30",

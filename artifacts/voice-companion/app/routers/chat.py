@@ -10,6 +10,7 @@ from app import store, claude, venice_client
 from app import memory as mem_store
 from app import memory_extractor
 from app import bond_analyzer
+from app import personality_extractor
 from app import future_memory_extractor
 from app import conversation_store
 from app import relationship
@@ -333,6 +334,14 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
                         asyncio.create_task(
                             conversation_store.save_exchange(
                                 user_id, persona.id, request.session_id, user_message, full_text
+                            )
+                        )
+
+                    # ── Personality mapping (power tier only) ──────────────
+                    if tier in ("power", "elite"):
+                        asyncio.create_task(
+                            personality_extractor.extract_and_update(
+                                user_id, user_message, full_text
                             )
                         )
 
