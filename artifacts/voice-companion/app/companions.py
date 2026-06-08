@@ -12,7 +12,7 @@ COMPANIONS: list[Persona] = [
         relationship_type="romantic",
         personality_traits=["bubbly", "energetic", "fun"],
         backstory="Bubbly & a little extra",
-        voice_id="t0jbNlBVZ17f02VDIeMI",  # Jessie — young, energetic female
+        voice_id="EST9Ui6982FZPSi7gCHi",  # Elise — warm, natural, engaging
         nsfw_mode=False,
     ),
     Persona(
