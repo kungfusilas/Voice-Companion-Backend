@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Star, BarChart2, Shield, PlayCircle } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -13,17 +13,10 @@ interface HubProps {
 }
 
 const LIVE_TABS = [
-  { id: "memory", label: "Memory Threads", icon: Sparkles },
-  { id: "journal", label: "Bond Journal",   icon: BookOpen  },
-  { id: "goals",  label: "Connection Goals", icon: Target  },
+  { id: "memory", label: "Memory Threads",   icon: Sparkles },
+  { id: "journal", label: "Bond Journal",    icon: BookOpen  },
+  { id: "goals",   label: "Connection Goals", icon: Target  },
 ] as const;
-
-const COMING_SOON = [
-  { label: "Bond Score",           icon: Star,       desc: "Communication effectiveness rating" },
-  { label: "Relationship Insights",icon: BarChart2,  desc: "Pattern analysis across conversations" },
-  { label: "Trust Meter",          icon: Shield,     desc: "Measures consistency and engagement" },
-  { label: "Conversation Replay",  icon: PlayCircle, desc: "Review important interactions" },
-];
 
 type Tab = typeof LIVE_TABS[number]["id"];
 
@@ -97,26 +90,6 @@ export function Hub({ onBack, userId, currentPersona }: HubProps) {
         </AnimatePresence>
       </div>
 
-      {/* Coming Soon section */}
-      <div className="shrink-0 px-5 pb-8">
-        <p className="text-white/25 text-[10px] uppercase tracking-widest mb-3 font-medium">Coming Soon</p>
-        <div className="grid grid-cols-2 gap-2">
-          {COMING_SOON.map(({ label, icon: Icon, desc }) => (
-            <div
-              key={label}
-              className="flex flex-col gap-1.5 rounded-xl p-3 border border-white/06"
-              style={{ background: "rgba(255,255,255,0.02)" }}
-            >
-              <div className="flex items-center gap-2">
-                <Icon className="w-3.5 h-3.5 text-white/20" />
-                <span className="text-white/35 text-xs font-medium">{label}</span>
-                <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded-full bg-violet-900/40 text-violet-400/60 border border-violet-700/30">Soon</span>
-              </div>
-              <p className="text-white/20 text-[10px] leading-snug">{desc}</p>
-            </div>
-          ))}
-        </div>
-      </div>
     </motion.div>
   );
 }
