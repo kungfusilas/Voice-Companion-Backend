@@ -20,11 +20,18 @@ _SHOULD_REMEMBER_PROMPT = (
     "Does this conversation exchange contain anything worth a companion remembering long-term? "
     "Look for: facts about the user (name, job, family, pets, location), "
     "preferences (likes/dislikes, hobbies), emotional moments (confessions, vulnerable shares, breakthroughs), "
-    "relationship milestones, or recurring themes. "
-    'If yes, return JSON: {"should_save": true, "content": "concise memory in 1-2 sentences written from '
-    'companion POV e.g. The user told me their dog is named Biscuit", '
-    '"type": "fact|emotion|preference|event|relationship", "importance": 1-10}. '
-    'If nothing worth saving, return {"should_save": false}. '
+    "relationship milestones, or recurring themes.\n\n"
+    "If yes, return JSON:\n"
+    '{"should_save": true, '
+    '"content": "concise memory in 1-2 sentences written from companion POV, '
+    'e.g. The user told me their dog is named Biscuit", '
+    '"type": "fact|emotion|preference|event|relationship", '
+    '"importance": 1-10, '
+    '"person_mentioned": "first name of person this memory is about, or null if about the user themselves", '
+    '"emotional_theme": "one of: joy|grief|growth|conflict|love|pride|fear|hope|loneliness|gratitude — or null", '
+    '"life_event": true or false (true only for significant milestones: births, deaths, marriages, divorces, moves, diagnoses, major career changes), '
+    '"topic": "one of: relationship|career|family|health|personal_growth|friendship|loss|identity|spirituality — or null"}\n\n'
+    'If nothing worth saving, return {"should_save": false}.\n'
     "Return ONLY valid JSON, no other text."
 )
 
@@ -91,11 +98,24 @@ async def save_memory(
     content: str,
     memory_type: str = "fact",
     importance: int = 5,
+    # Legacy Mode tagging fields — stored silently, power future features
+    person_mentioned: str | None = None,
+    emotional_theme: str | None = None,
+    life_event: bool = False,
+    topic: str | None = None,
 ) -> dict:
     """
     Embed content and POST directly to /rest/v1/memories via httpx.
     Using raw httpx (not supabase-py) gives full transparency and avoids
     any client-side caching layers. Returns {} silently on any error.
+
+    Legacy tagging fields (person_mentioned, emotional_theme, life_event, topic)
+    are stored alongside the embedding to power Legacy Mode when it unlocks.
+    Run these SQL migrations to enable them:
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS person_mentioned text;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS emotional_theme   text;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS life_event        boolean DEFAULT false;
+      ALTER TABLE memories ADD COLUMN IF NOT EXISTS topic             text;
     """
     try:
         embedding = await embed(content)
@@ -104,6 +124,24 @@ async def save_memory(
 
         supabase_url = os.environ.get("SUPABASE_URL", "")
         service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+
+        payload: dict = {
+            "user_id": user_id,
+            "companion_id": companion_id,
+            "content": content,
+            "memory_type": memory_type,
+            "embedding": vec_str,
+            "importance": max(1, min(10, int(importance))),
+        }
+        # Add legacy tags only when present — columns may not exist yet in older schemas
+        if person_mentioned:
+            payload["person_mentioned"] = person_mentioned
+        if emotional_theme:
+            payload["emotional_theme"] = emotional_theme
+        if life_event:
+            payload["life_event"] = True
+        if topic:
+            payload["topic"] = topic
 
         async with httpx.AsyncClient(timeout=15.0) as http:
             resp = await http.post(
@@ -114,14 +152,7 @@ async def save_memory(
                     "Content-Type": "application/json",
                     "Prefer": "return=representation",
                 },
-                json={
-                    "user_id": user_id,
-                    "companion_id": companion_id,
-                    "content": content,
-                    "memory_type": memory_type,
-                    "embedding": vec_str,
-                    "importance": max(1, min(10, int(importance))),
-                },
+                json=payload,
             )
             if resp.status_code in (200, 201):
                 rows = resp.json()

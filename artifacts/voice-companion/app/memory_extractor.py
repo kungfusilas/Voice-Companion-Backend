@@ -2,7 +2,9 @@
 Memory extraction and prompt formatting.
 
 extract_and_save  — fire-and-forget post-chat: Haiku decides what to save,
-                    memory.save_memory embeds and stores it in pgvector.
+                    memory.save_memory embeds and stores it in pgvector,
+                    plus legacy tagging fields (person_mentioned, emotional_theme,
+                    life_event, topic) for future Legacy Mode features.
 format_memories   — formats retrieved vector memories for system prompt injection.
 """
 from app import memory
@@ -16,7 +18,7 @@ async def extract_and_save(
 ) -> None:
     """
     Fire-and-forget: ask Haiku whether this exchange is worth remembering.
-    If yes, embed the content and persist to pgvector.
+    If yes, embed the content with legacy tags and persist to pgvector.
     Errors are silently swallowed — never blocks or slows chat.
     """
     try:
@@ -28,6 +30,11 @@ async def extract_and_save(
                 content=result["content"],
                 memory_type=result.get("type", "fact"),
                 importance=int(result.get("importance", 5)),
+                # Legacy Mode tags — extracted silently by Claude alongside the memory
+                person_mentioned=result.get("person_mentioned") or None,
+                emotional_theme=result.get("emotional_theme") or None,
+                life_event=bool(result.get("life_event", False)),
+                topic=result.get("topic") or None,
             )
     except Exception:
         pass

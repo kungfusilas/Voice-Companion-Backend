@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
 import { BondScore } from "./BondScore";
 import { FutureMemory } from "./FutureMemory";
+import { LegacyModal } from "@/components/LegacyModal";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -16,11 +17,11 @@ interface HubProps {
 }
 
 const LIVE_TABS = [
-  { id: "bond-score",     label: "Bond Score",      icon: Activity       },
-  { id: "future-memory",  label: "Future Memory",   icon: CalendarHeart  },
-  { id: "memory",         label: "Memory Threads",  icon: Sparkles       },
-  { id: "journal",        label: "Bond Journal",    icon: BookOpen       },
-  { id: "goals",          label: "Connection Goals", icon: Target        },
+  { id: "bond-score",    label: "Bond Score",       icon: Activity      },
+  { id: "future-memory", label: "Future Memory",    icon: CalendarHeart },
+  { id: "memory",        label: "Memory Threads",   icon: Sparkles      },
+  { id: "journal",       label: "Bond Journal",     icon: BookOpen      },
+  { id: "goals",         label: "Connection Goals", icon: Target        },
 ] as const;
 
 type Tab = typeof LIVE_TABS[number]["id"];
@@ -31,6 +32,7 @@ const BG: React.CSSProperties = {
 
 export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
   const [tab, setTab] = useState<Tab>("bond-score");
+  const [legacyOpen, setLegacyOpen] = useState(false);
 
   return (
     <motion.div
@@ -71,6 +73,20 @@ export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
               {label}
             </button>
           ))}
+
+          {/* Legacy Mode — locked, premium tab */}
+          <button
+            onClick={() => setLegacyOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all shrink-0 border"
+            style={{
+              color: "rgba(251,191,36,0.55)",
+              borderColor: "rgba(251,191,36,0.18)",
+              background: "rgba(251,191,36,0.04)",
+            }}
+          >
+            <Lock className="w-3 h-3" style={{ color: "rgba(251,191,36,0.5)" }} />
+            Legacy Mode
+          </button>
         </div>
       </div>
 
@@ -80,6 +96,11 @@ export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
           {tab === "bond-score" && (
             <motion.div key="bond-score" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <BondScore />
+            </motion.div>
+          )}
+          {tab === "future-memory" && (
+            <motion.div key="future-memory" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <FutureMemory onStartChat={onStartChat} />
             </motion.div>
           )}
           {tab === "memory" && (
@@ -92,11 +113,6 @@ export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
               <BondJournal userId={userId} currentPersona={currentPersona} />
             </motion.div>
           )}
-          {tab === "future-memory" && (
-            <motion.div key="future-memory" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
-              <FutureMemory onStartChat={onStartChat} />
-            </motion.div>
-          )}
           {tab === "goals" && (
             <motion.div key="goals" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <ConnectionGoals userId={userId} />
@@ -105,6 +121,8 @@ export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
         </AnimatePresence>
       </div>
 
+      {/* Legacy Mode modal */}
+      <LegacyModal open={legacyOpen} onClose={() => setLegacyOpen(false)} />
     </motion.div>
   );
 }

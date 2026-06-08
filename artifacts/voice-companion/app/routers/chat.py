@@ -9,6 +9,7 @@ from app import memory as mem_store
 from app import memory_extractor
 from app import bond_analyzer
 from app import future_memory_extractor
+from app import conversation_store
 from app import relationship
 from app import scoring
 from app.companions import ROMANTIC_MODE_PROMPTS
@@ -245,6 +246,11 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)
                     )
                     asyncio.create_task(
                         future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
+                    )
+                    asyncio.create_task(
+                        conversation_store.save_exchange(
+                            user_id, persona.id, request.session_id, user_message, full_text
+                        )
                     )
                     asyncio.create_task(
                         relationship.increment_message_count(user_id, persona.id)
