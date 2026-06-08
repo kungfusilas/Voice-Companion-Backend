@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -9,6 +9,7 @@ import { FutureMemory } from "./FutureMemory";
 import { RoleplaySimulator } from "./RoleplaySimulator";
 import { WeeklyInsight } from "./WeeklyInsight";
 import { PersonalityMap } from "./PersonalityMap";
+import { ConversationDebrief } from "./ConversationDebrief";
 import { LegacyModal } from "@/components/LegacyModal";
 import type { Persona } from "@/lib/api";
 
@@ -36,6 +37,7 @@ const PREMIUM_TABS = [
 
 const POWER_TABS = [
   { id: "your-profile",    label: "Your Profile",        icon: Brain         },
+  { id: "session-debrief", label: "Session Debrief",     icon: MessageSquare },
 ] as const;
 
 type BaseTab    = typeof BASE_TABS[number]["id"];
@@ -279,6 +281,11 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
           {tab === "your-profile" && isPowerHub && (
             <motion.div key="your-profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <PersonalityMap />
+            </motion.div>
+          )}
+          {tab === "session-debrief" && isPowerHub && (
+            <motion.div key="session-debrief" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <ConversationDebrief />
             </motion.div>
           )}
         </AnimatePresence>

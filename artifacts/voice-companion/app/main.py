@@ -22,6 +22,7 @@ from app.routers import waitlist as waitlist_router
 from app.routers import payments as payments_router
 from app.routers import roleplay as roleplay_router
 from app.routers import personality as personality_router
+from app.routers import analysis as analysis_router
 from app.routers import onboarding as onboarding_router
 from app.routers import reports as reports_router
 from app import store
@@ -115,6 +116,7 @@ app.include_router(hearts_router.router,       prefix="/api/hearts",            
 app.include_router(future_memory_router.router, prefix="/api/future-memory",     tags=["future-memory"])
 app.include_router(roleplay_router.router,      prefix="/api/roleplay",           tags=["roleplay"])
 app.include_router(personality_router.router,   prefix="/api/personality",        tags=["personality"])
+app.include_router(analysis_router.router,     prefix="/api/analysis",           tags=["analysis"])
 app.include_router(onboarding_router.router,   prefix="/api/onboarding",         tags=["onboarding"])
 app.include_router(reports_router.router,      prefix="/api/reports/weekly",      tags=["reports"])
 

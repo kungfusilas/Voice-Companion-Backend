@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useId, useEffect } from "react";
+import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
@@ -76,7 +77,8 @@ export function ChatPage({
   initialMessage, onMessageConsumed,
   isGuest = false, subscriptionTier = "free", onUpgradeChoice,
 }: ChatPageProps) {
-  const isPremium = !isGuest && (subscriptionTier === "premium" || subscriptionTier === "elite");
+  const isPremium = !isGuest && ["premium", "power", "elite"].includes(subscriptionTier);
+  const isPower   = !isGuest && ["power", "elite"].includes(subscriptionTier);
   const isElite   = !isGuest && subscriptionTier === "elite";
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
@@ -391,6 +393,29 @@ export function ChatPage({
   const { state: recorderState, start, stop, reset: resetRecorder } = useVoiceRecorder(handleAudio);
   const isBusy = busy || recorderState === "processing";
 
+  const handleBack = useCallback(() => {
+    if (isPower) {
+      const userMsgCount = messages.filter(m => m.role === "user").length;
+      if (userMsgCount >= 3) {
+        void (async () => {
+          try {
+            const { data: { session } } = await supabase.auth.getSession();
+            const token = session?.access_token ?? "";
+            if (token) {
+              fetch("/companion/api/analysis/debrief", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                body: JSON.stringify({ session_id: sessionId, companion_id: persona.id, companion_name: persona.name }),
+                keepalive: true,
+              }).catch(() => {});
+            }
+          } catch { /* ignore */ }
+        })();
+      }
+    }
+    onBack();
+  }, [isPower, messages, sessionId, persona.id, persona.name, onBack]);
+
   const typeColors: Record<string, string> = {
     romance:      "border-rose-800/40 text-rose-400 hover:bg-rose-900/30",
     mentor:       "border-violet-800/40 text-violet-400 hover:bg-violet-900/30",
@@ -413,7 +438,7 @@ export function ChatPage({
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
         <button
-          onClick={onBack}
+          onClick={handleBack}
           className="flex items-center gap-1.5 text-white/50 hover:text-white transition text-sm"
         >
           <ArrowLeft className="w-4 h-4" />
