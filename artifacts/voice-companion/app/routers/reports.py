@@ -68,6 +68,9 @@ async def _get_user_tier(user_id: str) -> str:
 def _is_premium(tier: str) -> bool:
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
 
+def _is_power(tier: str) -> bool:
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["power"]
+
 
 def _week_start_iso() -> str:
     today = datetime.now(timezone.utc).date()
@@ -178,8 +181,8 @@ async def _store_report(user_id: str, companion_id: str, report: dict) -> None:
 @router.get("")
 async def get_weekly_report(companion_id: str = "aria", user_id: str = Depends(verify_token)):
     tier = await _get_user_tier(user_id)
-    if not _is_premium(tier):
-        raise HTTPException(status_code=403, detail="Premium required")
+    if not _is_power(tier):
+        raise HTTPException(status_code=403, detail="Power tier required")
 
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:
@@ -207,8 +210,8 @@ async def get_weekly_report(companion_id: str = "aria", user_id: str = Depends(v
 @router.post("/generate")
 async def generate_weekly_report(companion_id: str = "aria", user_id: str = Depends(verify_token)):
     tier = await _get_user_tier(user_id)
-    if not _is_premium(tier):
-        raise HTTPException(status_code=403, detail="Premium required")
+    if not _is_power(tier):
+        raise HTTPException(status_code=403, detail="Power tier required")
 
     report = await _generate_report_data(user_id, companion_id)
     if not report.get("empty"):
@@ -227,7 +230,7 @@ async def run_weekly_reports_for_all_users() -> None:
                 f"{url}/rest/v1/profiles",
                 headers=_supa_headers(),
                 params={
-                    "subscription_tier": "in.(premium,power,elite)",
+                    "subscription_tier": "in.(power,elite)",
                     "select": "id,companion_id",
                     "limit": "500",
                 },
