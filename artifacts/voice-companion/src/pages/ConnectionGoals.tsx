@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Target, Plus, Trash2, CheckCircle2 } from "lucide-react";
 import { apiFetchJSON, apiFetch } from "@/lib/api";
 
@@ -22,11 +23,12 @@ interface Props {
 }
 
 export function ConnectionGoals({ userId }: Props) {
-  const [goals, setGoals]       = useState<Goal[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [saving, setSaving]     = useState(false);
-  const [input, setInput]       = useState("");
-  const [error, setError]       = useState<string | null>(null);
+  const [goals, setGoals]           = useState<Goal[]>([]);
+  const [loading, setLoading]       = useState(true);
+  const [saving, setSaving]         = useState(false);
+  const [input, setInput]           = useState("");
+  const [error, setError]           = useState<string | null>(null);
+  const [heartFlash, setHeartFlash] = useState<string | null>(null); // goal id that just earned a heart
   const inputRef = useRef<HTMLInputElement>(null);
 
   const fetchGoals = async () => {
@@ -69,6 +71,21 @@ export function ConnectionGoals({ userId }: Props) {
     } catch {
       fetchGoals();
     }
+  };
+
+  const completeGoal = async (id: string) => {
+    // Show heart flash, award heart, then delete
+    setHeartFlash(id);
+    setTimeout(() => setHeartFlash(null), 1200);
+    try {
+      await apiFetch("/companion/api/hearts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 1, reason: "goal_completed" }),
+      });
+    } catch { /* non-fatal */ }
+    // Small delay so the user sees the ❤️ flash before the row disappears
+    setTimeout(() => deleteGoal(id), 600);
   };
 
   if (loading) {
@@ -143,20 +160,52 @@ export function ConnectionGoals({ userId }: Props) {
         <div className="space-y-2">
           <p className="text-white/35 text-[10px] uppercase tracking-wider font-medium">Your Goals</p>
           {goals.map((g) => (
-            <div
+            <motion.div
               key={g.id}
-              className="flex items-start gap-3 rounded-xl px-3.5 py-3"
+              layout
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative flex items-start gap-3 rounded-xl px-3.5 py-3"
               style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
             >
-              <CheckCircle2 className="w-4 h-4 text-violet-400/60 mt-0.5 shrink-0" />
+              {/* Heart flash overlay */}
+              <AnimatePresence>
+                {heartFlash === g.id && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.6, y: 0 }}
+                    animate={{ opacity: 1, scale: 1, y: -4 }}
+                    exit={{ opacity: 0, y: -16 }}
+                    transition={{ duration: 0.4 }}
+                    className="absolute inset-0 flex items-center justify-center rounded-xl pointer-events-none z-10"
+                    style={{ background: "rgba(239,68,68,0.08)" }}
+                  >
+                    <span className="text-xl">❤️</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              <CheckCircle2 className="w-4 h-4 text-violet-400/40 mt-0.5 shrink-0" />
               <p className="flex-1 text-white/75 text-xs leading-relaxed">{g.goal}</p>
+
+              {/* Mark complete (awards ❤️) */}
+              <button
+                onClick={() => completeGoal(g.id)}
+                title="Mark complete — earn a heart"
+                className="text-white/20 hover:text-emerald-400/80 transition-colors mt-0.5 shrink-0"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Remove without reward */}
               <button
                 onClick={() => deleteGoal(g.id)}
-                className="text-white/20 hover:text-red-400/70 transition-colors mt-0.5 shrink-0"
+                title="Remove"
+                className="text-white/15 hover:text-red-400/60 transition-colors mt-0.5 shrink-0"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
-            </div>
+            </motion.div>
           ))}
         </div>
       )}

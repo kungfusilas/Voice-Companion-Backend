@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { TrendingUp, TrendingDown, Minus, Activity } from "lucide-react";
 import { apiFetchJSON } from "@/lib/api";
+import { FloatingHearts } from "@/components/FloatingHearts";
 
 const SKILLS: { key: string; label: string }[] = [
   { key: "listening",            label: "Listening"            },
@@ -13,6 +14,8 @@ const SKILLS: { key: string; label: string }[] = [
   { key: "humor",                label: "Humor"                },
   { key: "confidence",           label: "Confidence"           },
 ];
+
+const HEARTS_KEY = "bondai_hearts_seen";
 
 interface ScoreRow {
   bond_score: number;
@@ -26,6 +29,13 @@ interface BondScoreData {
   history: { bond_score: number; created_at: string }[];
   trend: number | null;
   monthly_trend: number | null;
+}
+
+interface HeartsData {
+  total_hearts: number;
+  level_title: string;
+  next_threshold: number | null;
+  hearts_to_next: number | null;
 }
 
 // ── Sparkline ─────────────────────────────────────────────────────────────────
@@ -44,7 +54,6 @@ function Sparkline({ data }: { data: number[] }) {
     return [x, y] as [number, number];
   });
 
-  // Build smooth path using cubic bezier approximation
   let d = `M ${pts[0][0]} ${pts[0][1]}`;
   for (let i = 1; i < pts.length; i++) {
     const [x0, y0] = pts[i - 1];
@@ -52,8 +61,6 @@ function Sparkline({ data }: { data: number[] }) {
     const cx = (x0 + x1) / 2;
     d += ` C ${cx} ${y0}, ${cx} ${y1}, ${x1} ${y1}`;
   }
-
-  // Fill path (area under curve)
   const fillD = `${d} L ${pts[pts.length - 1][0]} ${H} L ${pts[0][0]} ${H} Z`;
 
   return (
@@ -70,13 +77,7 @@ function Sparkline({ data }: { data: number[] }) {
       </defs>
       <path d={fillD} fill="url(#sparkFill)" />
       <path d={d} fill="none" stroke="url(#sparkLine)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      {/* Latest dot */}
-      <circle
-        cx={pts[pts.length - 1][0]}
-        cy={pts[pts.length - 1][1]}
-        r="3.5"
-        fill="rgba(168,85,247,1)"
-      />
+      <circle cx={pts[pts.length - 1][0]} cy={pts[pts.length - 1][1]} r="3.5" fill="rgba(168,85,247,1)" />
     </svg>
   );
 }
@@ -91,25 +92,18 @@ function ScoreRing({ score }: { score: number }) {
   return (
     <div className="relative flex items-center justify-center" style={{ width: 148, height: 148 }}>
       <svg width="148" height="148" viewBox="0 0 148 148" className="absolute inset-0 -rotate-90">
-        {/* Track */}
-        <circle cx="74" cy="74" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
-        {/* Progress */}
-        <circle
-          cx="74"
-          cy="74"
-          r={R}
-          fill="none"
-          stroke="url(#ringGrad)"
-          strokeWidth="10"
-          strokeLinecap="round"
-          strokeDasharray={`${dash} ${circ}`}
-        />
         <defs>
           <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%" stopColor="#7c3aed" />
             <stop offset="100%" stopColor="#db2777" />
           </linearGradient>
         </defs>
+        <circle cx="74" cy="74" r={R} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="10" />
+        <circle
+          cx="74" cy="74" r={R} fill="none"
+          stroke="url(#ringGrad)" strokeWidth="10" strokeLinecap="round"
+          strokeDasharray={`${dash} ${circ}`}
+        />
       </svg>
       <div className="flex flex-col items-center z-10">
         <motion.span
@@ -130,16 +124,14 @@ function ScoreRing({ score }: { score: number }) {
 function SkillBar({ label, score, delta }: { label: string; score: number; delta: number | null }) {
   const pct = score;
   const deltaStr = delta === null ? null : delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : null;
-  const deltaColor = delta === null || delta === 0 ? "text-white/30" : delta > 0 ? "text-emerald-400/80" : "text-red-400/70";
+  const deltaColor = !deltaStr ? "text-white/30" : delta! > 0 ? "text-emerald-400/80" : "text-red-400/70";
 
   return (
     <div>
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-white/65 text-xs">{label}</span>
         <div className="flex items-center gap-2">
-          {deltaStr && (
-            <span className={`text-[10px] font-medium ${deltaColor}`}>{deltaStr}</span>
-          )}
+          {deltaStr && <span className={`text-[10px] font-medium ${deltaColor}`}>{deltaStr}</span>}
           <span className="text-white/80 text-xs font-semibold tabular-nums w-6 text-right">{score}</span>
         </div>
       </div>
@@ -164,14 +156,33 @@ function SkillBar({ label, score, delta }: { label: string; score: number; delta
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export function BondScore() {
-  const [data, setData] = useState<BondScoreData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData]           = useState<BondScoreData | null>(null);
+  const [hearts, setHearts]       = useState<HeartsData | null>(null);
+  const [loading, setLoading]     = useState(true);
+  const [floatCount, setFloatCount] = useState(0);
 
   useEffect(() => {
-    apiFetchJSON<BondScoreData>("/companion/api/bond-score")
-      .then((d) => { setData(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    Promise.all([
+      apiFetchJSON<BondScoreData>("/companion/api/bond-score"),
+      apiFetchJSON<HeartsData>("/companion/api/hearts"),
+    ])
+      .then(([scoreData, heartsData]) => {
+        setData(scoreData);
+        setHearts(heartsData);
+
+        // Float hearts if new ones arrived since last visit
+        const seen = parseInt(localStorage.getItem(HEARTS_KEY) ?? "0", 10);
+        const earned = heartsData.total_hearts - seen;
+        if (earned > 0) setFloatCount(Math.min(earned, 3));
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
+
+  const handleFloatDone = () => {
+    if (hearts) localStorage.setItem(HEARTS_KEY, String(hearts.total_hearts));
+    setFloatCount(0);
+  };
 
   if (loading) {
     return (
@@ -185,6 +196,7 @@ export function BondScore() {
   if (!data?.latest) {
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+        {floatCount > 0 && <FloatingHearts count={floatCount} onComplete={handleFloatDone} />}
         <div
           className="w-24 h-24 rounded-full flex items-center justify-center mb-5"
           style={{ background: "rgba(139,92,246,0.08)", border: "1px solid rgba(139,92,246,0.15)" }}
@@ -195,6 +207,14 @@ export function BondScore() {
         <p className="text-white/30 text-xs leading-relaxed max-w-[200px]">
           Chat for a few exchanges and your relationship skills will be scored automatically.
         </p>
+        {hearts && hearts.total_hearts > 0 && (
+          <div className="mt-6 flex items-center gap-2 text-sm text-white/40">
+            <span>❤️</span>
+            <span>{hearts.total_hearts}</span>
+            <span className="text-white/20">·</span>
+            <span>{hearts.level_title}</span>
+          </div>
+        )}
       </div>
     );
   }
@@ -202,59 +222,95 @@ export function BondScore() {
   const { latest, previous, history, monthly_trend } = data;
   const scoreValues = history.map((h) => h.bond_score);
 
-  // Monthly trend display
   const trendValue = monthly_trend;
-  const TrendIcon = trendValue === null || trendValue === 0 ? Minus : trendValue > 0 ? TrendingUp : TrendingDown;
-  const trendColor = trendValue === null || trendValue === 0 ? "text-white/30" : trendValue > 0 ? "text-emerald-400" : "text-red-400";
+  const TrendIcon = !trendValue ? Minus : trendValue > 0 ? TrendingUp : TrendingDown;
+  const trendColor = !trendValue ? "text-white/30" : trendValue > 0 ? "text-emerald-400" : "text-red-400";
   const trendLabel =
     trendValue === null ? "No change data" :
-    trendValue === 0 ? "Holding steady" :
-    trendValue > 0 ? `↑ ${trendValue} pts this month` :
-    `↓ ${Math.abs(trendValue)} pts this month`;
+    trendValue === 0    ? "Holding steady" :
+    trendValue > 0      ? `↑ ${trendValue} pts this month` :
+                          `↓ ${Math.abs(trendValue)} pts this month`;
 
   return (
-    <div className="space-y-5 pt-2">
-      {/* Score ring + trend */}
-      <div className="flex flex-col items-center py-4">
-        <ScoreRing score={latest.bond_score} />
-        <div className={`flex items-center gap-1.5 mt-3 text-xs font-medium ${trendColor}`}>
-          <TrendIcon className="w-3.5 h-3.5" />
-          <span>{trendLabel}</span>
-        </div>
-      </div>
+    <>
+      {floatCount > 0 && <FloatingHearts count={floatCount} onComplete={handleFloatDone} />}
 
-      {/* Sparkline */}
-      {scoreValues.length >= 2 && (
-        <div
-          className="rounded-2xl px-4 pt-3 pb-2"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
-        >
-          <p className="text-white/30 text-[10px] uppercase tracking-wider mb-2 font-medium">Score history</p>
-          <Sparkline data={scoreValues} />
-          <div className="flex justify-between mt-1">
-            <span className="text-white/20 text-[9px]">Oldest</span>
-            <span className="text-white/20 text-[9px]">Latest</span>
+      <div className="space-y-5 pt-2">
+        {/* Score ring */}
+        <div className="flex flex-col items-center pt-4 pb-2">
+          <ScoreRing score={latest.bond_score} />
+
+          {/* Level + hearts row */}
+          {hearts && (
+            <motion.div
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="flex items-center gap-3 mt-3"
+            >
+              {/* Level pill */}
+              <span
+                className="text-[11px] font-medium px-2.5 py-1 rounded-full"
+                style={{
+                  background: "rgba(139,92,246,0.12)",
+                  border: "1px solid rgba(139,92,246,0.25)",
+                  color: "rgba(196,181,253,0.85)",
+                }}
+              >
+                {hearts.level_title}
+              </span>
+
+              {/* Hearts */}
+              <span className="flex items-center gap-1 text-xs text-white/40">
+                <span className="text-sm leading-none">❤️</span>
+                <span className="tabular-nums">{hearts.total_hearts}</span>
+                {hearts.hearts_to_next !== null && (
+                  <span className="text-white/20 text-[10px]">· {hearts.hearts_to_next} to next</span>
+                )}
+              </span>
+            </motion.div>
+          )}
+
+          {/* Trend */}
+          <div className={`flex items-center gap-1.5 mt-2.5 text-xs font-medium ${trendColor}`}>
+            <TrendIcon className="w-3.5 h-3.5" />
+            <span>{trendLabel}</span>
           </div>
         </div>
-      )}
 
-      {/* 8 skill bars */}
-      <div
-        className="rounded-2xl px-4 py-4 space-y-3.5"
-        style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
-      >
-        <p className="text-white/30 text-[10px] uppercase tracking-wider font-medium mb-4">Relationship Skills</p>
-        {SKILLS.map(({ key, label }) => {
-          const score = Number(latest[key] ?? 50);
-          const prevScore = previous ? Number(previous[key] ?? 50) : null;
-          const delta = prevScore !== null ? score - prevScore : null;
-          return <SkillBar key={key} label={label} score={score} delta={delta} />;
-        })}
+        {/* Sparkline */}
+        {scoreValues.length >= 2 && (
+          <div
+            className="rounded-2xl px-4 pt-3 pb-2"
+            style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
+          >
+            <p className="text-white/30 text-[10px] uppercase tracking-wider mb-2 font-medium">Score history</p>
+            <Sparkline data={scoreValues} />
+            <div className="flex justify-between mt-1">
+              <span className="text-white/20 text-[9px]">Oldest</span>
+              <span className="text-white/20 text-[9px]">Latest</span>
+            </div>
+          </div>
+        )}
+
+        {/* 8 skill bars */}
+        <div
+          className="rounded-2xl px-4 py-4 space-y-3.5"
+          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
+        >
+          <p className="text-white/30 text-[10px] uppercase tracking-wider font-medium mb-4">Relationship Skills</p>
+          {SKILLS.map(({ key, label }) => {
+            const score   = Number(latest[key] ?? 50);
+            const prevVal = previous ? Number(previous[key] ?? 50) : null;
+            const delta   = prevVal !== null ? score - prevVal : null;
+            return <SkillBar key={key} label={label} score={score} delta={delta} />;
+          })}
+        </div>
+
+        <p className="text-white/20 text-[10px] text-center pb-2 leading-relaxed">
+          Scored automatically after each conversation
+        </p>
       </div>
-
-      <p className="text-white/20 text-[10px] text-center pb-2 leading-relaxed">
-        Scored automatically after each conversation
-      </p>
-    </div>
+    </>
   );
 }
