@@ -1,17 +1,16 @@
 import { useState, useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { CompanionSelect } from "@/pages/CompanionSelect";
-import { RelationshipSelect } from "@/pages/RelationshipSelect";
 import { ChatPage } from "@/pages/Chat";
 import { AuthPage } from "@/pages/Auth";
 import { PricingPage } from "@/pages/Pricing";
 import { Hub } from "@/pages/Hub";
-import { getRelationshipStats, getSubscriptionStatus } from "@/lib/api";
+import { getSubscriptionStatus } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "auth" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat" | "pricing" | "hub";
+type Screen = "loading" | "auth" | "companion-select" | "chat" | "pricing" | "hub";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -77,36 +76,11 @@ export default function App() {
     }
   }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── After companion pick, check for existing relationship type ───────────
   const userId = session?.user.id ?? null;
-
-  useEffect(() => {
-    if (!persona || !userId || screen !== "rel-type-loading") return;
-    let cancelled = false;
-    getRelationshipStats(userId, persona.id)
-      .then((stats) => {
-        if (cancelled) return;
-        if (stats.relationship_type) {
-          setRelType(stats.relationship_type);
-          setScreen("chat");
-        } else {
-          setScreen("rel-type-select");
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setScreen("rel-type-select");
-      });
-    return () => { cancelled = true; };
-  }, [persona, userId, screen]);
 
   const handleCompanionSelect = (p: Persona) => {
     setPersona(p);
-    setRelType(null);
-    setScreen("rel-type-loading");
-  };
-
-  const handleRelTypeSelect = (rt: string) => {
-    setRelType(rt);
+    setRelType("friendship");
     setScreen("chat");
   };
 
@@ -114,11 +88,6 @@ export default function App() {
     setPersona(null);
     setRelType(null);
     setScreen("companion-select");
-  };
-
-  const handleBackToRelSelect = () => {
-    setRelType(null);
-    setScreen("rel-type-select");
   };
 
   const handleSignOut = async () => {
@@ -129,7 +98,7 @@ export default function App() {
 
   const handleStartChatFromMemory = (prompt: string) => {
     setPendingPrompt(prompt);
-    if (persona && relType) {
+    if (persona) {
       setScreen("chat");
     } else {
       setScreen("companion-select");
@@ -185,7 +154,7 @@ export default function App() {
   }
 
   // ── Main app card ─────────────────────────────────────────────────────────
-  const isNarrow = screen === "companion-select" || screen === "rel-type-loading" || screen === "rel-type-select" || screen === "pricing";
+  const isNarrow = screen === "companion-select" || screen === "pricing";
   const maxW = isNarrow ? "max-w-sm" : "max-w-md";
   const h = isNarrow ? "min-h-[640px]" : "h-[680px]";
 
@@ -228,31 +197,14 @@ export default function App() {
             />
           )}
 
-          {screen === "rel-type-loading" && (
-            <div key="loading" className="flex flex-col items-center justify-center flex-1 gap-3">
-              <div className="w-6 h-6 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
-              <p className="text-white/40 text-sm">Loading…</p>
-            </div>
-          )}
-
-          {screen === "rel-type-select" && persona && userId && (
-            <RelationshipSelect
-              key="rel-type-select"
-              persona={persona}
-              userId={userId}
-              onSelect={handleRelTypeSelect}
-              onBack={handleBack}
-            />
-          )}
-
-          {screen === "chat" && persona && relType && userId && (
+          {screen === "chat" && persona && userId && (
             <ChatPage
               key={`chat-${persona.id}`}
               persona={persona}
-              relType={relType}
+              relType={relType ?? "friendship"}
               userId={userId}
               onBack={handleBack}
-              onChangeRelType={handleBackToRelSelect}
+              onChangeRelType={handleBack}
               initialMessage={pendingPrompt ?? undefined}
               onMessageConsumed={() => setPendingPrompt(null)}
             />
