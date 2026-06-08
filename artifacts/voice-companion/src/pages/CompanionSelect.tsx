@@ -54,9 +54,11 @@ const COMPANIONS: CompanionConfig[] = [
 interface CompanionSelectProps {
   onSelect: (persona: Persona) => void;
   onSignOut?: () => void;
+  onUpgrade?: () => void;
+  subscriptionTier?: string;
 }
 
-export function CompanionSelect({ onSelect, onSignOut }: CompanionSelectProps) {
+export function CompanionSelect({ onSelect, onSignOut, onUpgrade, subscriptionTier }: CompanionSelectProps) {
   const handlePick = (companion: CompanionConfig) => {
     const persona: Persona = {
       id: companion.id,
@@ -87,16 +89,26 @@ export function CompanionSelect({ onSelect, onSignOut }: CompanionSelectProps) {
               AI Companions
             </span>
           </div>
-          {onSignOut && (
-            <button
-              onClick={onSignOut}
-              title="Sign out"
-              className="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition-colors text-xs"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>Sign out</span>
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onUpgrade && (
+              <button
+                onClick={onUpgrade}
+                className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border border-violet-500/30 text-violet-400/80 hover:text-violet-300 hover:border-violet-400/50 transition-colors capitalize"
+              >
+                {subscriptionTier && subscriptionTier !== "free" ? subscriptionTier : "Plans"}
+              </button>
+            )}
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                title="Sign out"
+                className="flex items-center gap-1.5 text-white/30 hover:text-white/60 transition-colors text-xs"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign out</span>
+              </button>
+            )}
+          </div>
         </div>
         <h1 className="text-2xl font-bold text-white">
           Who do you want to<br />talk to today?

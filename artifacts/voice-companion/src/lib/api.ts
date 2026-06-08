@@ -315,6 +315,26 @@ export async function saveActivityResult(
   }).catch(() => {});
 }
 
+export async function getSubscriptionStatus(): Promise<{ tier: string }> {
+  try {
+    const resp = await apiFetch(`${BASE}/subscription-status`);
+    if (!resp.ok) return { tier: "free" };
+    return resp.json();
+  } catch {
+    return { tier: "free" };
+  }
+}
+
+export async function createCheckoutSession(plan: string): Promise<{ url: string }> {
+  const resp = await apiFetch(`${BASE}/create-checkout-session`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ plan }),
+  });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 export async function submitWaitlist(
   email: string,
   companionId: string,

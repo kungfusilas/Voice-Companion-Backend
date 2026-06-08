@@ -15,6 +15,7 @@ from app.routers import activities as activities_router
 from app.routers import romantic as romantic_router
 from app.routers import daily_checkin as daily_checkin_router
 from app.routers import waitlist as waitlist_router
+from app.routers import payments as payments_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -90,6 +91,7 @@ app.include_router(auth_router.router,          prefix="/api/auth",             
 app.include_router(romantic_router.router,      prefix="/api/romantic-mode",      tags=["romantic"])
 app.include_router(daily_checkin_router.router, prefix="/api/daily-checkin",      tags=["daily-checkin"])
 app.include_router(waitlist_router.router,      prefix="/api/waitlist",           tags=["waitlist"])
+app.include_router(payments_router.router,     prefix="/api",                    tags=["payments"])
 
 
 @app.get("/api/healthz")

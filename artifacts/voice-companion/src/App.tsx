@@ -4,12 +4,13 @@ import { CompanionSelect } from "@/pages/CompanionSelect";
 import { RelationshipSelect } from "@/pages/RelationshipSelect";
 import { ChatPage } from "@/pages/Chat";
 import { AuthPage } from "@/pages/Auth";
-import { getRelationshipStats } from "@/lib/api";
+import { PricingPage } from "@/pages/Pricing";
+import { getRelationshipStats, getSubscriptionStatus } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "auth" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat";
+type Screen = "loading" | "auth" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat" | "pricing";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -27,32 +28,51 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [persona, setPersona] = useState<Persona | null>(null);
   const [relType, setRelType] = useState<string | null>(null);
+  const [subscriptionTier, setSubscriptionTier] = useState("free");
+  const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
 
   // ── Auth session management ──────────────────────────────────────────────
   useEffect(() => {
-    // Check for existing session on mount (handles OAuth callback redirect too)
+    // Check for checkout result URL params (Stripe redirect back)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("checkout") === "success") {
+      const plan = params.get("plan");
+      setCheckoutMessage(plan ? `🎉 You're on ${plan.charAt(0).toUpperCase() + plan.slice(1)}!` : "🎉 Subscription activated!");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (params.get("checkout") === "cancelled") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setScreen(session ? "companion-select" : "auth");
     });
 
-    // Listen for auth state changes (sign-in, sign-out, token refresh, OAuth)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
         setScreen((prev) =>
           prev === "auth" || prev === "loading" ? "companion-select" : prev
         );
+        // Fetch subscription tier whenever session changes
+        getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
       } else {
-        // Signed out — reset all state
         setPersona(null);
         setRelType(null);
+        setSubscriptionTier("free");
         setScreen("auth");
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
+
+  // Fetch subscription tier on mount when session exists
+  useEffect(() => {
+    if (session) {
+      getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
+    }
+  }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── After companion pick, check for existing relationship type ───────────
   const userId = session?.user.id ?? null;
@@ -100,7 +120,6 @@ export default function App() {
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
-    // onAuthStateChange listener will reset state and screen to "auth"
   };
 
   // ── Missing env-var guard (dev only) ─────────────────────────────────────
@@ -140,7 +159,7 @@ export default function App() {
   }
 
   // ── Main app card ─────────────────────────────────────────────────────────
-  const isNarrow = screen === "companion-select" || screen === "rel-type-loading" || screen === "rel-type-select";
+  const isNarrow = screen === "companion-select" || screen === "rel-type-loading" || screen === "rel-type-select" || screen === "pricing";
   const maxW = isNarrow ? "max-w-sm" : "max-w-md";
   const h = isNarrow ? "min-h-[640px]" : "h-[680px]";
 
@@ -150,9 +169,36 @@ export default function App() {
         className={`w-full ${maxW} ${h} flex flex-col rounded-3xl overflow-hidden relative`}
         style={CARD_STYLE}
       >
+        {/* Checkout success banner */}
+        <AnimatePresence>
+          {checkoutMessage && (
+            <div
+              className="absolute top-0 inset-x-0 z-10 flex items-center justify-between px-4 py-2.5 text-xs font-medium text-emerald-300"
+              style={{ background: "rgba(16,185,129,0.12)", borderBottom: "1px solid rgba(16,185,129,0.2)" }}
+            >
+              <span>{checkoutMessage}</span>
+              <button onClick={() => setCheckoutMessage(null)} className="text-emerald-400/60 hover:text-emerald-300 ml-2">✕</button>
+            </div>
+          )}
+        </AnimatePresence>
+
         <AnimatePresence mode="wait">
           {screen === "companion-select" && (
-            <CompanionSelect key="companion-select" onSelect={handleCompanionSelect} onSignOut={handleSignOut} />
+            <CompanionSelect
+              key="companion-select"
+              onSelect={handleCompanionSelect}
+              onSignOut={handleSignOut}
+              onUpgrade={() => setScreen("pricing")}
+              subscriptionTier={subscriptionTier}
+            />
+          )}
+
+          {screen === "pricing" && (
+            <PricingPage
+              key="pricing"
+              currentTier={subscriptionTier}
+              onBack={() => setScreen("companion-select")}
+            />
           )}
 
           {screen === "rel-type-loading" && (
