@@ -151,7 +151,17 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
           }
 
           if (ttsEnabled && fullReply) {
-            try { await playAudio(await speakText(fullReply, persona.id)); } catch {}
+            const spokenText = fullReply
+              // Remove *action text*, [stage directions], (parenthetical notes)
+              .replace(/\*[^*]*\*/g, "")
+              .replace(/\[[^\]]*\]/g, "")
+              .replace(/\([^)]*\)/g, "")
+              // Collapse leftover whitespace
+              .replace(/\s+/g, " ")
+              .trim();
+            if (spokenText) {
+              try { await playAudio(await speakText(spokenText, persona.id)); } catch {}
+            }
           }
         } else if (event.type === "waitlist_prompt") {
           setWaitlistPrompt(event.companion_id ?? persona.id);
