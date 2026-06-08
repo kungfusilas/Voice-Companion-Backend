@@ -76,7 +76,8 @@ export function ChatPage({
   initialMessage, onMessageConsumed,
   isGuest = false, subscriptionTier = "free", onUpgradeChoice,
 }: ChatPageProps) {
-  const isPremium = !isGuest && subscriptionTier === "premium";
+  const isPremium = !isGuest && (subscriptionTier === "premium" || subscriptionTier === "elite");
+  const isElite   = !isGuest && subscriptionTier === "elite";
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
 
@@ -217,7 +218,16 @@ export function ChatPage({
             setStageMax(event.stage_max ?? 100);
           }
 
-          if (ttsEnabled && fullReply) {
+          // Track guest onboarding progress BEFORE TTS so we know if this is Q10
+          if (isGuest && !wowDoneRef.current) {
+            guestMsgCountRef.current += 1;
+            if (guestMsgCountRef.current >= 10) {
+              shouldTriggerWow = true;
+            }
+          }
+
+          // Inline TTS for regular messages only — wow sequence speaks Q10 explicitly
+          if (ttsEnabled && fullReply && !shouldTriggerWow) {
             const spokenText = fullReply
               .replace(/\*[^*]*\*/g, "")
               .replace(/\[[^\]]*\]/g, "")
@@ -226,14 +236,6 @@ export function ChatPage({
               .trim();
             if (spokenText) {
               try { await playAudio(await speakText(spokenText, persona.id)); } catch {}
-            }
-          }
-
-          // Track guest onboarding progress
-          if (isGuest && !wowDoneRef.current) {
-            guestMsgCountRef.current += 1;
-            if (guestMsgCountRef.current >= 10) {
-              shouldTriggerWow = true;
             }
           }
 
@@ -252,30 +254,38 @@ export function ChatPage({
       setBusy(false);
     }
 
-    // Trigger wow moment AFTER stream + TTS settle
+    // Shared TTS helper — resolves only when audio.onended fires
+    const speakMsg = async (text: string): Promise<void> => {
+      if (!ttsEnabled) return;
+      const spoken = text
+        .replace(/\*[^*]*\*/g, "")
+        .replace(/\[[^\]]*\]/g, "")
+        .replace(/\([^)]*\)/g, "")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (spoken) {
+        try { await playAudio(await speakText(spoken, persona.id)); } catch {}
+      }
+    };
+
+    // Wow moment: fully sequential audio chain — no overlaps
     if (shouldTriggerWow && !wowDoneRef.current) {
       wowDoneRef.current = true;
-      setWowGenerating(true);
-      const speakMsg = async (text: string) => {
-        if (!ttsEnabled) return;
-        const spoken = text
-          .replace(/\*[^*]*\*/g, "")
-          .replace(/\[[^\]]*\]/g, "")
-          .replace(/\([^)]*\)/g, "")
-          .replace(/\s+/g, " ")
-          .trim();
-        if (spoken) {
-          try { await playAudio(await speakText(spoken, persona.id)); } catch {}
-        }
-      };
 
+      // Step 2: await Q10 response audio before anything else starts
+      await speakMsg(fullReply);
+
+      setWowGenerating(true);
       try {
+        // Step 3: fetch wow message, append, speak
         const { message: wowMsg } = await requestWowMoment(sessionId, persona.id);
         setMessages((prev) => [...prev, { role: "assistant", content: wowMsg }]);
-        await speakMsg(wowMsg);                     // waits for audio to finish
+        await speakMsg(wowMsg);                    // Step 4: await wow audio
+
+        // Step 5: append subscription ask, speak
         const upgradeAsk = `I want to keep remembering all of this. Every conversation, every detail, every goal you share with me. Want to make this permanent?`;
         setMessages((prev) => [...prev, { role: "assistant", content: upgradeAsk }]);
-        await speakMsg(upgradeAsk);                 // waits for audio to finish
+        await speakMsg(upgradeAsk);                // Step 6: await subscription ask audio
         setShowUpgradeCard(true);
       } catch {
         setShowUpgradeCard(true);

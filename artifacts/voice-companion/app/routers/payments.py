@@ -50,9 +50,10 @@ stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 # ── Plan definitions ──────────────────────────────────────────────────────────
 
 PLANS: dict[str, dict] = {
-    "basic":   {"name": "Companion Basic",   "amount": 1299, "label": "Basic"},
-    "premium": {"name": "Companion Premium", "amount": 3999, "label": "Premium"},
-    "power":   {"name": "Companion Power",   "amount": 8999, "label": "Power"},
+    "basic":   {"name": "Companion Basic",   "amount": 1299,  "label": "Basic"},
+    "premium": {"name": "Companion Premium", "amount": 3999,  "label": "Premium"},
+    "power":   {"name": "Companion Power",   "amount": 8999,  "label": "Power"},
+    "elite":   {"name": "Companion Elite",   "amount": 14999, "label": "Elite"},
 }
 
 _price_ids: dict[str, str] = {}

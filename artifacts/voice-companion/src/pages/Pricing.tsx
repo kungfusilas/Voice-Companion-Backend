@@ -51,12 +51,33 @@ const PLANS = [
     glow: "rgba(217,119,6,0.3)",
     highlight: false,
   },
+  {
+    key: "elite",
+    name: "Elite",
+    price: "$149.99",
+    period: "/mo",
+    description: "Two flagship features. Coming soon.",
+    features: [
+      "Everything in Power",
+      "✦ Flagship Feature 1 — coming soon",
+      "✦ Flagship Feature 2 — coming soon",
+      "Elite status badge",
+      "Founding member pricing locked in",
+    ],
+    accent: "yellow",
+    gradient: "from-yellow-500/20 to-orange-900/10",
+    border: "border-yellow-400/40",
+    buttonBg: "linear-gradient(135deg, #ca8a04, #78350f)",
+    glow: "rgba(202,138,4,0.35)",
+    highlight: false,
+  },
 ] as const;
 
 const TIER_COLORS: Record<string, string> = {
   basic:   "text-violet-400",
   premium: "text-rose-400",
   power:   "text-amber-400",
+  elite:   "text-yellow-300",
   free:    "text-white/40",
 };
 
