@@ -30,7 +30,7 @@ const PLANS = [
     price: "$39.99",
     period: "/mo",
     description: "Deeper connections, more features",
-    features: ["Everything in Basic", "Romantic Mode 🌙", "Companion selfies 📸", "Activity games", "Priority responses"],
+    features: ["Everything in Basic", "Companion selfies 📸", "Activity games", "Priority responses"],
     accent: "rose",
     gradient: "from-rose-600/20 to-rose-900/10",
     border: "border-rose-500/30",
