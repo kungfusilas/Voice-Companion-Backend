@@ -71,7 +71,7 @@ async def send_message(
     system_prompt: str,
     history: list[ChatMessage],
     user_message: str,
-    model: str = "claude-opus-4-5",
+    model: str = "claude-sonnet-4-6",
     max_tokens: int = 1024,
 ) -> str:
     """Send a message with agentic tool-use loop (web search)."""
@@ -111,7 +111,7 @@ async def stream_message(
     system_prompt: str,
     history: list[ChatMessage],
     user_message: str,
-    model: str = "claude-opus-4-5",
+    model: str = "claude-sonnet-4-6",
     max_tokens: int = 1024,
 ) -> AsyncGenerator[str, None]:
     """

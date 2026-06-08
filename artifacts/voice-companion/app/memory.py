@@ -74,7 +74,7 @@ async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
             system_prompt=_SHOULD_REMEMBER_PROMPT,
             history=[],
             user_message=turn,
-            model="claude-haiku-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=256,
         )
         # Strip markdown code fences if Claude wraps the JSON

@@ -103,7 +103,7 @@ async def _generate_checkin(
             system_prompt=system,
             history=[],
             user_message="[generate today's morning check-in message]",
-            model="claude-haiku-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=140,
         )
         return msg.strip().strip('"').strip("'") if msg else None

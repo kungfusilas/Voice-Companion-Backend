@@ -7,7 +7,7 @@ import os
 import anthropic
 from app.companions import COMPANION_MAP, build_system_prompt
 
-_MODEL = "claude-haiku-4-5"
+_MODEL = "claude-haiku-4-5-20251001"
 _client: anthropic.Anthropic | None = None
 
 # Per-companion voice guidance injected into every activity prompt

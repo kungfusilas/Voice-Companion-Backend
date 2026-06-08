@@ -48,7 +48,7 @@ _SCORING_CRITERIA: dict[str, str] = {
     "professional": "clarity, active listening, follow-through, professionalism, engagement",
 }
 
-_SCORING_MODEL = "claude-3-5-haiku-20241022"
+_SCORING_MODEL = "claude-haiku-4-5-20251001"
 
 
 def _get_client() -> anthropic.Anthropic:

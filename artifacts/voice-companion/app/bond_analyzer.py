@@ -66,7 +66,7 @@ async def _call_claude(user_messages: list[str], persona_name: str) -> dict:
     convo_text = "\n".join(f"User: {m}" for m in user_messages)
     prompt = f"The user was talking with an AI companion named {persona_name}.\n\nUser messages:\n{convo_text}"
     msg = await client.messages.create(
-        model="claude-haiku-4-5",
+        model="claude-haiku-4-5-20251001",
         max_tokens=256,
         system=_SYSTEM,
         messages=[{"role": "user", "content": prompt}],

@@ -76,7 +76,7 @@ async def _generate_checkin(companion_id: str) -> str | None:
             system_prompt=system,
             history=[],
             user_message="[generate a proactive check-in message for this user who has been away]",
-            model="claude-haiku-4-5",
+            model="claude-haiku-4-5-20251001",
             max_tokens=120,
         )
     except Exception as exc:

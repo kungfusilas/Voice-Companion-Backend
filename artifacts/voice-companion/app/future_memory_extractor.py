@@ -91,7 +91,7 @@ async def _call_claude(user_message: str, assistant_reply: str) -> dict:
     client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
     prompt = f'User said: "{user_message}"\n\nCompanion replied: "{assistant_reply[:300]}"'
     msg = await client.messages.create(
-        model="claude-haiku-4-5",
+        model="claude-haiku-4-5-20251001",
         max_tokens=512,
         system=_SYSTEM.format(today=today),
         messages=[{"role": "user", "content": prompt}],
