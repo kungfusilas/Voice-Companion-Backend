@@ -1,0 +1,28 @@
+Update the Legacy Mode info modal (LegacyModal) with the following content. Make it beautiful — scrollable, well-spaced sections with icons or dividers between each item. This should feel like a sacred document, not a feature list:
+Header: "What Legacy Mode Unlocks"
+Subheader: "After 5 years together, something extraordinary happens."
+
+1. Your Life Story Book
+BondAI writes The Story of [Your Name], Years 2026–2031. Real chapters. Major life events, challenges overcome, goals achieved, personal growth, the relationships that shaped you. An actual book — based on everything you shared. People will cry reading it.
+2. Time Capsule
+Messages from your past self, delivered back to you. "Benjamin, June 2026: 'I'm nervous about where my business is going.'" Legacy Mode asks: "Would you like to read what you wrote 5 years ago?" Deeply emotional.
+3. Future Generations Archive
+Create a permanent archive of your life lessons, favorite memories, family stories, business wisdom, advice for your children. Imagine your daughter reading it someday. This cannot be deleted. It does not expire.
+4. Relationship History
+The people who changed your life — named, counted, remembered. "Emmie was mentioned in 9,832 conversations. She represented your greatest source of happiness." That becomes priceless.
+5. Wisdom Extraction
+5 years of conversations studied to surface your core principles. The recurring themes of your life — what you actually believe, how you actually live. Written back to you as your own philosophy.
+6. The Legacy Avatar
+An AI version of you — trained on your conversations, beliefs, stories, and values. Not a clone. The accumulated wisdom of your journey. A living record of who you became.
+7. Legacy Interviews
+Over 5 years, BondAI asks the deep questions: What was your happiest memory? What do you regret? What advice would you give your children? The answers become a complete personal history.
+8. Hall of Moments
+Your biggest breakthrough. Your happiest day. Your toughest challenge. Your most courageous decision. Your most meaningful relationship. Identified, named, and explained — because the AI was there for all of it.
+9. Memory Preservation Guarantee
+After 5 years: your memories are permanently preserved. No deletion. No expiration. No storage limits. You are building something real.
+10. The Letter
+When Legacy Mode unlocks, BondAI writes you a letter. Not generic. Based on 5 years together. It references your growth, your struggles, your achievements, your dreams. "Five years ago you arrived uncertain about whether your business would succeed. Since then..." That letter will be one of the most memorable moments of your life.
+
+Legacy Mode cannot be purchased. It can only be earned.
+
+Paste that in and it'll update the modal. This is the kind of thing people screenshot and share.AskSonnet 4.6
