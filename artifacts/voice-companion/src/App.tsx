@@ -31,6 +31,7 @@ export default function App() {
   const [relType, setRelType] = useState<string | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState("free");
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
+  const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   // ── Auth session management ──────────────────────────────────────────────
   useEffect(() => {
@@ -126,6 +127,15 @@ export default function App() {
 
   const handleOpenHub = () => setScreen("hub");
 
+  const handleStartChatFromMemory = (prompt: string) => {
+    setPendingPrompt(prompt);
+    if (persona && relType) {
+      setScreen("chat");
+    } else {
+      setScreen("companion-select");
+    }
+  };
+
   // ── Missing env-var guard (dev only) ─────────────────────────────────────
   if (!SUPABASE_CONFIGURED) {
     return (
@@ -160,6 +170,7 @@ export default function App() {
         onBack={() => setScreen("companion-select")}
         userId={userId ?? ""}
         currentPersona={persona}
+        onStartChat={handleStartChatFromMemory}
       />
     );
   }
@@ -242,6 +253,8 @@ export default function App() {
               userId={userId}
               onBack={handleBack}
               onChangeRelType={handleBackToRelSelect}
+              initialMessage={pendingPrompt ?? undefined}
+              onMessageConsumed={() => setPendingPrompt(null)}
             />
           )}
         </AnimatePresence>

@@ -1,23 +1,26 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
 import { BondScore } from "./BondScore";
+import { FutureMemory } from "./FutureMemory";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
   onBack: () => void;
   userId: string;
   currentPersona: Persona | null;
+  onStartChat?: (prompt: string) => void;
 }
 
 const LIVE_TABS = [
-  { id: "bond-score", label: "Bond Score",      icon: Activity },
-  { id: "memory",     label: "Memory Threads",  icon: Sparkles },
-  { id: "journal",    label: "Bond Journal",    icon: BookOpen  },
-  { id: "goals",      label: "Connection Goals", icon: Target  },
+  { id: "bond-score",     label: "Bond Score",      icon: Activity       },
+  { id: "future-memory",  label: "Future Memory",   icon: CalendarHeart  },
+  { id: "memory",         label: "Memory Threads",  icon: Sparkles       },
+  { id: "journal",        label: "Bond Journal",    icon: BookOpen       },
+  { id: "goals",          label: "Connection Goals", icon: Target        },
 ] as const;
 
 type Tab = typeof LIVE_TABS[number]["id"];
@@ -26,7 +29,7 @@ const BG: React.CSSProperties = {
   background: "linear-gradient(145deg, #0d0d1a 0%, #0f0720 50%, #0d0d1a 100%)",
 };
 
-export function Hub({ onBack, userId, currentPersona }: HubProps) {
+export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
   const [tab, setTab] = useState<Tab>("bond-score");
 
   return (
@@ -87,6 +90,11 @@ export function Hub({ onBack, userId, currentPersona }: HubProps) {
           {tab === "journal" && (
             <motion.div key="journal" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <BondJournal userId={userId} currentPersona={currentPersona} />
+            </motion.div>
+          )}
+          {tab === "future-memory" && (
+            <motion.div key="future-memory" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <FutureMemory onStartChat={onStartChat} />
             </motion.div>
           )}
           {tab === "goals" && (

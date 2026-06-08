@@ -29,6 +29,8 @@ interface ChatPageProps {
   userId: string;
   onBack: () => void;
   onChangeRelType: () => void;
+  initialMessage?: string;
+  onMessageConsumed?: () => void;
 }
 
 const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = [
@@ -37,7 +39,7 @@ const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = 
   { type: "would_you_rather", icon: "🤔", label: "Would You Rather" },
 ];
 
-export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: ChatPageProps) {
+export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, initialMessage, onMessageConsumed }: ChatPageProps) {
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
 
@@ -508,11 +510,12 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType }: 
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
           <TextInput
-            onSend={sendMessage}
+            onSend={(text) => { sendMessage(text); onMessageConsumed?.(); }}
             disabled={isBusy}
             nsfw={persona.nsfw_mode}
             placeholder={inputPlaceholder}
             romantic={romanticMode}
+            initialValue={initialMessage}
           />
         </div>
 

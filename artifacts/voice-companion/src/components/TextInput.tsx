@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useState, useEffect, type KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 
 interface TextInputProps {
@@ -7,10 +7,16 @@ interface TextInputProps {
   nsfw: boolean;
   placeholder?: string;
   romantic?: boolean;
+  initialValue?: string;
 }
 
-export function TextInput({ onSend, disabled, nsfw, placeholder, romantic }: TextInputProps) {
-  const [value, setValue] = useState("");
+export function TextInput({ onSend, disabled, nsfw, placeholder, romantic, initialValue }: TextInputProps) {
+  const [value, setValue] = useState(initialValue ?? "");
+
+  // If parent changes initialValue (e.g. from Future Memory "Talk about this"), update local value
+  useEffect(() => {
+    if (initialValue) setValue(initialValue);
+  }, [initialValue]);
 
   const handleSend = () => {
     const trimmed = value.trim();
