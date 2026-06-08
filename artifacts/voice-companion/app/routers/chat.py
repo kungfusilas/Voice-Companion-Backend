@@ -1,5 +1,7 @@
+import os
 import json
 import asyncio
+import httpx
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -32,6 +34,30 @@ def _should_prompt_waitlist(text: str) -> bool:
 
 def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
     return persona_nsfw or request_nsfw
+
+
+_FREE_MODEL = "claude-haiku-4-5-20251001"
+_PREMIUM_MODEL = "claude-sonnet-4-6"
+
+
+async def _get_user_tier(user_id: str) -> str:
+    """Return 'premium' or 'free' for an authenticated user."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return "free"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{url}/rest/v1/profiles",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                params={"id": f"eq.{user_id}", "select": "subscription_tier", "limit": "1"},
+            )
+        if resp.status_code == 200 and resp.json():
+            return resp.json()[0].get("subscription_tier", "free")
+    except Exception:
+        pass
+    return "free"
 
 
 def _inject_date(prompt: str) -> str:
@@ -101,6 +127,10 @@ async def _build_system_prompt(
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_guest)):
     is_guest = user_id.startswith("guest_")
+    tier = "free" if is_guest else await _get_user_tier(user_id)
+    is_premium = tier == "premium"
+    claude_model = _PREMIUM_MODEL if is_premium else _FREE_MODEL
+
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
@@ -122,6 +152,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_gues
             system_prompt=system_prompt,
             history=history,
             user_message=request.message,
+            model=claude_model,
         )
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
@@ -149,9 +180,10 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_gues
             persona.name, persona.build_system_prompt(), new_stage_name, rel_type
         )
 
-    asyncio.create_task(
-        memory_extractor.extract_and_save(user_id, persona.id, request.message, reply)
-    )
+    if is_premium:
+        asyncio.create_task(
+            memory_extractor.extract_and_save(user_id, persona.id, request.message, reply)
+        )
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
 
     _hist = store.get_history(request.session_id)
@@ -194,6 +226,10 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
         {"type": "error",     "message": "..."}
     """
     is_guest = user_id.startswith("guest_")
+    tier = "free" if is_guest else await _get_user_tier(user_id)
+    is_premium = tier == "premium"
+    claude_model = _PREMIUM_MODEL if is_premium else _FREE_MODEL
+
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
@@ -206,15 +242,19 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
 
-    stream_fn = venice_client.stream_message if use_venice else claude.stream_message
     user_message = request.message
 
     async def event_generator():
-        async for chunk in stream_fn(
-            system_prompt=system_prompt,
-            history=history,
-            user_message=user_message,
-        ):
+        stream_iter = (
+            venice_client.stream_message(
+                system_prompt=system_prompt, history=history, user_message=user_message,
+            ) if use_venice else
+            claude.stream_message(
+                system_prompt=system_prompt, history=history, user_message=user_message,
+                model=claude_model,
+            )
+        )
+        async for chunk in stream_iter:
             try:
                 raw = chunk.removeprefix("data: ").strip()
                 payload = json.loads(raw)
@@ -229,11 +269,11 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
                     payload["model_backend"] = "venice" if use_venice else "claude"
 
                     if is_guest:
-                        # Skip all Supabase-dependent operations for guests
+                        # Guests: skip all Supabase ops
                         yield f"data: {json.dumps(payload)}\n\n"
                         return
 
-                    # ── Scoring ──────────────────────────────────────────────
+                    # ── Scoring (all authenticated users) ────────────────────
                     stats = await relationship.get_stats(user_id, persona.id)
                     rel_type: str = stats.get("relationship_type") or "romance"
                     old_score: int = stats.get("connection_score") or 50
@@ -273,17 +313,20 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
                     if _should_prompt_waitlist(full_text):
                         yield f"data: {json.dumps({'type': 'waitlist_prompt', 'companion_id': persona.id})}\n\n"
 
-                    asyncio.create_task(
-                        memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
-                    )
-                    asyncio.create_task(
-                        future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
-                    )
-                    asyncio.create_task(
-                        conversation_store.save_exchange(
-                            user_id, persona.id, request.session_id, user_message, full_text
+                    # ── Memory persistence (premium only) ───────────────────
+                    if is_premium:
+                        asyncio.create_task(
+                            memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
                         )
-                    )
+                        asyncio.create_task(
+                            future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
+                        )
+                        asyncio.create_task(
+                            conversation_store.save_exchange(
+                                user_id, persona.id, request.session_id, user_message, full_text
+                            )
+                        )
+
                     asyncio.create_task(
                         relationship.increment_message_count(user_id, persona.id)
                     )

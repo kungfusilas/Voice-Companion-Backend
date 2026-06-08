@@ -61,6 +61,7 @@ interface ChatPageProps {
   initialMessage?: string;
   onMessageConsumed?: () => void;
   isGuest?: boolean;
+  subscriptionTier?: string;
   onUpgradeChoice?: (tier: "free" | "premium") => void;
 }
 
@@ -73,8 +74,9 @@ const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = 
 export function ChatPage({
   persona, relType, userId, onBack, onChangeRelType,
   initialMessage, onMessageConsumed,
-  isGuest = false, onUpgradeChoice,
+  isGuest = false, subscriptionTier = "free", onUpgradeChoice,
 }: ChatPageProps) {
+  const isPremium = !isGuest && subscriptionTier === "premium";
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
 
@@ -93,14 +95,14 @@ export function ChatPage({
   const [stageMax, setStageMax] = useState(100);
   const [scoreDelta, setScoreDelta] = useState<number | undefined>(undefined);
 
-  // Romantic mode — persisted in localStorage, disabled for guests
+  // Romantic mode — persisted in localStorage, premium only
   const rmKey = `romantic_mode_${userId}_${persona.id}`;
   const ruKey = `romantic_unlocked_${userId}_${persona.id}`;
   const [romanticMode, setRomanticModeState] = useState(
-    () => !isGuest && localStorage.getItem(rmKey) === "true"
+    () => isPremium && localStorage.getItem(rmKey) === "true"
   );
   const [romanticUnlocked, setRomanticUnlocked] = useState(
-    () => !isGuest && localStorage.getItem(ruKey) === "true"
+    () => isPremium && localStorage.getItem(ruKey) === "true"
   );
   const [showAgeGate, setShowAgeGate] = useState(false);
   const [romanticLoading, setRomanticLoading] = useState(false);
@@ -285,7 +287,7 @@ export function ChatPage({
 
   // Romantic mode toggle handler
   const handleRomanticToggle = useCallback(() => {
-    if (isGuest || romanticLoading) return;
+    if (!isPremium || romanticLoading) return;
     if (!romanticUnlocked) {
       setShowAgeGate(true);
       return;
@@ -300,7 +302,7 @@ export function ChatPage({
       })
       .catch(() => setError("Could not change romantic mode — try again"))
       .finally(() => setRomanticLoading(false));
-  }, [isGuest, romanticLoading, romanticUnlocked, romanticMode, userId, persona.id, rmKey]);
+  }, [isPremium, romanticLoading, romanticUnlocked, romanticMode, userId, persona.id, rmKey]);
 
   const handleAgeGateConfirm = useCallback(() => {
     setShowAgeGate(false);
@@ -417,8 +419,8 @@ export function ChatPage({
             />
           )}
 
-          {/* Romantic mode — authenticated only */}
-          {!isGuest && (
+          {/* Romantic mode — premium only */}
+          {isPremium && (
             <motion.button
               onClick={handleRomanticToggle}
               disabled={romanticLoading}

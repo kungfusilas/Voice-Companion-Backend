@@ -21,6 +21,7 @@ const PLANS = [
     border: "border-violet-500/30",
     buttonBg: "linear-gradient(135deg, #7c3aed, #6d28d9)",
     glow: "rgba(124,58,237,0.3)",
+    highlight: false,
   },
   {
     key: "premium",
@@ -48,6 +49,7 @@ const PLANS = [
     border: "border-amber-500/30",
     buttonBg: "linear-gradient(135deg, #d97706, #b45309)",
     glow: "rgba(217,119,6,0.3)",
+    highlight: false,
   },
 ] as const;
 

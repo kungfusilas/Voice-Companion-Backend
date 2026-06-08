@@ -232,6 +232,7 @@ export default function App() {
               initialMessage={pendingPrompt ?? undefined}
               onMessageConsumed={() => setPendingPrompt(null)}
               isGuest={isGuest}
+              subscriptionTier={subscriptionTier}
               onUpgradeChoice={handleUpgradeChoice}
             />
           )}
