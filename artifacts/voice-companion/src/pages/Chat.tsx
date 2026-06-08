@@ -202,7 +202,7 @@ export function ChatPage({
 
           if (ttsEnabled && fullReply) {
             const spokenText = fullReply
-              .replace(/\*[^*]*\*/g, "")
+              .replace(/\*+([^*]*)\*+/g, "$1")
               .replace(/\[[^\]]*\]/g, "")
               .replace(/\([^)]*\)/g, "")
               .replace(/\s+/g, " ")
@@ -239,17 +239,27 @@ export function ChatPage({
     if (shouldTriggerWow && !wowDoneRef.current) {
       wowDoneRef.current = true;
       setWowGenerating(true);
+      const speakMsg = async (text: string) => {
+        if (!ttsEnabled) return;
+        const spoken = text
+          .replace(/\*+([^*]*)\*+/g, "$1")
+          .replace(/\[[^\]]*\]/g, "")
+          .replace(/\([^)]*\)/g, "")
+          .replace(/\s+/g, " ")
+          .trim();
+        if (spoken) {
+          try { await playAudio(await speakText(spoken, persona.id)); } catch {}
+        }
+      };
+
       try {
         const { message: wowMsg } = await requestWowMoment(sessionId, persona.id);
         setMessages((prev) => [...prev, { role: "assistant", content: wowMsg }]);
-        await new Promise((r) => setTimeout(r, 700));
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `I want to keep remembering all of this. Every conversation, every detail, every goal you share with me. Want to make this permanent?`,
-          },
-        ]);
+        await speakMsg(wowMsg);
+        await new Promise((r) => setTimeout(r, 400));
+        const upgradeAsk = `I want to keep remembering all of this. Every conversation, every detail, every goal you share with me. Want to make this permanent?`;
+        setMessages((prev) => [...prev, { role: "assistant", content: upgradeAsk }]);
+        await speakMsg(upgradeAsk);
         setShowUpgradeCard(true);
       } catch {
         setShowUpgradeCard(true);

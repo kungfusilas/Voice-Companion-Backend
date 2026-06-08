@@ -12,6 +12,13 @@ interface ChatTranscriptProps {
   onChatContinue?: (message: string) => void;
 }
 
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/\*+([^*]*)\*+/g, "$1")
+    .replace(/_([^_]*)_/g, "$1")
+    .trim();
+}
+
 export function ChatTranscript({
   messages,
   streamingText,
@@ -78,7 +85,7 @@ export function ChatTranscript({
                 {msg.role === "assistant" && (
                   <span className="text-xs font-medium opacity-60 block mb-1">{personaName}</span>
                 )}
-                {msg.content}
+                {stripMarkdown(msg.content)}
               </div>
             )}
           </motion.div>
@@ -94,7 +101,7 @@ export function ChatTranscript({
           >
             <div className={`max-w-[80%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm leading-relaxed border ${accentBg} ${accentText}`}>
               <span className="text-xs font-medium opacity-60 block mb-1">{personaName}</span>
-              {streamingText}
+              {stripMarkdown(streamingText)}
               <motion.span
                 className="inline-block w-1.5 h-3.5 ml-0.5 rounded-sm bg-current align-middle"
                 animate={{ opacity: [1, 0, 1] }}
