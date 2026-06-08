@@ -29,6 +29,7 @@ export default function App() {
   const [persona, setPersona] = useState<Persona | null>(null);
   const [guestId, setGuestId] = useState<string | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState("free");
+  const [subscribedAt, setSubscribedAt] = useState<string | null>(null);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
@@ -53,7 +54,10 @@ export default function App() {
       setSession(session);
       setScreen("companion-select");
       if (session) {
-        getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
+        getSubscriptionStatus().then(({ tier, subscribedAt }) => {
+          setSubscriptionTier(tier);
+          setSubscribedAt(subscribedAt);
+        }).catch(() => {});
       }
     });
 
@@ -63,7 +67,10 @@ export default function App() {
         // Signed in — clear guest state, fetch tier
         setGuestId(null);
         localStorage.removeItem("bondai_guest_id");
-        getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
+        getSubscriptionStatus().then(({ tier, subscribedAt }) => {
+          setSubscriptionTier(tier);
+          setSubscribedAt(subscribedAt);
+        }).catch(() => {});
         // If on auth screen, go back to companion select
         setScreen((prev) => prev === "auth" || prev === "loading" ? "companion-select" : prev);
       } else {
@@ -164,6 +171,8 @@ export default function App() {
         userId={userId ?? ""}
         currentPersona={persona}
         onStartChat={handleStartChatFromMemory}
+        subscriptionTier={subscriptionTier}
+        subscribedAt={subscribedAt}
       />
     );
   }

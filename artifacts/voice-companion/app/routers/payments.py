@@ -244,7 +244,7 @@ async def subscription_status(user_id: str = Depends(verify_token)):
         resp = await client.get(
             f"{url}/rest/v1/profiles",
             headers=_supa_headers(),
-            params={"id": f"eq.{user_id}", "select": "subscription_tier,subscription_status", "limit": "1"},
+            params={"id": f"eq.{user_id}", "select": "subscription_tier,subscription_status,subscribed_at", "limit": "1"},
         )
 
     if resp.status_code == 200 and resp.json():
@@ -252,5 +252,6 @@ async def subscription_status(user_id: str = Depends(verify_token)):
         return {
             "tier": row.get("subscription_tier", "free"),
             "status": row.get("subscription_status", "inactive"),
+            "subscribed_at": row.get("subscribed_at"),
         }
-    return {"tier": "free", "status": "inactive"}
+    return {"tier": "free", "status": "inactive", "subscribed_at": None}

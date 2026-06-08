@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Check, Loader2 } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Lock, Info } from "lucide-react";
 import { createCheckoutSession } from "@/lib/api";
+import { LegacyModal } from "@/components/LegacyModal";
 
 interface PricingPageProps {
   currentTier: string;
@@ -84,6 +85,7 @@ const TIER_COLORS: Record<string, string> = {
 export function PricingPage({ currentTier, onBack }: PricingPageProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [legacyModalOpen, setLegacyModalOpen] = useState(false);
 
   const handleSubscribe = async (planKey: string) => {
     if (loading || planKey === currentTier) return;
@@ -190,7 +192,64 @@ export function PricingPage({ currentTier, onBack }: PricingPageProps) {
             </motion.div>
           );
         })}
-      </div>
+
+        {/* Legacy Mode — loyalty reward, not purchasable */}
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: PLANS.length * 0.06 + 0.04 }}
+          className="relative rounded-2xl p-4 overflow-hidden"
+          style={{
+            background: "linear-gradient(135deg, rgba(251,191,36,0.07) 0%, rgba(120,83,20,0.08) 100%)",
+            border: "1px solid rgba(251,191,36,0.18)",
+          }}
+        >
+          {/* Subtle aged texture */}
+          <div
+            className="absolute inset-0 rounded-2xl pointer-events-none opacity-[0.06]"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(45deg, rgba(251,191,36,0.5) 0px, transparent 1px, transparent 9px, rgba(251,191,36,0.3) 10px)",
+            }}
+          />
+
+          <div className="relative flex items-start justify-between mb-3">
+            <div>
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <Lock className="w-3 h-3" style={{ color: "rgba(251,191,36,0.65)" }} />
+                <h2 className="text-sm font-semibold" style={{ color: "rgba(251,191,36,0.90)" }}>
+                  Legacy Mode
+                </h2>
+              </div>
+              <p className="text-[11px] italic" style={{ color: "rgba(251,191,36,0.45)" }}>
+                Earned, not bought.
+              </p>
+            </div>
+            <button
+              onClick={() => setLegacyModalOpen(true)}
+              className="transition-opacity hover:opacity-80 mt-0.5"
+              title="What is Legacy Mode?"
+            >
+              <Info className="w-4 h-4" style={{ color: "rgba(251,191,36,0.40)" }} />
+            </button>
+          </div>
+
+          <p className="relative text-xs mb-3" style={{ color: "rgba(251,191,36,0.55)" }}>
+            Activates free after 5 years of continuous subscription.
+          </p>
+
+          <div
+            className="relative py-2.5 rounded-xl text-center text-[11px] font-medium tracking-wide"
+            style={{
+              background: "rgba(251,191,36,0.04)",
+              border: "1px solid rgba(251,191,36,0.12)",
+              color: "rgba(251,191,36,0.32)",
+            }}
+          >
+            Cannot be purchased · Can only be earned
+          </div>
+        </motion.div>
+      </div>{/* end plan cards */}
 
       {/* Error */}
       {error && (
@@ -201,6 +260,8 @@ export function PricingPage({ currentTier, onBack }: PricingPageProps) {
       <p className="text-center text-[10px] text-white/20 pb-5 px-6 shrink-0">
         Payments processed securely by Stripe. Cancel anytime from your account settings.
       </p>
+
+      <LegacyModal open={legacyModalOpen} onClose={() => setLegacyModalOpen(false)} />
     </motion.div>
   );
 }

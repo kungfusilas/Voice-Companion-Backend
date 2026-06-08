@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
@@ -15,6 +15,8 @@ interface HubProps {
   userId: string;
   currentPersona: Persona | null;
   onStartChat?: (prompt: string) => void;
+  subscriptionTier?: string;
+  subscribedAt?: string | null;
 }
 
 const LIVE_TABS = [
@@ -32,9 +34,55 @@ const BG: React.CSSProperties = {
   background: "linear-gradient(145deg, #0d0d1a 0%, #0f0720 50%, #0d0d1a 100%)",
 };
 
-export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
+const LEGACY_TARGET_MONTHS = 60; // 5 years
+
+function useLegacyProgress(subscribedAt: string | null | undefined) {
+  return useMemo(() => {
+    if (!subscribedAt) return null;
+
+    const start = new Date(subscribedAt);
+    if (isNaN(start.getTime())) return null;
+
+    const now = new Date();
+    const totalMs = now.getTime() - start.getTime();
+    const msPerMonth = 1000 * 60 * 60 * 24 * 30.4375;
+    const monthsMember = Math.floor(totalMs / msPerMonth);
+    const progress = Math.min(monthsMember / LEGACY_TARGET_MONTHS, 1);
+
+    const remainingMonths = Math.max(LEGACY_TARGET_MONTHS - monthsMember, 0);
+    const yearsLeft  = Math.floor(remainingMonths / 12);
+    const monthsLeft = remainingMonths % 12;
+
+    let timeUntil = "";
+    if (remainingMonths <= 0) {
+      timeUntil = "unlocked";
+    } else if (yearsLeft > 0 && monthsLeft > 0) {
+      timeUntil = `${yearsLeft}y ${monthsLeft}mo`;
+    } else if (yearsLeft > 0) {
+      timeUntil = `${yearsLeft} year${yearsLeft !== 1 ? "s" : ""}`;
+    } else {
+      timeUntil = `${monthsLeft} month${monthsLeft !== 1 ? "s" : ""}`;
+    }
+
+    let memberFor = "";
+    if (monthsMember < 1) {
+      memberFor = "less than a month";
+    } else if (monthsMember < 12) {
+      memberFor = `${monthsMember} month${monthsMember !== 1 ? "s" : ""}`;
+    } else {
+      const y = Math.floor(monthsMember / 12);
+      const m = monthsMember % 12;
+      memberFor = m > 0 ? `${y}y ${m}mo` : `${y} year${y !== 1 ? "s" : ""}`;
+    }
+
+    return { progress, timeUntil, memberFor, unlocked: remainingMonths <= 0 };
+  }, [subscribedAt]);
+}
+
+export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionTier: _subscriptionTier, subscribedAt }: HubProps) {
   const [tab, setTab] = useState<Tab>("bond-score");
   const [legacyOpen, setLegacyOpen] = useState(false);
+  const legacy = useLegacyProgress(subscribedAt);
 
   return (
     <motion.div
@@ -76,7 +124,7 @@ export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
             </button>
           ))}
 
-          {/* Legacy Mode — locked, premium tab */}
+          {/* Legacy Mode — locked, opens info modal */}
           <button
             onClick={() => setLegacyOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all shrink-0 border"
@@ -90,6 +138,57 @@ export function Hub({ onBack, userId, currentPersona, onStartChat }: HubProps) {
             Legacy Mode
           </button>
         </div>
+
+        {/* Legacy progress indicator */}
+        {legacy && (
+          <motion.div
+            initial={{ opacity: 0, y: 6 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.15 }}
+            className="mt-3 rounded-xl px-3.5 py-2.5"
+            style={{
+              background: "rgba(251,191,36,0.04)",
+              border: "1px solid rgba(251,191,36,0.10)",
+            }}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span
+                className="text-[10px] font-medium uppercase tracking-wider flex items-center gap-1.5"
+                style={{ color: "rgba(251,191,36,0.50)" }}
+              >
+                <Lock className="w-2.5 h-2.5" />
+                Legacy Mode
+              </span>
+              <span className="text-[10px]" style={{ color: "rgba(251,191,36,0.30)" }}>
+                {legacy.unlocked ? "✦ Unlocked" : `${legacy.timeUntil} away`}
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div
+              className="w-full rounded-full overflow-hidden"
+              style={{ height: "3px", background: "rgba(251,191,36,0.10)" }}
+            >
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${legacy.progress * 100}%` }}
+                transition={{ duration: 1.2, ease: "easeOut", delay: 0.3 }}
+                className="h-full rounded-full"
+                style={{
+                  background: legacy.unlocked
+                    ? "rgba(251,191,36,0.9)"
+                    : "linear-gradient(90deg, rgba(251,191,36,0.35) 0%, rgba(251,191,36,0.65) 100%)",
+                }}
+              />
+            </div>
+
+            <p className="text-[10px] mt-1.5" style={{ color: "rgba(255,255,255,0.22)" }}>
+              {legacy.unlocked
+                ? "Legacy Mode is active — your companion has known you for years."
+                : `Member for ${legacy.memberFor} · ${legacy.timeUntil} until Legacy`}
+            </p>
+          </motion.div>
+        )}
       </div>
 
       {/* Tab content */}
