@@ -315,13 +315,13 @@ export async function saveActivityResult(
   }).catch(() => {});
 }
 
-export async function getSubscriptionStatus(): Promise<{ tier: string }> {
+export async function getSubscriptionStatus(): Promise<{ tier: string; status: string }> {
   try {
     const resp = await apiFetch(`${BASE}/subscription-status`);
-    if (!resp.ok) return { tier: "free" };
+    if (!resp.ok) return { tier: "free", status: "inactive" };
     return resp.json();
   } catch {
-    return { tier: "free" };
+    return { tier: "free", status: "inactive" };
   }
 }
 

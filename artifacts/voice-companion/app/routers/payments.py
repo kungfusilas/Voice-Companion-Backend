@@ -7,6 +7,27 @@ Stripe payments router.
 
 Products and prices are created on-demand on the first checkout call and cached
 in memory for the lifetime of the process.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DATABASE — run this SQL in Supabase SQL Editor before using payments:
+
+  CREATE TABLE IF NOT EXISTS profiles (
+    id                  uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+    stripe_customer_id  text,
+    subscription_tier   text        DEFAULT 'free',
+    subscription_status text        DEFAULT 'inactive',
+    subscribed_at       timestamptz,
+    updated_at          timestamptz DEFAULT now()
+  );
+
+If the table already exists, add the missing columns:
+
+  ALTER TABLE profiles
+    ADD COLUMN IF NOT EXISTS subscription_tier   text DEFAULT 'free',
+    ADD COLUMN IF NOT EXISTS stripe_customer_id  text,
+    ADD COLUMN IF NOT EXISTS subscription_status text DEFAULT 'inactive';
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 import asyncio
 import datetime
@@ -195,6 +216,7 @@ async def stripe_webhook(request: Request):
                 user_id,
                 stripe_customer_id=customer_id,
                 subscription_tier=plan,
+                subscription_status="active",
                 subscribed_at=datetime.datetime.utcnow().isoformat(),
             )
             logger.info("Subscription activated user=%s plan=%s", user_id, plan)
@@ -204,7 +226,7 @@ async def stripe_webhook(request: Request):
         if customer_id:
             user_id = await _user_id_by_customer(customer_id)
             if user_id:
-                await _upsert_profile(user_id, subscription_tier="free")
+                await _upsert_profile(user_id, subscription_tier="free", subscription_status="inactive")
                 logger.info("Subscription cancelled user=%s", user_id)
 
     return {"received": True}
@@ -221,9 +243,13 @@ async def subscription_status(user_id: str = Depends(verify_token)):
         resp = await client.get(
             f"{url}/rest/v1/profiles",
             headers=_supa_headers(),
-            params={"id": f"eq.{user_id}", "select": "subscription_tier", "limit": "1"},
+            params={"id": f"eq.{user_id}", "select": "subscription_tier,subscription_status", "limit": "1"},
         )
 
     if resp.status_code == 200 and resp.json():
-        return {"tier": resp.json()[0].get("subscription_tier", "free")}
-    return {"tier": "free"}
+        row = resp.json()[0]
+        return {
+            "tier": row.get("subscription_tier", "free"),
+            "status": row.get("subscription_status", "inactive"),
+        }
+    return {"tier": "free", "status": "inactive"}
