@@ -15,28 +15,59 @@ export function AuthCallback({ onSuccess, onError }: Props) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const code = new URLSearchParams(window.location.search).get("code");
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get("code");
+    const errorParam = params.get("error");
+    const errorDescription = params.get("error_description");
+
+    console.log("[AuthCallback] URL search:", window.location.search);
+    console.log("[AuthCallback] code:", code ? code.slice(0, 8) + "…" : null);
+    console.log("[AuthCallback] error param:", errorParam, errorDescription);
+
+    if (errorParam) {
+      const msg = errorDescription ?? errorParam;
+      console.error("[AuthCallback] OAuth error from provider:", msg);
+      setStatus("error");
+      setErrorMsg(msg);
+      setTimeout(onError, 2500);
+      return;
+    }
 
     if (!code) {
+      const msg = "No authorization code found in URL.";
+      console.error("[AuthCallback]", msg);
       setStatus("error");
-      setErrorMsg("No authorization code found in URL.");
+      setErrorMsg(msg);
       setTimeout(onError, 2000);
       return;
     }
 
+    // Must pass just the raw code string — NOT window.location.search or full URL
+    console.log("[AuthCallback] calling exchangeCodeForSession…");
     supabase.auth
-      .exchangeCodeForSession(window.location.search)
-      .then(({ error }) => {
+      .exchangeCodeForSession(code)
+      .then(({ data, error }) => {
         if (error) {
+          console.error("[AuthCallback] exchangeCodeForSession error:", {
+            message: error.message,
+            status: error.status,
+            name: error.name,
+          });
           setStatus("error");
           setErrorMsg(error.message);
           setTimeout(onError, 2500);
         } else {
-          // Session is now set — onAuthStateChange in App.tsx will also fire,
-          // but we navigate directly here for speed.
+          console.log("[AuthCallback] exchange succeeded, user:", data.session?.user?.email);
           window.history.replaceState({}, "", "/companion/");
           onSuccess();
         }
+      })
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[AuthCallback] unexpected error:", msg);
+        setStatus("error");
+        setErrorMsg(msg);
+        setTimeout(onError, 2500);
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
