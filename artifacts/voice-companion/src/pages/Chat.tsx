@@ -202,7 +202,7 @@ export function ChatPage({
 
           if (ttsEnabled && fullReply) {
             const spokenText = fullReply
-              .replace(/\*+([^*]*)\*+/g, "$1")
+              .replace(/\*[^*]*\*/g, "")
               .replace(/\[[^\]]*\]/g, "")
               .replace(/\([^)]*\)/g, "")
               .replace(/\s+/g, " ")
@@ -242,7 +242,7 @@ export function ChatPage({
       const speakMsg = async (text: string) => {
         if (!ttsEnabled) return;
         const spoken = text
-          .replace(/\*+([^*]*)\*+/g, "$1")
+          .replace(/\*[^*]*\*/g, "")
           .replace(/\[[^\]]*\]/g, "")
           .replace(/\([^)]*\)/g, "")
           .replace(/\s+/g, " ")
