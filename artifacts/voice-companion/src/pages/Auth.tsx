@@ -1,6 +1,17 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { FaGoogle, FaApple } from "react-icons/fa";
+
+const ROTATING_LINES = [
+  "Build Better Relationships",
+  "Your AI Companion for Real Connection",
+  "Every Conversation Matters",
+  "Companionship That Grows With You",
+  "The AI That Helps You Connect",
+  "Strengthen Every Relationship",
+  "Remember More. Connect Better.",
+  "Your Personal Relationship Coach",
+];
 
 interface Props {
   onAuth: () => void;
@@ -27,6 +38,19 @@ export function AuthPage({ onAuth }: Props) {
   const [oauthLoading, setOauthLoading] = useState<"google" | "apple" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [taglineIdx, setTaglineIdx] = useState(0);
+  const [taglineFade, setTaglineFade] = useState(true);
+
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setTaglineFade(false);
+      setTimeout(() => {
+        setTaglineIdx((i) => (i + 1) % ROTATING_LINES.length);
+        setTaglineFade(true);
+      }, 400);
+    }, 3000);
+    return () => clearInterval(iv);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,6 +105,12 @@ export function AuthPage({ onAuth }: Props) {
           </div>
           <h1 className="text-xl font-semibold text-white tracking-tight">BondAI</h1>
           <p className="text-white/40 text-sm mt-1">An AI that remembers who you're becoming.</p>
+          <p
+            className="text-white/25 text-xs mt-1.5 transition-opacity duration-400"
+            style={{ opacity: taglineFade ? 1 : 0 }}
+          >
+            {ROTATING_LINES[taglineIdx]}
+          </p>
         </div>
 
         {/* Mode toggle */}
