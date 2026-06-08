@@ -53,6 +53,7 @@ class ChatRequest(BaseModel):
     nsfw_mode: bool = False
     user_id: str | None = None
     romantic_mode: bool = False
+    onboarding_context: str | None = None
 
 
 class ChatResponse(BaseModel):

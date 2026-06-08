@@ -19,9 +19,33 @@ import {
   startActivity,
   setRomanticMode,
   submitWaitlist,
+  requestWowMoment,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
+
+// ── Onboarding questions ──────────────────────────────────────────────────────
+
+const ONBOARDING_QUESTIONS = [
+  "What's your name?",
+  "How old are you — or what stage of life are you in right now?",
+  "What's been on your mind the most lately?",
+  "Who are the most important people in your life right now?",
+  "Is there a relationship you've been hoping to improve?",
+  "What does feeling truly close to someone look like for you?",
+  "What's something you wish more people understood about you?",
+  "What are you working on about yourself these days?",
+  "What kind of support do you find most helpful — someone who listens, or someone who challenges you?",
+  "Is there anything you'd want me to always remember about you?",
+];
+
+function getOnboardingContext(step: number): string {
+  if (step >= ONBOARDING_QUESTIONS.length) return "";
+  const q = ONBOARDING_QUESTIONS[step];
+  return `[GUIDE Q${step + 1}/10]: After your warm, genuine response to what they just shared, naturally ask: "${q}" — weave it in as real curiosity, not a questionnaire item.`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface ChatPageProps {
   persona: Persona;
@@ -31,6 +55,8 @@ interface ChatPageProps {
   onChangeRelType: () => void;
   initialMessage?: string;
   onMessageConsumed?: () => void;
+  isGuest?: boolean;
+  onUpgradeChoice?: (tier: "free" | "premium") => void;
 }
 
 const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = [
@@ -39,7 +65,11 @@ const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = 
   { type: "would_you_rather", icon: "🤔", label: "Would You Rather" },
 ];
 
-export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, initialMessage, onMessageConsumed }: ChatPageProps) {
+export function ChatPage({
+  persona, relType, userId, onBack, onChangeRelType,
+  initialMessage, onMessageConsumed,
+  isGuest = false, onUpgradeChoice,
+}: ChatPageProps) {
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
 
@@ -58,14 +88,14 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
   const [stageMax, setStageMax] = useState(100);
   const [scoreDelta, setScoreDelta] = useState<number | undefined>(undefined);
 
-  // Romantic mode — persisted in localStorage so it survives refreshes
+  // Romantic mode — persisted in localStorage, disabled for guests
   const rmKey = `romantic_mode_${userId}_${persona.id}`;
   const ruKey = `romantic_unlocked_${userId}_${persona.id}`;
   const [romanticMode, setRomanticModeState] = useState(
-    () => localStorage.getItem(rmKey) === "true"
+    () => !isGuest && localStorage.getItem(rmKey) === "true"
   );
   const [romanticUnlocked, setRomanticUnlocked] = useState(
-    () => localStorage.getItem(ruKey) === "true"
+    () => !isGuest && localStorage.getItem(ruKey) === "true"
   );
   const [showAgeGate, setShowAgeGate] = useState(false);
   const [romanticLoading, setRomanticLoading] = useState(false);
@@ -75,11 +105,18 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
   const [waitlistEmail, setWaitlistEmail] = useState("");
   const [waitlistLoading, setWaitlistLoading] = useState(false);
 
+  // Guest onboarding state — refs to avoid stale closure issues
+  const guestMsgCountRef = useRef(0);
+  const wowDoneRef = useRef(false);
+  const [showUpgradeCard, setShowUpgradeCard] = useState(false);
+  const [wowGenerating, setWowGenerating] = useState(false);
+
   const busyRef = useRef(false);
   const { playing: speaking, play: playAudio } = useAudioPlayer();
 
-  // Init meter + romantic mode from DB
+  // Init meter + romantic mode from DB (skip for guests)
   useEffect(() => {
+    if (isGuest) return;
     let cancelled = false;
     getRelationshipStats(userId, persona.id)
       .then((stats) => {
@@ -90,7 +127,6 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
         setStageName(sName);
         setStageMin(sMin);
         setStageMax(sMax);
-        // Only apply DB values if localStorage has no opinion (first-ever visit)
         if (localStorage.getItem(rmKey) === null) {
           setRomanticModeState(stats.romantic_mode ?? false);
         }
@@ -100,10 +136,11 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [persona.id, relType, userId]);
+  }, [persona.id, relType, userId, isGuest]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load proactive messages
+  // Load proactive messages (skip for guests)
   useEffect(() => {
+    if (isGuest) return;
     let cancelled = false;
     fetchProactiveMessages(userId, persona.id)
       .then((data) => {
@@ -119,10 +156,10 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [persona.id, persona.name, userId]);
+  }, [persona.id, persona.name, userId, isGuest]);
 
   const sendMessage = useCallback(async (userText: string) => {
-    if (busyRef.current) return;
+    if (busyRef.current || showUpgradeCard) return;
     busyRef.current = true;
     setBusy(true);
     setError("");
@@ -131,9 +168,20 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
     setStreamingText("");
 
+    // Compute onboarding context for this step (guest flow only)
+    let onboardingCtx: string | undefined;
+    if (isGuest && !wowDoneRef.current) {
+      const step = guestMsgCountRef.current;
+      if (step < ONBOARDING_QUESTIONS.length) {
+        onboardingCtx = getOnboardingContext(step);
+      }
+    }
+
     let fullReply = "";
+    let shouldTriggerWow = false;
+
     try {
-      for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode)) {
+      for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx)) {
         if (event.type === "token") {
           fullReply += event.text ?? "";
           setStreamingText(fullReply);
@@ -144,7 +192,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
           if (event.stage_up_text) newMsgs.push({ role: "assistant", content: event.stage_up_text });
           setMessages((prev) => [...prev, ...newMsgs]);
 
-          if (event.connection_score !== undefined) {
+          if (!isGuest && event.connection_score !== undefined) {
             setConnectionScore(event.connection_score);
             setScoreDelta(event.score_delta);
             setStageName(event.stage_name ?? "");
@@ -154,17 +202,24 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
 
           if (ttsEnabled && fullReply) {
             const spokenText = fullReply
-              // Remove *action text*, [stage directions], (parenthetical notes)
               .replace(/\*[^*]*\*/g, "")
               .replace(/\[[^\]]*\]/g, "")
               .replace(/\([^)]*\)/g, "")
-              // Collapse leftover whitespace
               .replace(/\s+/g, " ")
               .trim();
             if (spokenText) {
               try { await playAudio(await speakText(spokenText, persona.id)); } catch {}
             }
           }
+
+          // Track guest onboarding progress
+          if (isGuest && !wowDoneRef.current) {
+            guestMsgCountRef.current += 1;
+            if (guestMsgCountRef.current >= 10) {
+              shouldTriggerWow = true;
+            }
+          }
+
         } else if (event.type === "waitlist_prompt") {
           setWaitlistPrompt(event.companion_id ?? persona.id);
         } else if (event.type === "error") {
@@ -179,11 +234,34 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       busyRef.current = false;
       setBusy(false);
     }
-  }, [sessionId, persona.id, userId, ttsEnabled, playAudio, romanticMode]);
+
+    // Trigger wow moment AFTER stream + TTS settle
+    if (shouldTriggerWow && !wowDoneRef.current) {
+      wowDoneRef.current = true;
+      setWowGenerating(true);
+      try {
+        const { message: wowMsg } = await requestWowMoment(sessionId, persona.id);
+        setMessages((prev) => [...prev, { role: "assistant", content: wowMsg }]);
+        await new Promise((r) => setTimeout(r, 700));
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `I want to keep remembering all of this. Every conversation, every detail, every goal you share with me. Want to make this permanent?`,
+          },
+        ]);
+        setShowUpgradeCard(true);
+      } catch {
+        setShowUpgradeCard(true);
+      } finally {
+        setWowGenerating(false);
+      }
+    }
+  }, [sessionId, persona.id, userId, ttsEnabled, playAudio, romanticMode, isGuest, showUpgradeCard]);
 
   // Romantic mode toggle handler
   const handleRomanticToggle = useCallback(() => {
-    if (romanticLoading) return;
+    if (isGuest || romanticLoading) return;
     if (!romanticUnlocked) {
       setShowAgeGate(true);
       return;
@@ -198,7 +276,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       })
       .catch(() => setError("Could not change romantic mode — try again"))
       .finally(() => setRomanticLoading(false));
-  }, [romanticLoading, romanticUnlocked, romanticMode, userId, persona.id]);
+  }, [isGuest, romanticLoading, romanticUnlocked, romanticMode, userId, persona.id, rmKey]);
 
   const handleAgeGateConfirm = useCallback(() => {
     setShowAgeGate(false);
@@ -213,10 +291,10 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       })
       .catch(() => setError("Could not enable romantic mode — try again"))
       .finally(() => setRomanticLoading(false));
-  }, [userId, persona.id]);
+  }, [userId, persona.id, rmKey, ruKey]);
 
   const handleActivity = useCallback(async (type: ActivityType) => {
-    if (activityLoading || busy) return;
+    if (activityLoading || busy || isGuest) return;
     setActivityLoading(type);
     setError("");
     try {
@@ -231,7 +309,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
     } finally {
       setActivityLoading(null);
     }
-  }, [persona.id, userId, activityLoading, busy]);
+  }, [persona.id, userId, activityLoading, busy, isGuest]);
 
   const handleWaitlistSubmit = useCallback(async () => {
     if (!waitlistEmail.trim() || !waitlistPrompt) return;
@@ -240,7 +318,6 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       await submitWaitlist(waitlistEmail.trim(), waitlistPrompt, userId);
       setWaitlistSubmitted(true);
     } catch {
-      // Silently succeed — don't block the user experience on a waitlist error
       setWaitlistSubmitted(true);
     } finally {
       setWaitlistLoading(false);
@@ -248,7 +325,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
   }, [waitlistEmail, waitlistPrompt, userId]);
 
   const handleSelfie = useCallback(async () => {
-    if (selfieLoading || busy) return;
+    if (selfieLoading || busy || isGuest) return;
     setSelfieLoading(true);
     setError("");
     try {
@@ -262,7 +339,7 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
     } finally {
       setSelfieLoading(false);
     }
-  }, [persona.id, persona.name, userId, selfieLoading, busy]);
+  }, [persona.id, persona.name, userId, selfieLoading, busy, isGuest]);
 
   const handleAudio = useCallback(async (blob: Blob) => {
     try {
@@ -307,41 +384,45 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
           Back
         </button>
         <div className="flex items-center gap-2">
-          <MemoriesPanel
-            userId={userId}
-            personaId={persona.id}
-            personaName={persona.name}
-            nsfw={persona.nsfw_mode}
-          />
+          {!isGuest && (
+            <MemoriesPanel
+              userId={userId}
+              personaId={persona.id}
+              personaName={persona.name}
+              nsfw={persona.nsfw_mode}
+            />
+          )}
 
-          {/* 🌙 Romantic Mode toggle */}
-          <motion.button
-            onClick={handleRomanticToggle}
-            disabled={romanticLoading}
-            title="Romantic Mode"
-            className="relative flex items-center justify-center w-8 h-8 rounded-full border transition disabled:opacity-50"
-            style={{
-              borderColor: romanticMode ? "rgba(251,113,133,0.5)" : "rgba(255,255,255,0.12)",
-              background: romanticMode ? "rgba(159,18,57,0.15)" : "rgba(255,255,255,0.04)",
-            }}
-            animate={romanticMode ? {
-              boxShadow: [
-                "0 0 6px rgba(251,113,133,0.3)",
-                "0 0 14px rgba(251,113,133,0.6)",
-                "0 0 6px rgba(251,113,133,0.3)",
-              ],
-            } : { boxShadow: "none" }}
-            transition={romanticMode ? { duration: 2, repeat: Infinity } : {}}
-          >
-            {romanticLoading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
-            ) : (
-              <Moon
-                className="w-3.5 h-3.5 transition-colors"
-                style={{ color: romanticMode ? "#fb7185" : "rgba(255,255,255,0.3)" }}
-              />
-            )}
-          </motion.button>
+          {/* Romantic mode — authenticated only */}
+          {!isGuest && (
+            <motion.button
+              onClick={handleRomanticToggle}
+              disabled={romanticLoading}
+              title="Romantic Mode"
+              className="relative flex items-center justify-center w-8 h-8 rounded-full border transition disabled:opacity-50"
+              style={{
+                borderColor: romanticMode ? "rgba(251,113,133,0.5)" : "rgba(255,255,255,0.12)",
+                background: romanticMode ? "rgba(159,18,57,0.15)" : "rgba(255,255,255,0.04)",
+              }}
+              animate={romanticMode ? {
+                boxShadow: [
+                  "0 0 6px rgba(251,113,133,0.3)",
+                  "0 0 14px rgba(251,113,133,0.6)",
+                  "0 0 6px rgba(251,113,133,0.3)",
+                ],
+              } : { boxShadow: "none" }}
+              transition={romanticMode ? { duration: 2, repeat: Infinity } : {}}
+            >
+              {romanticLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin text-rose-400" />
+              ) : (
+                <Moon
+                  className="w-3.5 h-3.5 transition-colors"
+                  style={{ color: romanticMode ? "#fb7185" : "rgba(255,255,255,0.3)" }}
+                />
+              )}
+            </motion.button>
+          )}
 
           <button
             onClick={() => setTtsEnabled((v) => !v)}
@@ -371,15 +452,16 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
       {/* ── Backend badge ── */}
       <div className="flex justify-center mb-2 shrink-0">
         <span
-          className={`text-xs px-2.5 py-0.5 rounded-full border cursor-pointer transition ${
+          className={`text-xs px-2.5 py-0.5 rounded-full border transition ${
+            isGuest ? "cursor-default" : "cursor-pointer"
+          } ${
             persona.nsfw_mode
               ? "bg-red-950/40 border-red-800/40 text-red-400"
               : romanticMode
               ? "bg-rose-950/40 border-rose-800/40 text-rose-400"
               : "bg-violet-950/40 border-violet-800/40 text-violet-400"
           }`}
-          onClick={onChangeRelType}
-          title="Change relationship type"
+          onClick={isGuest ? undefined : onChangeRelType}
         >
           {persona.nsfw_mode
             ? "Venice.ai · uncensored"
@@ -389,8 +471,8 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
         </span>
       </div>
 
-      {/* ── Connection Meter ── */}
-      {stageName && (
+      {/* ── Connection Meter (authenticated only) ── */}
+      {!isGuest && stageName && (
         <ConnectionMeter
           score={connectionScore}
           stageName={stageName}
@@ -419,6 +501,69 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
         userId={userId}
         onChatContinue={sendMessage}
       />
+
+      {/* ── Wow generating spinner ── */}
+      <AnimatePresence>
+        {wowGenerating && (
+          <motion.div
+            key="wow-spinner"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="flex justify-center mb-2 shrink-0"
+          >
+            <div className="flex items-center gap-2 text-xs text-violet-300/50 italic">
+              <div className="w-3 h-3 border border-violet-400/30 border-t-violet-400 rounded-full animate-spin" />
+              reflecting…
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Upgrade card (appears after wow moment) ── */}
+      <AnimatePresence>
+        {showUpgradeCard && !wowGenerating && (
+          <motion.div
+            key="upgrade-card"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1, type: "spring", stiffness: 280, damping: 26 }}
+            className="mx-4 mb-3 shrink-0 space-y-2"
+          >
+            {/* Premium */}
+            <button
+              onClick={() => onUpgradeChoice?.("premium")}
+              className="w-full py-4 px-4 rounded-2xl text-left transition-transform active:scale-[0.98]"
+              style={{
+                background: "linear-gradient(135deg, rgba(124,58,237,0.22), rgba(109,40,217,0.10))",
+                border: "1px solid rgba(139,92,246,0.42)",
+                boxShadow: "0 4px 24px rgba(109,40,217,0.18)",
+              }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-white font-semibold text-sm">✨ Go Premium</p>
+                  <p className="text-white/40 text-xs mt-0.5">Unlimited · Full memory · Every feature</p>
+                </div>
+                <span className="text-violet-400 text-sm shrink-0 ml-3">→</span>
+              </div>
+            </button>
+
+            {/* Free */}
+            <button
+              onClick={() => onUpgradeChoice?.("free")}
+              className="w-full py-3 px-4 rounded-2xl text-left transition-transform active:scale-[0.98]"
+              style={{
+                background: "rgba(255,255,255,0.03)",
+                border: "1px solid rgba(255,255,255,0.09)",
+              }}
+            >
+              <p className="text-white/55 text-sm">Continue for free</p>
+              <p className="text-white/28 text-xs mt-0.5">Limited messages · No memory between sessions</p>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Waitlist card ── */}
       <AnimatePresence>
@@ -483,35 +628,37 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
         <p className="text-center text-xs text-red-400 px-4 pb-1 shrink-0">{error}</p>
       )}
 
-      {/* ── Activity toolbar ── */}
-      <div className="flex items-center gap-2 px-4 pb-1.5 shrink-0">
-        <span className="text-white/20 text-[9px] uppercase tracking-widest mr-0.5">Play</span>
-        {ACTIVITY_BUTTONS.map(({ type, icon, label }) => (
-          <motion.button
-            key={type}
-            onClick={() => handleActivity(type)}
-            disabled={isBusy || !!activityLoading}
-            whileTap={{ scale: 0.94 }}
-            title={label}
-            className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border transition disabled:opacity-40 ${accentColor}`}
-            style={{ background: "rgba(255,255,255,0.03)" }}
-          >
-            {activityLoading === type ? (
-              <Loader2 className="w-3 h-3 animate-spin" />
-            ) : (
-              <span className="text-xs">{icon}</span>
-            )}
-            <span className="hidden xs:inline">{label}</span>
-          </motion.button>
-        ))}
-      </div>
+      {/* ── Activity toolbar (authenticated only) ── */}
+      {!isGuest && (
+        <div className="flex items-center gap-2 px-4 pb-1.5 shrink-0">
+          <span className="text-white/20 text-[9px] uppercase tracking-widest mr-0.5">Play</span>
+          {ACTIVITY_BUTTONS.map(({ type, icon, label }) => (
+            <motion.button
+              key={type}
+              onClick={() => handleActivity(type)}
+              disabled={isBusy || !!activityLoading}
+              whileTap={{ scale: 0.94 }}
+              title={label}
+              className={`flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border transition disabled:opacity-40 ${accentColor}`}
+              style={{ background: "rgba(255,255,255,0.03)" }}
+            >
+              {activityLoading === type ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <span className="text-xs">{icon}</span>
+              )}
+              <span className="hidden xs:inline">{label}</span>
+            </motion.button>
+          ))}
+        </div>
+      )}
 
       {/* ── Input row ── */}
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
           <TextInput
             onSend={(text) => { sendMessage(text); onMessageConsumed?.(); }}
-            disabled={isBusy}
+            disabled={isBusy || showUpgradeCard}
             nsfw={persona.nsfw_mode}
             placeholder={inputPlaceholder}
             romantic={romanticMode}
@@ -519,26 +666,28 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
           />
         </div>
 
-        {/* Selfie button */}
-        <motion.button
-          onClick={handleSelfie}
-          disabled={isBusy || selfieLoading}
-          whileTap={{ scale: 0.93 }}
-          title="Ask for a selfie 📸"
-          className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${accentColor}`}
-          style={{ background: "rgba(255,255,255,0.04)" }}
-        >
-          {selfieLoading
-            ? <Loader2 className="w-5 h-5 animate-spin" />
-            : <Camera className="w-5 h-5" />
-          }
-        </motion.button>
+        {/* Selfie — authenticated only */}
+        {!isGuest && (
+          <motion.button
+            onClick={handleSelfie}
+            disabled={isBusy || selfieLoading}
+            whileTap={{ scale: 0.93 }}
+            title="Ask for a selfie 📸"
+            className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${accentColor}`}
+            style={{ background: "rgba(255,255,255,0.04)" }}
+          >
+            {selfieLoading
+              ? <Loader2 className="w-5 h-5 animate-spin" />
+              : <Camera className="w-5 h-5" />
+            }
+          </motion.button>
+        )}
 
         <PushToTalkButton
           state={recorderState}
           onStart={start}
           onStop={stop}
-          disabled={busy}
+          disabled={busy || showUpgradeCard}
           nsfw={persona.nsfw_mode}
         />
       </div>
@@ -564,14 +713,12 @@ export function ChatPage({ persona, relType, userId, onBack, onChangeRelType, in
                 boxShadow: "0 24px 60px rgba(0,0,0,0.6), 0 0 40px rgba(159,18,57,0.12)",
               }}
             >
-              {/* Subtle top gradient */}
               <div
                 className="absolute top-0 inset-x-0 h-px"
                 style={{ background: "linear-gradient(90deg, transparent, rgba(251,113,133,0.4), transparent)" }}
               />
 
               <div className="px-6 pt-7 pb-6">
-                {/* Moon icon */}
                 <div className="flex justify-center mb-4">
                   <div
                     className="w-12 h-12 rounded-full flex items-center justify-center"

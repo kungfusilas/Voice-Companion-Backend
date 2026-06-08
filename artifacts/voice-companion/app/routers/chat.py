@@ -13,7 +13,7 @@ from app import conversation_store
 from app import relationship
 from app import scoring
 from app.companions import ROMANTIC_MODE_PROMPTS
-from app.auth_middleware import verify_token
+from app.auth_middleware import verify_token_or_guest
 
 router = APIRouter()
 
@@ -40,17 +40,26 @@ def _inject_date(prompt: str) -> str:
 
 
 async def _build_system_prompt(
-    persona, user_id: str, user_message: str, romantic_mode: bool = False
+    persona,
+    user_id: str,
+    user_message: str,
+    romantic_mode: bool = False,
+    onboarding_context: str | None = None,
+    is_guest: bool = False,
 ) -> str:
     """
-    Build the full system prompt:
-    1. Base persona prompt
-    2. Romantic Mode overlay (if enabled)
-    3. Semantically relevant long-term memories (vector search, top-5)
-    4. Relationship level context
-    5. One-time drift notice (if triggered)
+    Build the full system prompt.
+    For guests, skip Supabase calls and just use the base persona prompt.
+    For authenticated users, include memories, relationship context, and drift.
     """
     base_prompt = persona.build_system_prompt()
+
+    if is_guest:
+        prompt = _inject_date(base_prompt)
+        if onboarding_context:
+            prompt += f"\n\n{onboarding_context}"
+        return prompt
+
     try:
         memories, stats, needs_drift = await asyncio.gather(
             mem_store.retrieve_memories(user_id, persona.id, user_message, top_k=5),
@@ -59,7 +68,6 @@ async def _build_system_prompt(
         )
 
         message_count = stats.get("message_count", 0)
-        # romantic_mode comes from request (client-owned state via localStorage)
 
         memory_block = memory_extractor.format_memories_for_prompt(memories)
         rel_context = relationship.build_relationship_context(persona.id, message_count)
@@ -79,21 +87,28 @@ async def _build_system_prompt(
             )
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
-        return _inject_date(
+        prompt = _inject_date(
             base_prompt + romantic_block + memory_block + rel_context + drift_block
         )
+        if onboarding_context:
+            prompt += f"\n\n{onboarding_context}"
+        return prompt
 
     except Exception:
         return _inject_date(base_prompt)
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
+async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_guest)):
+    is_guest = user_id.startswith("guest_")
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
     history = store.get_or_create_session(request.session_id, request.persona_id)
-    system_prompt = await _build_system_prompt(persona, user_id, request.message, request.romantic_mode)
+    system_prompt = await _build_system_prompt(
+        persona, user_id, request.message, request.romantic_mode,
+        request.onboarding_context, is_guest,
+    )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     if use_venice:
@@ -111,6 +126,15 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
+
+    if is_guest:
+        return ChatResponse(
+            session_id=request.session_id,
+            persona_id=request.persona_id,
+            reply=reply,
+            message_count=len(store.get_history(request.session_id)),
+            model_backend="venice" if use_venice else "claude",
+        )
 
     stats = await relationship.get_stats(user_id, persona.id)
     rel_type = stats.get("relationship_type") or "romance"
@@ -130,7 +154,6 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
     )
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
 
-    # Bond Score: analyze every 3 user messages
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
     if len(_user_msgs) >= 3 and len(_user_msgs) % 3 == 0:
@@ -157,7 +180,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)):
+async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_or_guest)):
     """
     Stream the companion reply as SSE.
 
@@ -170,11 +193,15 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)
          "stage_min": N, "stage_max": N, "stage_up_text": "..."}
         {"type": "error",     "message": "..."}
     """
+    is_guest = user_id.startswith("guest_")
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
     history = store.get_or_create_session(request.session_id, request.persona_id)
-    system_prompt = await _build_system_prompt(persona, user_id, request.message, request.romantic_mode)
+    system_prompt = await _build_system_prompt(
+        persona, user_id, request.message, request.romantic_mode,
+        request.onboarding_context, is_guest,
+    )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
@@ -200,6 +227,11 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)
                     )
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
+
+                    if is_guest:
+                        # Skip all Supabase-dependent operations for guests
+                        yield f"data: {json.dumps(payload)}\n\n"
+                        return
 
                     # ── Scoring ──────────────────────────────────────────────
                     stats = await relationship.get_stats(user_id, persona.id)

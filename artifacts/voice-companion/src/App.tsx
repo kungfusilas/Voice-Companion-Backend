@@ -10,7 +10,7 @@ import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "auth" | "companion-select" | "chat" | "pricing" | "hub";
+type Screen = "loading" | "companion-select" | "chat" | "auth" | "pricing" | "hub";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -27,16 +27,15 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [session, setSession] = useState<Session | null>(null);
   const [persona, setPersona] = useState<Persona | null>(null);
-  const [relType, setRelType] = useState<string | null>(null);
+  const [guestId, setGuestId] = useState<string | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState("free");
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
   // ── Auth session management ──────────────────────────────────────────────
   useEffect(() => {
+    // Check for Stripe checkout return params
     const params = new URLSearchParams(window.location.search);
-
-    // Check for checkout result URL params (Stripe redirect back)
     if (params.get("checkout") === "success") {
       const plan = params.get("plan");
       setCheckoutMessage(plan ? `🎉 You're on ${plan.charAt(0).toUpperCase() + plan.slice(1)}!` : "🎉 Subscription activated!");
@@ -45,48 +44,60 @@ export default function App() {
       window.history.replaceState({}, "", window.location.pathname);
     }
 
+    // Load existing guest ID
+    const existingGuestId = localStorage.getItem("bondai_guest_id");
+    if (existingGuestId) setGuestId(existingGuestId);
+
+    // Always start at companion-select — no login wall
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      setScreen(session ? "companion-select" : "auth");
+      setScreen("companion-select");
+      if (session) {
+        getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) {
-        setScreen((prev) =>
-          prev === "auth" || prev === "loading" ? "companion-select" : prev
-        );
-        // Fetch subscription tier whenever session changes
+        // Signed in — clear guest state, fetch tier
+        setGuestId(null);
+        localStorage.removeItem("bondai_guest_id");
         getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
+        // If on auth screen, go back to companion select
+        setScreen((prev) => prev === "auth" || prev === "loading" ? "companion-select" : prev);
       } else {
+        // Signed out — go to companion-select (not auth)
         setPersona(null);
-        setRelType(null);
         setSubscriptionTier("free");
-        setScreen("auth");
+        setScreen("companion-select");
       }
     });
 
     return () => subscription.unsubscribe();
   }, []);
 
-  // Fetch subscription tier on mount when session exists
-  useEffect(() => {
-    if (session) {
-      getSubscriptionStatus().then(({ tier }) => setSubscriptionTier(tier)).catch(() => {});
-    }
-  }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ── User ID (real or guest) ──────────────────────────────────────────────
+  const userId = session?.user.id ?? (guestId ? `guest_${guestId}` : null);
+  const isGuest = !session;
 
-  const userId = session?.user.id ?? null;
-
+  // ── Companion selection ──────────────────────────────────────────────────
   const handleCompanionSelect = (p: Persona) => {
     setPersona(p);
-    setRelType("friendship");
+    // Ensure a guest ID exists for unauthenticated users
+    if (!session) {
+      let gid = localStorage.getItem("bondai_guest_id");
+      if (!gid) {
+        gid = crypto.randomUUID();
+        localStorage.setItem("bondai_guest_id", gid);
+      }
+      setGuestId(gid);
+    }
     setScreen("chat");
   };
 
   const handleBack = () => {
     setPersona(null);
-    setRelType(null);
     setScreen("companion-select");
   };
 
@@ -102,6 +113,15 @@ export default function App() {
       setScreen("chat");
     } else {
       setScreen("companion-select");
+    }
+  };
+
+  // ── Upgrade / subscription flow ──────────────────────────────────────────
+  const handleUpgradeChoice = (tier: "free" | "premium") => {
+    if (tier === "premium") {
+      setScreen("pricing");
+    } else {
+      setScreen("auth"); // account creation for free tier
     }
   };
 
@@ -127,12 +147,16 @@ export default function App() {
     );
   }
 
-  // ── Auth screen (full-page, no card wrapper) ──────────────────────────────
+  // ── Auth screen — shown post-upgrade, not at entry ─────────────────────
   if (screen === "auth") {
-    return <AuthPage onAuth={() => setScreen("companion-select")} />;
+    return (
+      <AuthPage
+        onAuth={() => setScreen("companion-select")}
+      />
+    );
   }
 
-  // ── Hub (full-page, no card wrapper) ─────────────────────────────────────
+  // ── Hub (full-page, authenticated only) ───────────────────────────────
   if (screen === "hub") {
     return (
       <Hub
@@ -144,7 +168,7 @@ export default function App() {
     );
   }
 
-  // ── Initial load spinner ──────────────────────────────────────────────────
+  // ── Initial load spinner ──────────────────────────────────────────────
   if (screen === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center" style={BG_STYLE}>
@@ -153,7 +177,7 @@ export default function App() {
     );
   }
 
-  // ── Main app card ─────────────────────────────────────────────────────────
+  // ── Main app card ─────────────────────────────────────────────────────
   const isNarrow = screen === "companion-select" || screen === "pricing";
   const maxW = isNarrow ? "max-w-sm" : "max-w-md";
   const h = isNarrow ? "min-h-[640px]" : "h-[680px]";
@@ -182,9 +206,9 @@ export default function App() {
             <CompanionSelect
               key="companion-select"
               onSelect={handleCompanionSelect}
-              onSignOut={handleSignOut}
+              onSignOut={session ? handleSignOut : undefined}
               onUpgrade={() => setScreen("pricing")}
-              onHub={handleOpenHub}
+              onHub={session ? handleOpenHub : undefined}
               subscriptionTier={subscriptionTier}
             />
           )}
@@ -193,7 +217,7 @@ export default function App() {
             <PricingPage
               key="pricing"
               currentTier={subscriptionTier}
-              onBack={() => setScreen("companion-select")}
+              onBack={() => setScreen(isGuest ? "companion-select" : "companion-select")}
             />
           )}
 
@@ -201,12 +225,14 @@ export default function App() {
             <ChatPage
               key={`chat-${persona.id}`}
               persona={persona}
-              relType={relType ?? "friendship"}
+              relType="friendship"
               userId={userId}
               onBack={handleBack}
               onChangeRelType={handleBack}
               initialMessage={pendingPrompt ?? undefined}
               onMessageConsumed={() => setPendingPrompt(null)}
+              isGuest={isGuest}
+              onUpgradeChoice={handleUpgradeChoice}
             />
           )}
         </AnimatePresence>

@@ -13,12 +13,14 @@ async function apiFetch(input: RequestInfo, init: RequestInit = {}): Promise<Res
     data: { session },
   } = await supabase.auth.getSession();
   const token = session?.access_token;
+  const guestId = !token ? localStorage.getItem("bondai_guest_id") : null;
 
   return fetch(input, {
     ...init,
     headers: {
       ...(init.headers as Record<string, string> | undefined),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(guestId ? { "X-Guest-ID": guestId } : {}),
     },
   });
 }
@@ -196,13 +198,19 @@ export async function* chatStream(
   session_id: string,
   persona_id: string,
   message: string,
-  _user_id?: string,        // kept for call-site compat; user_id now comes from JWT
+  _user_id?: string,
   romantic_mode?: boolean,
+  _nsfw_mode?: boolean,
+  onboarding_context?: string,
 ): AsyncGenerator<StreamEvent> {
   const res = await apiFetch(`${BASE}/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ session_id, persona_id, message, romantic_mode: romantic_mode ?? false }),
+    body: JSON.stringify({
+      session_id, persona_id, message,
+      romantic_mode: romantic_mode ?? false,
+      onboarding_context: onboarding_context ?? undefined,
+    }),
   });
   if (!res.ok || !res.body) throw new Error(await res.text());
 
@@ -221,6 +229,20 @@ export async function* chatStream(
       try { yield JSON.parse(line.slice(6)) as StreamEvent; } catch {}
     }
   }
+}
+
+// ── Onboarding / Wow moment ───────────────────────────────────────────────────
+
+export interface WowResponse { message: string; }
+
+export async function requestWowMoment(session_id: string, persona_id: string): Promise<WowResponse> {
+  const res = await apiFetch(`${BASE}/onboarding/wow`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id, persona_id }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
 }
 
 // ── Memories ──────────────────────────────────────────────────────────────────

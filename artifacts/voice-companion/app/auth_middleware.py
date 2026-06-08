@@ -15,7 +15,7 @@ Usage in a route:
 import time
 import httpx
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 _security = HTTPBearer(auto_error=False)
@@ -138,5 +138,28 @@ def verify_token(
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid token",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+def verify_token_or_guest(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(_security),
+) -> str:
+    """
+    Like verify_token but also accepts an X-Guest-ID header for unauthenticated
+    guests.  Returns either a verified Supabase user UUID or 'guest_<id>'.
+    """
+    if credentials:
+        return verify_token(credentials)
+
+    guest_id = request.headers.get("X-Guest-ID", "").strip()
+    if guest_id:
+        safe = "".join(c for c in guest_id if c.isalnum() or c == "-")[:36]
+        return f"guest_{safe}"
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Not authenticated",
         headers={"WWW-Authenticate": "Bearer"},
     )
