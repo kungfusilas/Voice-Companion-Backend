@@ -270,11 +270,10 @@ export function ChatPage({
       try {
         const { message: wowMsg } = await requestWowMoment(sessionId, persona.id);
         setMessages((prev) => [...prev, { role: "assistant", content: wowMsg }]);
-        await speakMsg(wowMsg);
-        await new Promise((r) => setTimeout(r, 400));
+        await speakMsg(wowMsg);                     // waits for audio to finish
         const upgradeAsk = `I want to keep remembering all of this. Every conversation, every detail, every goal you share with me. Want to make this permanent?`;
         setMessages((prev) => [...prev, { role: "assistant", content: upgradeAsk }]);
-        await speakMsg(upgradeAsk);
+        await speakMsg(upgradeAsk);                 // waits for audio to finish
         setShowUpgradeCard(true);
       } catch {
         setShowUpgradeCard(true);

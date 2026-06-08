@@ -13,12 +13,22 @@ export function useAudioPlayer() {
     const audio = new Audio(url);
     audioRef.current = audio;
     setPlaying(true);
-    audio.onended = () => {
-      setPlaying(false);
-      URL.revokeObjectURL(url);
-    };
-    audio.onerror = () => setPlaying(false);
-    await audio.play();
+
+    await new Promise<void>((resolve) => {
+      audio.onended = () => {
+        setPlaying(false);
+        URL.revokeObjectURL(url);
+        resolve();
+      };
+      audio.onerror = () => {
+        setPlaying(false);
+        resolve();
+      };
+      audio.play().catch(() => {
+        setPlaying(false);
+        resolve();
+      });
+    });
   }, []);
 
   const stop = useCallback(() => {
