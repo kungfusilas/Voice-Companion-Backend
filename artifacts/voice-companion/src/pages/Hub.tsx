@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
+import { BondScore } from "./BondScore";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -13,9 +14,10 @@ interface HubProps {
 }
 
 const LIVE_TABS = [
-  { id: "memory", label: "Memory Threads",   icon: Sparkles },
-  { id: "journal", label: "Bond Journal",    icon: BookOpen  },
-  { id: "goals",   label: "Connection Goals", icon: Target  },
+  { id: "bond-score", label: "Bond Score",      icon: Activity },
+  { id: "memory",     label: "Memory Threads",  icon: Sparkles },
+  { id: "journal",    label: "Bond Journal",    icon: BookOpen  },
+  { id: "goals",      label: "Connection Goals", icon: Target  },
 ] as const;
 
 type Tab = typeof LIVE_TABS[number]["id"];
@@ -25,7 +27,7 @@ const BG: React.CSSProperties = {
 };
 
 export function Hub({ onBack, userId, currentPersona }: HubProps) {
-  const [tab, setTab] = useState<Tab>("memory");
+  const [tab, setTab] = useState<Tab>("bond-score");
 
   return (
     <motion.div
@@ -72,6 +74,11 @@ export function Hub({ onBack, userId, currentPersona }: HubProps) {
       {/* Tab content */}
       <div className="flex-1 overflow-hidden">
         <AnimatePresence mode="wait">
+          {tab === "bond-score" && (
+            <motion.div key="bond-score" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <BondScore />
+            </motion.div>
+          )}
           {tab === "memory" && (
             <motion.div key="memory" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <MemoryThreads userId={userId} currentPersona={currentPersona} />

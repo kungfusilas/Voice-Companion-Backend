@@ -7,6 +7,7 @@ from app.models import ChatMessage, ChatRequest, ChatResponse
 from app import store, claude, venice_client
 from app import memory as mem_store
 from app import memory_extractor
+from app import bond_analyzer
 from app import relationship
 from app import scoring
 from app.companions import ROMANTIC_MODE_PROMPTS
@@ -127,6 +128,16 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token)):
     )
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
 
+    # Bond Score: analyze every 3 user messages
+    _hist = store.get_history(request.session_id)
+    _user_msgs = [m.content for m in _hist if m.role == "user"]
+    if len(_user_msgs) >= 3 and len(_user_msgs) % 3 == 0:
+        asyncio.create_task(
+            bond_analyzer.analyze_and_save(
+                user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
+            )
+        )
+
     return ChatResponse(
         session_id=request.session_id,
         persona_id=request.persona_id,
@@ -234,6 +245,16 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token)
                     asyncio.create_task(
                         relationship.increment_message_count(user_id, persona.id)
                     )
+
+                    # Bond Score: analyze every 3 user messages
+                    _hist = store.get_history(request.session_id)
+                    _user_msgs = [m.content for m in _hist if m.role == "user"]
+                    if len(_user_msgs) >= 3 and len(_user_msgs) % 3 == 0:
+                        asyncio.create_task(
+                            bond_analyzer.analyze_and_save(
+                                user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
+                            )
+                        )
                     return
 
             except Exception:

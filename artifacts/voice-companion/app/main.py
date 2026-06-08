@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.routers import chat, personas, sessions, tts, stt, memories
 from app.routers import goals as goals_router
+from app.routers import bond_score as bond_score_router
 from app.routers import auth as auth_router
 from app.routers import proactive as proactive_router
 from app.routers import selfie as selfie_router
@@ -94,6 +95,7 @@ app.include_router(daily_checkin_router.router, prefix="/api/daily-checkin",    
 app.include_router(waitlist_router.router,      prefix="/api/waitlist",           tags=["waitlist"])
 app.include_router(payments_router.router,     prefix="/api",                    tags=["payments"])
 app.include_router(goals_router.router,        prefix="/api/goals",              tags=["goals"])
+app.include_router(bond_score_router.router,   prefix="/api/bond-score",         tags=["bond-score"])
 
 
 @app.get("/api/healthz")
