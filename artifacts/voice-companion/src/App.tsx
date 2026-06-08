@@ -4,14 +4,13 @@ import { CompanionSelect } from "@/pages/CompanionSelect";
 import { RelationshipSelect } from "@/pages/RelationshipSelect";
 import { ChatPage } from "@/pages/Chat";
 import { AuthPage } from "@/pages/Auth";
-import { AuthCallback } from "@/pages/AuthCallback";
 import { PricingPage } from "@/pages/Pricing";
 import { getRelationshipStats, getSubscriptionStatus } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "auth" | "auth-callback" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat" | "pricing";
+type Screen = "loading" | "auth" | "companion-select" | "rel-type-loading" | "rel-type-select" | "chat" | "pricing";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -35,13 +34,6 @@ export default function App() {
   // ── Auth session management ──────────────────────────────────────────────
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-
-    // If we're on the /auth/callback path, show the dedicated callback handler
-    // which calls exchangeCodeForSession explicitly — most reliable PKCE approach.
-    if (window.location.pathname.endsWith("/auth/callback")) {
-      setScreen("auth-callback");
-      return;
-    }
 
     // Check for checkout result URL params (Stripe redirect back)
     if (params.get("checkout") === "success") {
@@ -156,16 +148,6 @@ export default function App() {
   // ── Auth screen (full-page, no card wrapper) ──────────────────────────────
   if (screen === "auth") {
     return <AuthPage onAuth={() => setScreen("companion-select")} />;
-  }
-
-  // ── OAuth callback — exchanges PKCE code for session ─────────────────────
-  if (screen === "auth-callback") {
-    return (
-      <AuthCallback
-        onSuccess={() => setScreen("companion-select")}
-        onError={() => setScreen("auth")}
-      />
-    );
   }
 
   // ── Initial load spinner ──────────────────────────────────────────────────

@@ -60,7 +60,7 @@ export function AuthPage({ onAuth }: Props) {
         options: {
           // After OAuth completes, Supabase redirects here.
           // Configure this URL in: Supabase Dashboard → Authentication → URL Configuration
-          redirectTo: `${window.location.origin}/companion/auth/callback`,
+          redirectTo: `${window.location.origin}/companion/`,
         },
       });
       if (error) throw error;

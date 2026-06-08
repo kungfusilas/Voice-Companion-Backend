@@ -32,7 +32,7 @@ function buildClient(): { client: SupabaseClient; configured: boolean } {
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
-          flowType: "pkce",
+          flowType: "implicit",
         },
       }
     );
