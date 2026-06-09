@@ -117,7 +117,7 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
           </button>
         </div>
 
-        <h1 className="text-xl font-bold text-white mb-1">BondAI Features</h1>
+        <h1 className="text-xl font-bold text-white mb-1">LegacyBond AI Features</h1>
         <p className="text-white/35 text-xs">Your relationship intelligence hub</p>
 
         {/* Tab bar */}

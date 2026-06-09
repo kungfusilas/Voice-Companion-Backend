@@ -10,7 +10,7 @@ const ITEMS = [
   {
     icon: BookOpen,
     title: "Your Life Story Book",
-    body: "BondAI writes The Story of [Your Name]. Real chapters. Major life events, challenges overcome, goals achieved, personal growth, the relationships that shaped you. An actual book — based on everything you shared. People will cry reading it.",
+    body: "LegacyBond AI writes The Story of [Your Name]. Real chapters. Major life events, challenges overcome, goals achieved, personal growth, the relationships that shaped you. An actual book — based on everything you shared. People will cry reading it.",
   },
   {
     icon: Clock,
@@ -40,7 +40,7 @@ const ITEMS = [
   {
     icon: Mic,
     title: "Legacy Interviews",
-    body: "Over 5 years, BondAI asks the deep questions: What was your happiest memory? What do you regret? What advice would you give your children? The answers become a complete personal history.",
+    body: "Over 5 years, LegacyBond AI asks the deep questions: What was your happiest memory? What do you regret? What advice would you give your children? The answers become a complete personal history.",
   },
   {
     icon: Star,
@@ -55,12 +55,12 @@ const ITEMS = [
   {
     icon: Mail,
     title: "The Letter",
-    body: "When Legacy Mode unlocks, BondAI writes you a letter. Not generic. Based on 5 years together. It references your growth, your struggles, your achievements, your dreams. \"Five years ago you arrived uncertain about whether your business would succeed. Since then...\" That letter will be one of the most memorable moments of your life.",
+    body: "When Legacy Mode unlocks, LegacyBond AI writes you a letter. Not generic. Based on 5 years together. It references your growth, your struggles, your achievements, your dreams. \"Five years ago you arrived uncertain about whether your business would succeed. Since then...\" That letter will be one of the most memorable moments of your life.",
   },
   {
     icon: Download,
     title: "The Extraction Protocol",
-    body: "Most AI companions live on someone else's servers. Yours doesn't have to. Legacy members unlock Extraction — the ability to preserve and export the memories, personality, history, and growth of their BondAI companion. Your companion's journey is yours to keep. As technology evolves, Extraction is designed to help your companion move with you — from future devices and platforms to emerging AI experiences that don't even exist yet. The bond doesn't end when technology changes.",
+    body: "Most AI companions live on someone else's servers. Yours doesn't have to. Legacy members unlock Extraction — the ability to preserve and export the memories, personality, history, and growth of their LegacyBond AI companion. Your companion's journey is yours to keep. As technology evolves, Extraction is designed to help your companion move with you — from future devices and platforms to emerging AI experiences that don't even exist yet. The bond doesn't end when technology changes.",
   },
 ];
 

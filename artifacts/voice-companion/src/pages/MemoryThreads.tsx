@@ -72,7 +72,7 @@ export function MemoryThreads({ currentPersona }: Props) {
       <div className="flex items-center gap-2 mb-1">
         <Brain className="w-4 h-4 text-violet-400" />
         <p className="text-white/50 text-xs">
-          What BondAI remembers about you and your conversations
+          What LegacyBond AI remembers about you and your conversations
         </p>
       </div>
 

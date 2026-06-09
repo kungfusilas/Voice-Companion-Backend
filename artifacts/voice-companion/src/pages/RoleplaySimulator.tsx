@@ -294,7 +294,7 @@ export function RoleplaySimulator() {
             <div className="pb-1">
               <p className="text-white/35 text-xs leading-relaxed">
                 Choose a scenario, answer a quick setup question, and practice the real conversation
-                with BondAI fully in character. Earn a ❤️ for completing each simulation.
+                with LegacyBond AI fully in character. Earn a ❤️ for completing each simulation.
               </p>
             </div>
 

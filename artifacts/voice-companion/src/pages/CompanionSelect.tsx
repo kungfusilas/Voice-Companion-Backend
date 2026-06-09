@@ -94,7 +94,7 @@ export function CompanionSelect({ onSelect, onSignOut, onUpgrade, onHub, subscri
             {onHub && (
               <button
                 onClick={onHub}
-                title="BondAI Features"
+                title="LegacyBond AI Features"
                 className="flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border border-violet-500/30 text-violet-400/80 hover:text-violet-300 hover:border-violet-400/50 transition-colors"
               >
                 <LayoutGrid className="w-3 h-3" />

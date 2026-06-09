@@ -103,7 +103,7 @@ export function AuthPage({ onAuth }: Props) {
           <div className="w-12 h-12 mx-auto mb-4 rounded-2xl bg-violet-600/30 border border-violet-500/30 flex items-center justify-center">
             <span className="text-2xl">✦</span>
           </div>
-          <h1 className="text-xl font-semibold text-white tracking-tight">BondAI</h1>
+          <h1 className="text-xl font-semibold text-white tracking-tight">LegacyBond AI</h1>
           <p className="text-white/40 text-sm mt-1">An AI that remembers who you're becoming.</p>
           <p
             className="text-white/25 text-xs mt-1.5 transition-opacity duration-400"

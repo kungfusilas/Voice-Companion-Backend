@@ -181,7 +181,7 @@ export function FutureMemory({ onStartChat }: FutureMemoryProps) {
         {/* Header blurb */}
         <div className="pb-1">
           <p className="text-white/35 text-xs leading-relaxed">
-            BondAI notices important dates, people, and patterns from your conversations —
+            LegacyBond AI notices important dates, people, and patterns from your conversations —
             surfacing them when the moment is right.
           </p>
         </div>
