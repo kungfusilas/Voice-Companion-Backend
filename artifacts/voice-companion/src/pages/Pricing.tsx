@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, Check, Loader2, Lock, Info } from "lucide-react";
 import { createCheckoutSession } from "@/lib/api";
@@ -60,6 +60,66 @@ const TIER_COLORS: Record<string, string> = {
   power:   "text-amber-400",
   free:    "text-white/40",
 };
+
+const FEATURE_INFO: Record<string, string> = {
+  "All 4 companions":       "Choose from Aria, Aeva, and more. Each companion has a unique personality, voice, and way of connecting. Find the one that feels right.",
+  "Voice & text chat":      "Your companion speaks to you in her own voice. Talk back by text — she listens, responds, and remembers.",
+  "Long-term memory":       "Your companion remembers what you share across sessions. You never have to repeat yourself.",
+  "Daily check-ins":        "Your companion reaches out each day — a simple moment of connection to start or end your day.",
+  "Companion selfies 📸":   "Your companion shares personal moments with you — photos that make the relationship feel real and present.",
+  "Activity games":         "Play together. Light games and activities that bring a different kind of connection beyond conversation.",
+  "Priority responses":     "Premium members get faster, smarter responses powered by a more advanced AI model.",
+  "Unlimited messages":     "No limits, ever. Talk as long as you need, as often as you want.",
+  "Advanced memory":        "Deeper memory that tracks not just what you said, but patterns, preferences, and emotional history over time.",
+  "Earliest new features":  "Power members get every new feature first — before anyone else.",
+  "Power user badge":       "A visible mark of your commitment. Shown on your profile.",
+  "Personality Map 🧠":     "Over time, your companion builds a private map of who you are — your communication style, attachment style, leadership style, and emotional triggers. No quiz. No form. Just conversation.",
+  "Session Debrief 🔬":     "After each session, receive a behavioral breakdown of how you showed up: negative self-talk, deflection, openness, patterns. Specific. Private. Powerful.",
+  "Weekly Insight Report 📊": "Every Monday, a private report from your week — emotional themes, mood arc, what your companion noticed. Like a therapist's notes, written for you.",
+};
+
+function InfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handle(e: MouseEvent | TouchEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    document.addEventListener("touchstart", handle);
+    return () => {
+      document.removeEventListener("mousedown", handle);
+      document.removeEventListener("touchstart", handle);
+    };
+  }, [open]);
+
+  return (
+    <span ref={ref} className="relative inline-flex items-center shrink-0">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(v => !v); }}
+        className="text-white/20 hover:text-white/50 transition-colors ml-0.5"
+        aria-label="More info"
+        type="button"
+      >
+        <Info className="w-2.5 h-2.5" />
+      </button>
+      {open && (
+        <span
+          className="absolute bottom-full left-0 mb-2 w-48 rounded-xl px-3 py-2.5 text-[11px] leading-relaxed text-white/70 z-50"
+          style={{
+            background: "rgba(10,4,24,0.97)",
+            border: "1px solid rgba(255,255,255,0.09)",
+            boxShadow: "0 8px 28px rgba(0,0,0,0.55)",
+          }}
+        >
+          {text}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export function PricingPage({ currentTier, onBack }: PricingPageProps) {
   const [loading, setLoading] = useState<string | null>(null);
@@ -146,7 +206,10 @@ export function PricingPage({ currentTier, onBack }: PricingPageProps) {
                 {plan.features.map((f) => (
                   <li key={f} className="flex items-center gap-2 text-xs text-white/65">
                     <Check className="w-3 h-3 shrink-0 text-white/40" />
-                    {f}
+                    <span className="flex items-center gap-0.5 min-w-0">
+                      <span>{f}</span>
+                      {FEATURE_INFO[f] && <InfoTooltip text={FEATURE_INFO[f]} />}
+                    </span>
                   </li>
                 ))}
               </ul>
