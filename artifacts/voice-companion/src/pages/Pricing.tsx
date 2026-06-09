@@ -215,12 +215,19 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.06 }}
-              className={`relative rounded-2xl p-4 bg-gradient-to-br ${plan.gradient} border ${plan.border} ${plan.highlight ? "ring-1 ring-rose-500/20" : ""}`}
+              className={`relative rounded-2xl p-4 bg-gradient-to-br ${plan.gradient} border ${plan.border} ${plan.highlight ? "ring-1 ring-rose-500/20" : ""} ${isCurrent ? "ring-1 ring-emerald-500/30" : ""}`}
             >
-              {plan.highlight && (
+              {plan.highlight && !isCurrent && (
                 <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
                   <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full bg-rose-500 text-white">
                     Most Popular
+                  </span>
+                </div>
+              )}
+              {isCurrent && (
+                <div className="absolute -top-2.5 left-1/2 -translate-x-1/2">
+                  <span className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full text-white flex items-center gap-1" style={{ background: "linear-gradient(135deg, #059669, #047857)" }}>
+                    <Check className="w-2.5 h-2.5" /> Current Plan
                   </span>
                 </div>
               )}
