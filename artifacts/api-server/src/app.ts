@@ -1,6 +1,7 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import { fileURLToPath } from "url";
 import router from "./routes";
 import { logger } from "./lib/logger";
 
@@ -28,6 +29,12 @@ app.use(
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Landing page — resolve from dist/ back up to workspace root
+const LANDING_HTML = fileURLToPath(new URL("../../../landing.html", import.meta.url));
+app.get("/", (_req, res) => {
+  res.sendFile(LANDING_HTML);
+});
 
 app.use("/api", router);
 
