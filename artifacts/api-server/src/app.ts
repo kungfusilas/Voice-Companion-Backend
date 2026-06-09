@@ -30,11 +30,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Landing page — resolve from dist/ back up to workspace root
+// Static pages — resolve from dist/ back up to workspace root
 const LANDING_HTML = fileURLToPath(new URL("../../../landing.html", import.meta.url));
-app.get("/", (_req, res) => {
-  res.sendFile(LANDING_HTML);
-});
+const TERMS_HTML   = fileURLToPath(new URL("../../../terms.html",   import.meta.url));
+
+app.get("/", (_req, res) => { res.sendFile(LANDING_HTML); });
+app.get("/terms", (_req, res) => { res.sendFile(TERMS_HTML); });
 
 app.use("/api", router);
 

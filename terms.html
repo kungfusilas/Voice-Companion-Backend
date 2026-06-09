@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms of Service — LegacyBond AI</title>
+  <meta name="description" content="Terms of Service for LegacyBond AI LLC." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a12;
+      --bg2: #0f0f1c;
+      --bg3: #13131f;
+      --purple: #7c5cbf;
+      --purple-light: #9b7de0;
+      --purple-dim: rgba(124,92,191,0.15);
+      --text: #f0eeff;
+      --text-muted: rgba(240,238,255,0.5);
+      --text-dim: rgba(240,238,255,0.28);
+      --border: rgba(124,92,191,0.18);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: rgba(124,92,191,0.3); border-radius: 3px; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 clamp(1.25rem, 5vw, 3rem);
+      height: 64px;
+      background: rgba(10,10,18,0.9);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+    }
+    .nav-logo-icon {
+      width: 30px; height: 30px; border-radius: 9px;
+      background: linear-gradient(135deg, #7c5cbf, #e05a8a);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; flex-shrink: 0;
+    }
+    .nav-logo-text { font-size: 15px; font-weight: 600; }
+    .nav-logo-text span { color: var(--purple-light); }
+
+    .btn-nav {
+      display: inline-flex; align-items: center;
+      padding: 7px 18px;
+      background: linear-gradient(135deg, #7c5cbf, #6b4cb0);
+      color: #fff; font-size: 13px; font-weight: 600;
+      border-radius: 999px; text-decoration: none;
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: opacity 0.2s;
+    }
+    .btn-nav:hover { opacity: 0.85; }
+
+    /* ── Layout ── */
+    .page-wrap {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: clamp(40px, 6vw, 80px) clamp(1.25rem, 5vw, 2.5rem);
+    }
+
+    /* ── Header ── */
+    .page-header {
+      margin-bottom: 52px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .page-header h1 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #f0eeff 30%, #c4aeff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .page-meta {
+      font-size: 13.5px;
+      color: var(--text-dim);
+      display: flex; flex-wrap: wrap; gap: 20px;
+    }
+    .page-meta span { display: flex; align-items: center; gap: 6px; }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 28px;
+      margin-bottom: 52px;
+    }
+    .toc h2 {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--purple-light);
+      margin-bottom: 16px;
+    }
+    .toc ol {
+      list-style: decimal;
+      padding-left: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 6px 24px;
+    }
+    .toc li { font-size: 13.5px; }
+    .toc a {
+      text-decoration: none;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    .toc a:hover { color: var(--purple-light); }
+
+    /* ── Sections ── */
+    .section {
+      margin-bottom: 52px;
+      scroll-margin-top: 80px;
+    }
+    .section-number {
+      display: inline-block;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--purple-light);
+      margin-bottom: 6px;
+    }
+    .section h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .section p {
+      font-size: 14.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .section p:last-child { margin-bottom: 0; }
+
+    .section ul, .section ol {
+      padding-left: 20px;
+      margin-bottom: 12px;
+      display: flex; flex-direction: column; gap: 7px;
+    }
+    .section li {
+      font-size: 14.5px;
+      color: var(--text-muted);
+      line-height: 1.65;
+    }
+
+    .section a {
+      color: var(--purple-light);
+      text-decoration: underline;
+      text-decoration-color: rgba(155,125,224,0.35);
+      text-underline-offset: 3px;
+    }
+    .section a:hover { text-decoration-color: var(--purple-light); }
+
+    .highlight-box {
+      background: var(--purple-dim);
+      border: 1px solid rgba(124,92,191,0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 14px 0;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .highlight-box strong { color: var(--text); }
+
+    .pricing-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .pricing-table th {
+      background: rgba(124,92,191,0.15);
+      color: var(--purple-light);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      padding: 10px 16px;
+      text-align: left;
+    }
+    .pricing-table td {
+      padding: 11px 16px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    .pricing-table tr:last-child td { border-bottom: none; }
+    .pricing-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+    .section-divider {
+      height: 1px;
+      background: var(--border);
+      margin-bottom: 52px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px clamp(1.25rem, 5vw, 3rem);
+    }
+    .footer-inner {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex; flex-wrap: wrap;
+      justify-content: space-between; align-items: center;
+      gap: 16px;
+    }
+    .footer-logo {
+      display: flex; align-items: center; gap: 8px;
+      text-decoration: none; color: var(--text-dim);
+      font-size: 14px;
+    }
+    .footer-logo-icon {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(135deg, #7c5cbf, #e05a8a);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+    }
+    .footer-links {
+      display: flex; gap: 24px; list-style: none;
+    }
+    .footer-links a {
+      text-decoration: none;
+      color: var(--text-dim); font-size: 13px;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--text-muted); }
+    .footer-copy { font-size: 12px; color: var(--text-dim); }
+  </style>
+</head>
+<body>
+
+  <!-- ── NAV ── -->
+  <nav>
+    <a href="/" class="nav-logo">
+      <div class="nav-logo-icon">✦</div>
+      <span class="nav-logo-text">LegacyBond <span>AI</span></span>
+    </a>
+    <a href="/companion/" class="btn-nav">Start Free →</a>
+  </nav>
+
+  <!-- ── CONTENT ── -->
+  <div class="page-wrap">
+
+    <div class="page-header">
+      <h1>Terms of Service</h1>
+      <div class="page-meta">
+        <span>📅 Effective Date: June 9, 2026</span>
+        <span>🏢 LegacyBond AI LLC</span>
+      </div>
+    </div>
+
+    <!-- TOC -->
+    <div class="toc">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Eligibility</a></li>
+        <li><a href="#s2">Account Registration</a></li>
+        <li><a href="#s3">Subscription Plans &amp; Billing</a></li>
+        <li><a href="#s4">Use of the Service</a></li>
+        <li><a href="#s5">AI Companions and Conversations</a></li>
+        <li><a href="#s6">Privacy and Data</a></li>
+        <li><a href="#s7">Intellectual Property</a></li>
+        <li><a href="#s8">Third-Party Services</a></li>
+        <li><a href="#s9">Disclaimers</a></li>
+        <li><a href="#s10">Limitation of Liability</a></li>
+        <li><a href="#s11">Indemnification</a></li>
+        <li><a href="#s12">Termination</a></li>
+        <li><a href="#s13">Governing Law &amp; Arbitration</a></li>
+        <li><a href="#s14">Changes to Terms</a></li>
+        <li><a href="#s15">Miscellaneous</a></li>
+        <li><a href="#s16">Contact</a></li>
+      </ol>
+    </div>
+
+    <p style="font-size:14.5px; color:var(--text-muted); margin-bottom:48px; line-height:1.75;">
+      These Terms of Service ("Terms") constitute a legally binding agreement between you and <strong style="color:var(--text);">LegacyBond AI LLC</strong> ("Company," "we," "us," or "our") governing your access to and use of the LegacyBond AI platform, including our website, mobile application, APIs, and all related services (collectively, the "Service"). By creating an account or using the Service in any way, you agree to be bound by these Terms. If you do not agree, do not use the Service.
+    </p>
+
+    <!-- 1 -->
+    <div class="section" id="s1">
+      <span class="section-number">Section 01</span>
+      <h2>Eligibility</h2>
+      <p>You must be at least <strong>18 years of age</strong> to use the Service. By creating an account or accessing the Service, you represent and warrant that you are 18 years of age or older and have the legal capacity to enter into a binding agreement.</p>
+      <p>If you are accessing the Service on behalf of a business or other legal entity, you represent that you have authority to bind that entity to these Terms, in which case "you" refers to that entity.</p>
+      <p>We do not knowingly collect personal information from individuals under the age of 18. If we become aware that a person under 18 has created an account, we will terminate that account and delete any associated data promptly.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 2 -->
+    <div class="section" id="s2">
+      <span class="section-number">Section 02</span>
+      <h2>Account Registration</h2>
+      <p>To access most features of the Service, you must create an account. When registering, you agree to:</p>
+      <ul>
+        <li>Provide accurate, current, and complete information</li>
+        <li>Maintain and promptly update your account information to keep it accurate</li>
+        <li>Keep your password confidential and not share it with any third party</li>
+        <li>Accept responsibility for all activity that occurs under your account</li>
+        <li>Notify us immediately at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a> if you suspect unauthorized access to your account</li>
+      </ul>
+      <p>We reserve the right to refuse registration, terminate accounts, or remove content at our sole discretion. You may not create more than one account per person without our express written permission.</p>
+      <p>Guest access (without account creation) is available for limited functionality. Guest sessions may have reduced memory retention and feature availability.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 3 -->
+    <div class="section" id="s3">
+      <span class="section-number">Section 03</span>
+      <h2>Subscription Plans and Billing</h2>
+      <p>LegacyBond AI offers the following paid subscription plans:</p>
+
+      <table class="pricing-table">
+        <thead>
+          <tr>
+            <th>Plan</th>
+            <th>Price</th>
+            <th>Billing</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong style="color:var(--text);">Basic</strong></td>
+            <td>$12.99 / month</td>
+            <td>Monthly, billed via Stripe</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Premium</strong></td>
+            <td>$39.99 / month</td>
+            <td>Monthly, billed via Stripe</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Power</strong></td>
+            <td>$89.99 / month</td>
+            <td>Monthly, billed via Stripe</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p><strong style="color:var(--text);">Billing.</strong> Subscriptions are billed monthly on a recurring basis through our payment processor, Stripe. Your subscription renews automatically on the same day each month unless cancelled. By subscribing, you authorize LegacyBond AI LLC to charge your payment method on a recurring basis.</p>
+
+      <p><strong style="color:var(--text);">Cancellation.</strong> You may cancel your subscription at any time through your account settings or by contacting us at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a>. Cancellation takes effect at the end of the current billing period. You will retain access to paid features until the end of the paid period.</p>
+
+      <div class="highlight-box">
+        <strong>No Partial Refunds.</strong> We do not provide refunds or credits for partial subscription periods, unused features, or unused time remaining in a billing cycle. All charges are final once processed.
+      </div>
+
+      <p><strong style="color:var(--text);">Free Plan.</strong> A free tier is available with limited features. We reserve the right to modify or discontinue the free tier at any time with reasonable notice.</p>
+
+      <p><strong style="color:var(--text);">Price Changes.</strong> We may modify subscription prices at any time. We will provide at least 30 days' advance notice of any price changes. Continued use of the Service after a price change constitutes your acceptance of the new price.</p>
+
+      <p><strong style="color:var(--text);">Failed Payments.</strong> If a payment fails, we may suspend or terminate your access to paid features until the outstanding balance is resolved. We may retry failed payments and will notify you of payment issues.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 4 -->
+    <div class="section" id="s4">
+      <span class="section-number">Section 04</span>
+      <h2>Use of the Service</h2>
+      <p><strong style="color:var(--text);">Permitted Use.</strong> Subject to these Terms, we grant you a limited, non-exclusive, non-transferable, revocable license to access and use the Service for your personal, non-commercial purposes.</p>
+
+      <p><strong style="color:var(--text);">Prohibited Conduct.</strong> You agree not to:</p>
+      <ul>
+        <li>Use the Service for any unlawful purpose or in violation of any applicable law or regulation</li>
+        <li>Attempt to gain unauthorized access to any part of the Service, other accounts, or related systems</li>
+        <li>Reverse engineer, decompile, disassemble, or attempt to derive the source code of the Service</li>
+        <li>Use the Service to generate, distribute, or facilitate harassment, hate speech, or content that is abusive, threatening, or defamatory</li>
+        <li>Impersonate any person, entity, or LegacyBond AI staff member</li>
+        <li>Use automated means (bots, scrapers, crawlers) to access the Service without our express written consent</li>
+        <li>Introduce malware, viruses, or other harmful code into the Service</li>
+        <li>Attempt to probe, scan, or test the vulnerability of any LegacyBond AI system or network</li>
+        <li>Resell, sublicense, or commercialize access to the Service without authorization</li>
+        <li>Use the Service to train, fine-tune, or benchmark any competing AI system or model</li>
+        <li>Collect or harvest any personally identifiable information from other users</li>
+        <li>Interfere with or disrupt the integrity or performance of the Service</li>
+      </ul>
+
+      <p>We reserve the right to investigate and take appropriate action against anyone who violates these provisions, including suspending or terminating accounts and reporting violations to law enforcement.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 5 -->
+    <div class="section" id="s5">
+      <span class="section-number">Section 05</span>
+      <h2>AI Companions and Conversations</h2>
+      <p>LegacyBond AI provides AI-powered companion characters for personal growth, reflection, and conversation. You acknowledge and agree that:</p>
+
+      <ul>
+        <li>The AI companions are not real persons and do not have genuine emotions, opinions, or consciousness</li>
+        <li>Responses generated by the AI are produced by automated systems and may not always be accurate, appropriate, or complete</li>
+        <li>The Service is intended for entertainment, personal reflection, and self-improvement purposes only</li>
+      </ul>
+
+      <div class="highlight-box">
+        <strong>Not a Substitute for Professional Advice.</strong> The Service is not a licensed mental health provider, therapist, counselor, financial advisor, legal advisor, or medical professional. Nothing generated by the AI constitutes professional advice of any kind. If you are experiencing a mental health crisis, please contact a qualified professional or call a crisis line such as the 988 Suicide &amp; Crisis Lifeline.
+      </div>
+
+      <p>You are responsible for all content you share through the Service. Do not share information that you are legally prohibited from disclosing or that you would not want retained in our systems.</p>
+      <p>We may use conversation data in anonymized, aggregated form to improve our AI systems, subject to our Privacy Policy. We will never sell your individual conversation content to third parties.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 6 -->
+    <div class="section" id="s6">
+      <span class="section-number">Section 06</span>
+      <h2>Privacy and Data</h2>
+      <p>Your privacy is important to us. Our collection, use, and handling of your personal data is governed by our <a href="/privacy">Privacy Policy</a>, which is incorporated into these Terms by reference.</p>
+      <p>By using the Service, you consent to the collection and use of your information as described in the <a href="/privacy">Privacy Policy</a>. You should review the Privacy Policy carefully before using the Service.</p>
+      <p>You may request deletion of your account and associated data at any time by contacting us at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a>. Certain data may be retained as required by law or for legitimate business purposes as described in the Privacy Policy.</p>
+      <p>We implement commercially reasonable technical and organizational measures to protect your data. However, no system is completely secure, and we cannot guarantee the absolute security of your information.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 7 -->
+    <div class="section" id="s7">
+      <span class="section-number">Section 07</span>
+      <h2>Intellectual Property</h2>
+      <p><strong style="color:var(--text);">Our Property.</strong> The Service and all content, features, and functionality — including but not limited to the software, text, graphics, logos, icons, images, AI models, and the selection and arrangement thereof — are owned by LegacyBond AI LLC or our licensors and are protected by United States and international copyright, trademark, patent, trade secret, and other intellectual property laws.</p>
+
+      <p><strong style="color:var(--text);">Your Content.</strong> You retain ownership of any content you submit, post, or display through the Service ("User Content"). By submitting User Content, you grant LegacyBond AI LLC a worldwide, royalty-free, non-exclusive license to use, process, store, and display your User Content solely as necessary to provide and improve the Service.</p>
+
+      <p><strong style="color:var(--text);">Feedback.</strong> If you provide feedback, suggestions, or ideas regarding the Service, you grant us the right to use that feedback without restriction or compensation to you.</p>
+
+      <p><strong style="color:var(--text);">Trademarks.</strong> "LegacyBond AI" and related logos and marks are trademarks of LegacyBond AI LLC. You may not use our trademarks without our prior written permission.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 8 -->
+    <div class="section" id="s8">
+      <span class="section-number">Section 08</span>
+      <h2>Third-Party Services</h2>
+      <p>The Service integrates with and relies on the following third-party providers to function:</p>
+      <ul>
+        <li><strong style="color:var(--text);">Stripe</strong> — Payment processing. Your payment information is handled directly by Stripe and subject to <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe's Privacy Policy</a>.</li>
+        <li><strong style="color:var(--text);">Google</strong> — Authentication (Sign in with Google) and related infrastructure services.</li>
+        <li><strong style="color:var(--text);">ElevenLabs</strong> — AI voice synthesis for Two-Way Voice features. Voice output is generated by ElevenLabs' systems.</li>
+        <li><strong style="color:var(--text);">Deepgram</strong> — Speech-to-text transcription for voice input features.</li>
+        <li><strong style="color:var(--text);">Supabase</strong> — Database, authentication infrastructure, and data storage.</li>
+        <li><strong style="color:var(--text);">Anthropic / Claude</strong> — Large language model powering AI companion responses.</li>
+      </ul>
+      <p>Your use of the Service is subject to the terms and privacy policies of these third-party providers. We are not responsible for the practices of third parties, and we encourage you to review their policies. We do not sell your personal data to these providers; they receive only what is necessary to deliver their services.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 9 -->
+    <div class="section" id="s9">
+      <span class="section-number">Section 09</span>
+      <h2>Disclaimers</h2>
+      <div class="highlight-box">
+        <strong>AS-IS BASIS.</strong> THE SERVICE IS PROVIDED ON AN "AS IS" AND "AS AVAILABLE" BASIS WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED. TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, LEGACYBOND AI LLC EXPRESSLY DISCLAIMS ALL WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+      </div>
+      <p>We do not warrant that:</p>
+      <ul>
+        <li>The Service will be uninterrupted, error-free, or free of viruses or other harmful components</li>
+        <li>The results obtained from the use of the Service will be accurate or reliable</li>
+        <li>Any errors in the Service will be corrected</li>
+        <li>The AI responses will be appropriate, safe, or suitable for your specific circumstances</li>
+      </ul>
+      <p>Some jurisdictions do not allow the exclusion of implied warranties, so some of the above exclusions may not apply to you.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 10 -->
+    <div class="section" id="s10">
+      <span class="section-number">Section 10</span>
+      <h2>Limitation of Liability</h2>
+      <div class="highlight-box">
+        <strong>TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW:</strong> IN NO EVENT SHALL LEGACYBOND AI LLC, ITS OFFICERS, DIRECTORS, EMPLOYEES, AGENTS, PARTNERS, OR LICENSORS BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, PUNITIVE, OR EXEMPLARY DAMAGES — INCLUDING BUT NOT LIMITED TO LOSS OF PROFITS, DATA, USE, GOODWILL, OR OTHER INTANGIBLE LOSSES — ARISING OUT OF OR RELATED TO YOUR USE OF OR INABILITY TO USE THE SERVICE, EVEN IF WE HAVE BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+      </div>
+      <p>Our total aggregate liability to you for any claims arising out of or related to these Terms or the Service shall not exceed the greater of: (a) the amount you paid to LegacyBond AI LLC in the twelve (12) months preceding the claim, or (b) one hundred US dollars ($100.00).</p>
+      <p>The limitations of liability in this section apply whether the alleged liability is based on contract, tort, negligence, strict liability, or any other basis, even if we have been advised of the possibility of such damage.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 11 -->
+    <div class="section" id="s11">
+      <span class="section-number">Section 11</span>
+      <h2>Indemnification</h2>
+      <p>You agree to defend, indemnify, and hold harmless LegacyBond AI LLC, its affiliates, officers, directors, employees, agents, licensors, and service providers from and against any claims, liabilities, damages, judgments, awards, losses, costs, expenses, or fees (including reasonable attorneys' fees) arising out of or relating to:</p>
+      <ul>
+        <li>Your violation of these Terms</li>
+        <li>Your use of the Service in a manner not authorized by these Terms</li>
+        <li>Your User Content</li>
+        <li>Your violation of any third party's rights, including intellectual property rights or privacy rights</li>
+        <li>Any claim that your User Content caused damage to a third party</li>
+      </ul>
+      <p>We reserve the right, at your expense, to assume the exclusive defense and control of any matter for which you are required to indemnify us, and you agree to cooperate with our defense of such claims.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 12 -->
+    <div class="section" id="s12">
+      <span class="section-number">Section 12</span>
+      <h2>Termination</h2>
+      <p><strong style="color:var(--text);">By You.</strong> You may terminate your account at any time by contacting us at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a> or through your account settings. Termination of your account does not entitle you to any refund of prepaid fees.</p>
+
+      <p><strong style="color:var(--text);">By Us.</strong> We may suspend or terminate your account and access to the Service, with or without notice, if we reasonably believe that:</p>
+      <ul>
+        <li>You have violated these Terms or any applicable law</li>
+        <li>Your use of the Service poses a risk to us, other users, or third parties</li>
+        <li>We are required to do so by law or a court or regulatory order</li>
+        <li>Continued provision of the Service to you is no longer commercially viable</li>
+      </ul>
+
+      <p><strong style="color:var(--text);">Effect of Termination.</strong> Upon termination, your right to use the Service ceases immediately. We may delete your account and associated data in accordance with our Privacy Policy. Sections that by their nature should survive termination (including Disclaimers, Limitation of Liability, Indemnification, and Governing Law) shall survive.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 13 -->
+    <div class="section" id="s13">
+      <span class="section-number">Section 13</span>
+      <h2>Governing Law and Arbitration</h2>
+      <p><strong style="color:var(--text);">Governing Law.</strong> These Terms and any dispute arising out of or related to them shall be governed by and construed in accordance with the laws of the State of Delaware, without regard to its conflict of law provisions.</p>
+
+      <p><strong style="color:var(--text);">Binding Arbitration.</strong> Except for claims that qualify for small claims court, any dispute, controversy, or claim arising out of or relating to these Terms or the Service shall be resolved exclusively through binding individual arbitration administered by the American Arbitration Association ("AAA") under its Consumer Arbitration Rules. The arbitration shall take place in Delaware, or at another mutually agreed location.</p>
+
+      <div class="highlight-box">
+        <strong>Class Action Waiver.</strong> YOU AND LEGACYBOND AI LLC EACH AGREE THAT ANY PROCEEDINGS WILL BE CONDUCTED ONLY ON AN INDIVIDUAL BASIS AND NOT IN A CLASS, CONSOLIDATED, OR REPRESENTATIVE ACTION. If this waiver is found to be unenforceable, then the entirety of this arbitration section shall be null and void.
+      </div>
+
+      <p><strong style="color:var(--text);">Exceptions.</strong> Either party may seek emergency injunctive relief in a court of competent jurisdiction in Delaware to prevent irreparable harm pending arbitration. You may also bring individual claims in small claims court if your claims qualify.</p>
+
+      <p><strong style="color:var(--text);">Opt-Out.</strong> You may opt out of the arbitration agreement by sending written notice to <a href="mailto:support@legacybond.ai">support@legacybond.ai</a> within 30 days of first accepting these Terms. Opting out does not affect any other provision of these Terms.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 14 -->
+    <div class="section" id="s14">
+      <span class="section-number">Section 14</span>
+      <h2>Changes to Terms</h2>
+      <p>We reserve the right to modify these Terms at any time. When we make material changes, we will:</p>
+      <ul>
+        <li>Post the updated Terms on this page with a new effective date</li>
+        <li>Notify you by email at the address associated with your account</li>
+        <li>Display a prominent notice within the Service</li>
+      </ul>
+
+      <div class="highlight-box">
+        <strong>14-Day Notice.</strong> For material changes, we will provide at least <strong>14 days' advance notice</strong> before the new Terms take effect. Changes that are required by law may take effect immediately.
+      </div>
+
+      <p>Your continued use of the Service after the effective date of any changes constitutes your acceptance of the modified Terms. If you do not agree to the updated Terms, you must stop using the Service before the effective date.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 15 -->
+    <div class="section" id="s15">
+      <span class="section-number">Section 15</span>
+      <h2>Miscellaneous</h2>
+      <p><strong style="color:var(--text);">Entire Agreement.</strong> These Terms, together with our Privacy Policy and any other agreements expressly incorporated by reference, constitute the entire agreement between you and LegacyBond AI LLC regarding the Service and supersede all prior agreements, understandings, representations, and warranties.</p>
+
+      <p><strong style="color:var(--text);">Severability.</strong> If any provision of these Terms is found by a court or arbitrator to be invalid, illegal, or unenforceable, that provision shall be modified to the minimum extent necessary to make it enforceable, and the remaining provisions shall continue in full force and effect.</p>
+
+      <p><strong style="color:var(--text);">Waiver.</strong> Our failure to enforce any right or provision of these Terms shall not constitute a waiver of that right or provision. Any waiver must be in writing and signed by an authorized representative of LegacyBond AI LLC.</p>
+
+      <p><strong style="color:var(--text);">Assignment.</strong> You may not assign or transfer these Terms or any rights or obligations hereunder without our prior written consent. We may freely assign these Terms, including in connection with a merger, acquisition, or sale of assets.</p>
+
+      <p><strong style="color:var(--text);">Force Majeure.</strong> We shall not be liable for any failure or delay in performance resulting from causes beyond our reasonable control, including acts of God, war, terrorism, labor disputes, government actions, or internet outages.</p>
+
+      <p><strong style="color:var(--text);">Language.</strong> These Terms are written in English. In the event of any conflict between an English version and a translated version, the English version shall govern.</p>
+
+      <p><strong style="color:var(--text);">Headings.</strong> Section headings are for convenience only and do not affect the interpretation of these Terms.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 16 -->
+    <div class="section" id="s16">
+      <span class="section-number">Section 16</span>
+      <h2>Contact</h2>
+      <p>If you have any questions, concerns, or complaints about these Terms or the Service, please contact us:</p>
+      <div class="highlight-box" style="margin-top:16px;">
+        <strong style="display:block; margin-bottom:8px;">LegacyBond AI LLC</strong>
+        <span style="display:block; margin-bottom:4px;">📧 Email: <a href="mailto:support@legacybond.ai">support@legacybond.ai</a></span>
+        <span style="display:block;">🌐 Website: <a href="/">legacybond.ai</a></span>
+      </div>
+      <p style="margin-top:16px;">We aim to respond to all inquiries within 2 business days.</p>
+    </div>
+
+  </div><!-- end page-wrap -->
+
+  <!-- ── FOOTER ── -->
+  <footer>
+    <div class="footer-inner">
+      <a href="/" class="footer-logo">
+        <div class="footer-logo-icon">✦</div>
+        <span>LegacyBond AI</span>
+      </a>
+      <ul class="footer-links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/privacy">Privacy Policy</a></li>
+        <li><a href="/terms">Terms of Service</a></li>
+        <li><a href="/companion/">Launch App</a></li>
+      </ul>
+      <p class="footer-copy">© 2026 LegacyBond AI LLC. All rights reserved.</p>
+    </div>
+  </footer>
+
+</body>
+</html>
