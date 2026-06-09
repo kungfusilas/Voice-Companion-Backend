@@ -29,7 +29,9 @@ export default function App() {
   const [persona, setPersona] = useState<Persona | null>(null);
   const [guestId, setGuestId] = useState<string | null>(null);
   const [subscriptionTier, setSubscriptionTier] = useState("free");
+  const [subscriptionStatus, setSubscriptionStatus] = useState("inactive");
   const [subscribedAt, setSubscribedAt] = useState<string | null>(null);
+  const [subCheckDone, setSubCheckDone] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
 
@@ -49,16 +51,26 @@ export default function App() {
     const existingGuestId = localStorage.getItem("bondai_guest_id");
     if (existingGuestId) setGuestId(existingGuestId);
 
-    // Always start at companion-select — no login wall
+    // On load: resolve session then check subscription before deciding screen
     supabase.auth.getSession()
-      .then(({ data: { session } }) => {
+      .then(async ({ data: { session } }) => {
         setSession(session);
-        setScreen("companion-select");
         if (session) {
-          getSubscriptionStatus().then(({ tier, subscribedAt }) => {
+          try {
+            const { tier, status, subscribedAt } = await getSubscriptionStatus();
             setSubscriptionTier(tier);
+            setSubscriptionStatus(status);
             setSubscribedAt(subscribedAt);
-          }).catch(() => {});
+          } catch {
+            // Subscription check failed — fail open (treat as unpaid, show pricing)
+          } finally {
+            setSubCheckDone(true);
+          }
+          // Screen is set by effectiveScreen based on tier/status
+          setScreen("companion-select");
+        } else {
+          // Guest — no subscription check needed
+          setScreen("companion-select");
         }
       })
       .catch(() => {
@@ -66,22 +78,29 @@ export default function App() {
         setScreen("companion-select");
       });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession);
+      if (newSession) {
         // Signed in — clear guest state, fetch tier
         setGuestId(null);
         localStorage.removeItem("bondai_guest_id");
-        getSubscriptionStatus().then(({ tier, subscribedAt }) => {
+        setSubCheckDone(false);
+        getSubscriptionStatus().then(({ tier, status, subscribedAt }) => {
           setSubscriptionTier(tier);
+          setSubscriptionStatus(status);
           setSubscribedAt(subscribedAt);
-        }).catch(() => {});
-        // If on auth screen, go back to companion select
+          setSubCheckDone(true);
+        }).catch(() => {
+          setSubCheckDone(true); // fail open — effectiveScreen will show pricing
+        });
+        // If on auth screen, navigate to companion-select (effectiveScreen enforces paywall)
         setScreen((prev) => prev === "auth" || prev === "loading" ? "companion-select" : prev);
       } else {
-        // Signed out — go to companion-select (not auth)
+        // Signed out — clear subscription state and go to companion-select
         setPersona(null);
         setSubscriptionTier("free");
+        setSubscriptionStatus("inactive");
+        setSubCheckDone(false);
         setScreen("companion-select");
       }
     });
@@ -92,6 +111,22 @@ export default function App() {
   // ── User ID (real or guest) ──────────────────────────────────────────────
   const userId = session?.user.id ?? (guestId ? `guest_${guestId}` : null);
   const isGuest = !session;
+
+  // ── Paywall: resolve which screen to actually render ─────────────────────
+  // Authenticated users must have an active paid subscription to access
+  // companion features. While the sub check is still in-flight we show a
+  // spinner; once done, unpaid users are forced to the pricing screen.
+  const effectiveScreen: Screen = (() => {
+    if (screen === "loading") return "loading";
+    if (screen === "auth") return "auth";          // always reachable
+    if (screen === "pricing") return "pricing";    // always reachable
+    if (session) {
+      if (!subCheckDone) return "loading";         // waiting for sub check
+      const isPaid = subscriptionTier !== "free" && subscriptionStatus === "active";
+      if (!isPaid) return "pricing";               // gate unpaid authenticated users
+    }
+    return screen;
+  })();
 
   // ── Companion selection ──────────────────────────────────────────────────
   const handleCompanionSelect = (p: Persona) => {
@@ -160,7 +195,7 @@ export default function App() {
   }
 
   // ── Auth screen — shown post-upgrade, not at entry ─────────────────────
-  if (screen === "auth") {
+  if (effectiveScreen === "auth") {
     return (
       <AuthPage
         onAuth={() => setScreen("companion-select")}
@@ -169,7 +204,7 @@ export default function App() {
   }
 
   // ── Hub (full-page, authenticated only) ───────────────────────────────
-  if (screen === "hub") {
+  if (effectiveScreen === "hub") {
     return (
       <Hub
         onBack={() => setScreen("companion-select")}
@@ -182,8 +217,8 @@ export default function App() {
     );
   }
 
-  // ── Initial load spinner ──────────────────────────────────────────────
-  if (screen === "loading") {
+  // ── Initial load / subscription check spinner ─────────────────────────
+  if (effectiveScreen === "loading") {
     return (
       <div className="min-h-screen flex items-center justify-center" style={BG_STYLE}>
         <div className="w-6 h-6 border-2 border-violet-400 border-t-transparent rounded-full animate-spin" />
@@ -192,7 +227,7 @@ export default function App() {
   }
 
   // ── Main app card ─────────────────────────────────────────────────────
-  const isNarrow = screen === "companion-select" || screen === "pricing";
+  const isNarrow = effectiveScreen === "companion-select" || effectiveScreen === "pricing";
   const maxW = isNarrow ? "max-w-sm" : "max-w-md";
   const h = isNarrow ? "min-h-[640px]" : "h-[680px]";
 
@@ -216,7 +251,7 @@ export default function App() {
         </AnimatePresence>
 
         <AnimatePresence mode="wait">
-          {screen === "companion-select" && (
+          {effectiveScreen === "companion-select" && (
             <CompanionSelect
               key="companion-select"
               onSelect={handleCompanionSelect}
@@ -227,7 +262,7 @@ export default function App() {
             />
           )}
 
-          {screen === "pricing" && (
+          {effectiveScreen === "pricing" && (
             <PricingPage
               key="pricing"
               currentTier={subscriptionTier}
@@ -237,7 +272,7 @@ export default function App() {
             />
           )}
 
-          {screen === "chat" && persona && userId && (
+          {effectiveScreen === "chat" && persona && userId && (
             <ChatPage
               key={`chat-${persona.id}`}
               persona={persona}

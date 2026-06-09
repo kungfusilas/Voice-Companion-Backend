@@ -60,24 +60,32 @@ def _select_model(tier: str) -> str:
     return _FREE_MODEL                # free / guest
 
 
-async def _get_user_tier(user_id: str) -> str:
-    """Return 'premium' or 'free' for an authenticated user."""
+async def _get_user_profile(user_id: str) -> tuple[str, str]:
+    """Return (subscription_tier, subscription_status) for an authenticated user."""
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     if not url or not key:
-        return "free"
+        return ("free", "inactive")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
                 f"{url}/rest/v1/profiles",
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
-                params={"id": f"eq.{user_id}", "select": "subscription_tier", "limit": "1"},
+                params={
+                    "id": f"eq.{user_id}",
+                    "select": "subscription_tier,subscription_status",
+                    "limit": "1",
+                },
             )
         if resp.status_code == 200 and resp.json():
-            return resp.json()[0].get("subscription_tier", "free")
+            row = resp.json()[0]
+            return (
+                row.get("subscription_tier", "free"),
+                row.get("subscription_status", "inactive"),
+            )
     except Exception:
         pass
-    return "free"
+    return ("free", "inactive")
 
 
 def _inject_date(prompt: str) -> str:
@@ -147,9 +155,16 @@ async def _build_system_prompt(
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_guest)):
     is_guest = user_id.startswith("guest_")
-    tier = "free" if is_guest else await _get_user_tier(user_id)
+    if is_guest:
+        tier, sub_status = "free", "guest"
+    else:
+        tier, sub_status = await _get_user_profile(user_id)
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
+
+    # Paywall: authenticated users must have an active paid subscription
+    if not is_guest and (tier == "free" or sub_status != "active"):
+        raise HTTPException(status_code=402, detail="Subscription required")
 
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -246,9 +261,16 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
         {"type": "error",     "message": "..."}
     """
     is_guest = user_id.startswith("guest_")
-    tier = "free" if is_guest else await _get_user_tier(user_id)
+    if is_guest:
+        tier, sub_status = "free", "guest"
+    else:
+        tier, sub_status = await _get_user_profile(user_id)
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
+
+    # Paywall: authenticated users must have an active paid subscription
+    if not is_guest and (tier == "free" or sub_status != "active"):
+        raise HTTPException(status_code=402, detail="Subscription required")
 
     persona = store.get_persona(request.persona_id)
     if not persona:
