@@ -39,15 +39,25 @@ def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
 
 _FREE_MODEL    = "claude-haiku-4-5-20251001"
 _PREMIUM_MODEL = "claude-sonnet-4-6"
+_POWER_MODEL   = "claude-opus-4-6"
 
 # Tier hierarchy used for feature gating
-_TIER_RANK: dict[str, int] = {"free": 0, "premium": 1, "elite": 2}
+_TIER_RANK: dict[str, int] = {"free": 0, "basic": 1, "premium": 2, "power": 3, "elite": 4}
 
 def _is_premium_or_above(tier: str) -> bool:
-    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["basic"]
 
 def _is_elite(tier: str) -> bool:
     return tier == "elite"
+
+def _select_model(tier: str) -> str:
+    """Map subscription tier to the appropriate Claude model (backend-only, not user-facing)."""
+    rank = _TIER_RANK.get(tier, 0)
+    if rank >= _TIER_RANK["power"]:   # power + elite
+        return _POWER_MODEL
+    if rank >= _TIER_RANK["basic"]:   # basic + premium
+        return _PREMIUM_MODEL
+    return _FREE_MODEL                # free / guest
 
 
 async def _get_user_tier(user_id: str) -> str:
@@ -139,7 +149,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_gues
     is_guest = user_id.startswith("guest_")
     tier = "free" if is_guest else await _get_user_tier(user_id)
     is_premium = _is_premium_or_above(tier)
-    claude_model = _PREMIUM_MODEL if is_premium else _FREE_MODEL
+    claude_model = _select_model(tier)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -238,7 +248,7 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
     is_guest = user_id.startswith("guest_")
     tier = "free" if is_guest else await _get_user_tier(user_id)
     is_premium = _is_premium_or_above(tier)
-    claude_model = _PREMIUM_MODEL if is_premium else _FREE_MODEL
+    claude_model = _select_model(tier)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
