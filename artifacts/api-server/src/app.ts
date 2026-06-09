@@ -38,7 +38,9 @@ app.get("/", (_req, res) => { res.sendFile(LANDING_HTML); });
 app.get("/terms", (_req, res) => { res.sendFile(TERMS_HTML); });
 
 // Email verification — called when user clicks the link in the verification email.
-// Supabase appends token_hash + type; we verify server-side and redirect into the app.
+// Supabase appends token_hash + type; we verify server-side, then redirect into the
+// app with the session tokens in the URL hash so the Supabase JS client picks them
+// up automatically via detectSessionInUrl and logs the user in without a second step.
 app.get("/verify-email", async (req: Request, res: Response) => {
   const token = (req.query["token_hash"] ?? req.query["token"]) as string | undefined;
   const type  = (req.query["type"] as string | undefined) ?? "email";
@@ -66,13 +68,33 @@ app.get("/verify-email", async (req: Request, res: Response) => {
       body: JSON.stringify({ token_hash: token, type }),
     });
 
-    if (response.ok) {
-      return res.redirect("/companion/?verified=success");
+    const body = await response.json().catch(() => ({})) as Record<string, unknown>;
+
+    if (!response.ok) {
+      logger.warn({ status: response.status, body }, "Supabase verify failed");
+      return res.redirect("/companion/?verified=error&reason=invalid_token");
     }
 
-    const body = await response.json().catch(() => ({}));
-    logger.warn({ status: response.status, body }, "Supabase verify failed");
-    return res.redirect("/companion/?verified=error&reason=invalid_token");
+    // Supabase returns access_token + refresh_token on success.
+    // Putting them in the URL hash lets the Supabase JS client (detectSessionInUrl)
+    // automatically establish the session — user lands logged in, no second sign-in.
+    const accessToken  = body["access_token"]  as string | undefined;
+    const refreshToken = body["refresh_token"] as string | undefined;
+    const tokenType    = (body["token_type"]   as string | undefined) ?? "bearer";
+
+    if (accessToken && refreshToken) {
+      const hash = new URLSearchParams({
+        access_token:  accessToken,
+        refresh_token: refreshToken,
+        token_type:    tokenType,
+        type:          "signup",
+      }).toString().replace(/\+/g, "%20");
+      return res.redirect(`/companion/#${hash}`);
+    }
+
+    // Tokens missing in response — fall back to the auth screen with a success hint
+    logger.warn({ body }, "Supabase verify OK but no tokens in response");
+    return res.redirect("/companion/?verified=success");
   } catch (err) {
     logger.error({ err }, "Error calling Supabase verify");
     return res.redirect("/companion/?verified=error&reason=server_error");
