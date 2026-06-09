@@ -125,15 +125,20 @@ async def _upsert_profile(user_id: str, **fields: object) -> None:
         "updated_at": datetime.datetime.utcnow().isoformat(),
         **fields,
     }
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        await client.post(
-            f"{url}/rest/v1/profiles",
-            headers={
-                **_supa_headers(),
-                "Prefer": "resolution=merge-duplicates,return=minimal",
-            },
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{url}/rest/v1/profiles",
+                headers={
+                    **_supa_headers(),
+                    "Prefer": "resolution=merge-duplicates,return=minimal",
+                },
+                json=payload,
+            )
+        if resp.status_code >= 400:
+            logger.error("Profile upsert failed user=%s status=%s body=%s", user_id, resp.status_code, resp.text[:200])
+    except Exception as exc:
+        logger.error("Profile upsert error user=%s: %s", user_id, exc)
 
 
 async def _user_id_by_customer(customer_id: str) -> str | None:
@@ -169,6 +174,9 @@ async def create_checkout_session(
     if req.plan not in PLANS:
         raise HTTPException(400, f"Unknown plan '{req.plan}'. Choose: {list(PLANS)}")
 
+    if not stripe.api_key:
+        raise HTTPException(503, "Payment system not configured — STRIPE_SECRET_KEY missing")
+
     try:
         price_id = await asyncio.to_thread(_sync_get_or_create_price, req.plan)
         base = _app_base_url()
@@ -183,6 +191,9 @@ async def create_checkout_session(
         )
     except stripe.StripeError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Unexpected checkout error plan=%s user=%s: %s", req.plan, user_id, exc)
+        raise HTTPException(503, "Checkout unavailable — please try again") from exc
 
     return {"url": session.url}
 
@@ -208,27 +219,33 @@ async def stripe_webhook(request: Request):
 
     obj = event["data"]["object"]
 
-    if event["type"] == "checkout.session.completed":
-        user_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("user_id")
-        customer_id = obj.get("customer")
-        plan = (obj.get("metadata") or {}).get("plan", "basic")
-        if user_id:
-            await _upsert_profile(
-                user_id,
-                stripe_customer_id=customer_id,
-                subscription_tier=plan,
-                subscription_status="active",
-                subscribed_at=datetime.datetime.utcnow().isoformat(),
-            )
-            logger.info("Subscription activated user=%s plan=%s", user_id, plan)
-
-    elif event["type"] == "customer.subscription.deleted":
-        customer_id = obj.get("customer")
-        if customer_id:
-            user_id = await _user_id_by_customer(customer_id)
+    try:
+        if event["type"] == "checkout.session.completed":
+            user_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("user_id")
+            customer_id = obj.get("customer")
+            plan = (obj.get("metadata") or {}).get("plan", "basic")
             if user_id:
-                await _upsert_profile(user_id, subscription_tier="free", subscription_status="inactive")
-                logger.info("Subscription cancelled user=%s", user_id)
+                await _upsert_profile(
+                    user_id,
+                    stripe_customer_id=customer_id,
+                    subscription_tier=plan,
+                    subscription_status="active",
+                    subscribed_at=datetime.datetime.utcnow().isoformat(),
+                )
+                logger.info("Subscription activated user=%s plan=%s", user_id, plan)
+
+        elif event["type"] == "customer.subscription.deleted":
+            customer_id = obj.get("customer")
+            if customer_id:
+                user_id = await _user_id_by_customer(customer_id)
+                if user_id:
+                    await _upsert_profile(user_id, subscription_tier="free", subscription_status="inactive")
+                    logger.info("Subscription cancelled user=%s", user_id)
+
+    except Exception as exc:
+        # Log but always return 200 — Stripe retries on any non-2xx, which would
+        # flood the server. The event can be replayed from the Stripe dashboard.
+        logger.error("Webhook handler error event=%s: %s", event["type"], exc)
 
     return {"received": True}
 

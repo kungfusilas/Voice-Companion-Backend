@@ -50,16 +50,21 @@ export default function App() {
     if (existingGuestId) setGuestId(existingGuestId);
 
     // Always start at companion-select — no login wall
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setScreen("companion-select");
-      if (session) {
-        getSubscriptionStatus().then(({ tier, subscribedAt }) => {
-          setSubscriptionTier(tier);
-          setSubscribedAt(subscribedAt);
-        }).catch(() => {});
-      }
-    });
+    supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setScreen("companion-select");
+        if (session) {
+          getSubscriptionStatus().then(({ tier, subscribedAt }) => {
+            setSubscriptionTier(tier);
+            setSubscribedAt(subscribedAt);
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {
+        // Supabase unavailable on load — still show the app, just as guest
+        setScreen("companion-select");
+      });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
