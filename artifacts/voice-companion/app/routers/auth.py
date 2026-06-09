@@ -63,28 +63,37 @@ class OAuthVerifyRequest(BaseModel):
 @router.post("/signup")
 async def signup(req: SignupRequest):
     """
-    Create a new user via Supabase Admin API.
-    If email confirmation is disabled in your Supabase project,
-    the response will include a full session (access_token + refresh_token).
+    Create a new user via the standard Supabase signup endpoint.
+    Supabase sends a branded verification email; the user must click the link
+    before they can sign in. The confirmation URL in the email resolves to
+    https://www.legacybond.ai/verify-email which verifies the token and
+    redirects into the app.
     """
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
-            f"{_supabase_url()}/auth/v1/admin/users",
-            headers=_auth_headers(),
+            f"{_supabase_url()}/auth/v1/signup",
+            headers={
+                "apikey": _service_key(),
+                "Content-Type": "application/json",
+            },
             json={
                 "email": req.email,
                 "password": req.password,
-                "email_confirm": True,  # auto-confirm for apps without email flow
             },
         )
     if resp.status_code not in (200, 201):
         body = resp.json()
         raise HTTPException(
             status_code=resp.status_code,
-            detail=body.get("msg") or body.get("message") or "Signup failed",
+            detail=body.get("msg") or body.get("message") or body.get("error_description") or "Signup failed",
         )
-    user = resp.json()
-    return {"user_id": user.get("id"), "email": user.get("email")}
+    data = resp.json()
+    user = data.get("user") or data
+    return {
+        "user_id": user.get("id"),
+        "email": user.get("email"),
+        "message": "Check your email to verify your account.",
+    }
 
 
 @router.post("/login")
