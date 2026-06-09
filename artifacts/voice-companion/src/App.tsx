@@ -226,7 +226,9 @@ export default function App() {
             <PricingPage
               key="pricing"
               currentTier={subscriptionTier}
-              onBack={() => setScreen(isGuest ? "companion-select" : "companion-select")}
+              onBack={() => setScreen("companion-select")}
+              isGuest={isGuest}
+              onSignIn={() => setScreen("auth")}
             />
           )}
 

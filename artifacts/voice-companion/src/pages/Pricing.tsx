@@ -7,6 +7,8 @@ import { LegacyModal } from "@/components/LegacyModal";
 interface PricingPageProps {
   currentTier: string;
   onBack: () => void;
+  isGuest?: boolean;
+  onSignIn?: () => void;
 }
 
 const PLANS = [
@@ -121,20 +123,37 @@ function InfoTooltip({ text }: { text: string }) {
   );
 }
 
-export function PricingPage({ currentTier, onBack }: PricingPageProps) {
+function parseApiError(raw: unknown): string {
+  if (!(raw instanceof Error)) return "Checkout failed — try again";
+  try {
+    const parsed = JSON.parse(raw.message);
+    if (parsed?.detail) return parsed.detail;
+  } catch { /* not JSON */ }
+  const msg = raw.message.toLowerCase();
+  if (msg.includes("not authenticated") || msg.includes("401")) {
+    return "Sign in to subscribe";
+  }
+  return raw.message || "Checkout failed — try again";
+}
+
+export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingPageProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [legacyModalOpen, setLegacyModalOpen] = useState(false);
 
   const handleSubscribe = async (planKey: string) => {
     if (loading || planKey === currentTier) return;
+    if (isGuest) {
+      onSignIn?.();
+      return;
+    }
     setError(null);
     setLoading(planKey);
     try {
       const { url } = await createCheckoutSession(planKey);
       window.location.href = url;
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Checkout failed — try again");
+      setError(parseApiError(err));
       setLoading(null);
     }
   };
@@ -162,6 +181,21 @@ export function PricingPage({ currentTier, onBack }: PricingPageProps) {
           </p>
         </div>
       </div>
+
+      {/* Error banner — shown above plan cards so it's always visible */}
+      {error && (
+        <div className="mx-4 mb-1 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-center shrink-0">
+          <p className="text-xs text-red-400">{error}</p>
+          {error === "Sign in to subscribe" && onSignIn && (
+            <button
+              onClick={onSignIn}
+              className="mt-1 text-[11px] font-semibold text-violet-400 underline"
+            >
+              Sign in →
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Title */}
       <div className="text-center px-5 pb-4 shrink-0">
@@ -292,11 +326,6 @@ export function PricingPage({ currentTier, onBack }: PricingPageProps) {
           </div>
         </motion.div>
       </div>{/* end plan cards */}
-
-      {/* Error */}
-      {error && (
-        <p className="text-center text-xs text-red-400 px-4 pb-4 shrink-0">{error}</p>
-      )}
 
       {/* Footer note */}
       <p className="text-center text-[10px] text-white/20 pb-5 px-6 shrink-0">
