@@ -229,6 +229,19 @@ export interface StreamEvent {
   companion_id?: string;
 }
 
+export async function uploadPhoto(
+  file: File,
+): Promise<{ storage_path: string; display_url: string }> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await apiFetch(`${BASE}/photo/upload`, { method: "POST", body: form });
+  if (!res.ok) {
+    const { code, detail } = await _parseErrorBody(res);
+    throw new ApiError(res.status, code, detail);
+  }
+  return res.json() as Promise<{ storage_path: string; display_url: string }>;
+}
+
 export async function* chatStream(
   session_id: string,
   persona_id: string,
@@ -237,6 +250,7 @@ export async function* chatStream(
   romantic_mode?: boolean,
   _nsfw_mode?: boolean,
   onboarding_context?: string,
+  image_url?: string,
 ): AsyncGenerator<StreamEvent> {
   const res = await apiFetch(`${BASE}/chat/stream`, {
     method: "POST",
@@ -245,6 +259,7 @@ export async function* chatStream(
       session_id, persona_id, message,
       romantic_mode: romantic_mode ?? false,
       onboarding_context: onboarding_context ?? undefined,
+      ...(image_url ? { image_url } : {}),
     }),
   });
   if (!res.ok || !res.body) {

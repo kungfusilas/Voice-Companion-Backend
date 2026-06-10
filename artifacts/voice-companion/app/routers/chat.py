@@ -98,6 +98,18 @@ _BASIC_SELFIE_NOTE = """
 If the user explicitly asks for a selfie or a photo of you: warmly say in one sentence that photo sharing is a Premium feature and they can unlock it by upgrading, then naturally continue the conversation. Do not dwell on it or repeat it.
 """
 
+# ── User-sent photo context block (injected when user sends an image) ─────────
+
+_USER_PHOTO_BLOCK = """
+
+## The user just shared a real photo with you
+You are viewing an actual image they sent. React naturally, warmly, and fully in-character.
+Notice specific details you can actually see — their expression, surroundings, what they are doing or wearing.
+Be genuinely engaged and curious. This is a real window into their life — treat it that way.
+Avoid generic reactions ("oh nice photo!") — be specific and personal about what you see.
+If they are in the photo, comment on their vibe or energy. If it is a place or thing, get curious about it.
+"""
+
 _POWER_ROLEPLAY_INSTRUCTION = """
 
 ## Inline Roleplay Capability (Power tier)
@@ -640,20 +652,61 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
+    # ── Photo message handling ────────────────────────────────────────────────
+    photo_bytes: bytes | None = None
+    photo_media_type: str = "image/jpeg"
+    if request.image_url:
+        # Server-side Premium gate for photo feature
+        if not is_guest and _TIER_RANK.get(tier, 0) < _TIER_RANK["premium"]:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "plan_required",
+                    "required": "premium",
+                    "message": "Sending photos requires a Premium plan or higher.",
+                },
+            )
+        # Consume an extra quota unit (photos cost 2 messages)
+        if not is_guest:
+            await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
+        # Download image for Claude vision (signed URL is publicly accessible)
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as _http:
+                _img = await _http.get(request.image_url, follow_redirects=True)
+            if _img.status_code == 200:
+                photo_bytes = _img.content
+                _ct = _img.headers.get("content-type", "image/jpeg").split(";")[0].strip()
+                if _ct.startswith("image/"):
+                    photo_media_type = _ct
+        except Exception:
+            pass  # fail open — Claude will react to text only
+        # Append photo context to system prompt
+        system_prompt += _USER_PHOTO_BLOCK
+
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
 
     user_message = request.message
 
     async def event_generator():
-        stream_iter = (
-            venice_client.stream_message(
-                system_prompt=system_prompt, history=history, user_message=user_message,
-            ) if use_venice else
-            claude.stream_message(
-                system_prompt=system_prompt, history=history, user_message=user_message,
+        if photo_bytes:
+            stream_iter = claude.stream_message_with_image(
+                system_prompt=system_prompt,
+                history=history,
+                user_message=user_message,
+                image_bytes=photo_bytes,
+                image_media_type=photo_media_type,
                 model=claude_model,
             )
-        )
+        else:
+            stream_iter = (
+                venice_client.stream_message(
+                    system_prompt=system_prompt, history=history, user_message=user_message,
+                ) if use_venice else
+                claude.stream_message(
+                    system_prompt=system_prompt, history=history, user_message=user_message,
+                    model=claude_model,
+                )
+            )
         async for chunk in stream_iter:
             try:
                 raw = chunk.removeprefix("data: ").strip()

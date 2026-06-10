@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import anthropic
 from typing import AsyncGenerator
 from app.models import ChatMessage
@@ -166,5 +167,63 @@ async def stream_message(
 
         messages.append({"role": "assistant", "content": _serialize_content(final_message.content)})
         messages.append({"role": "user", "content": tool_results})
+
+    yield f"data: {json.dumps({'type': 'done', 'full_text': full_text})}\n\n"
+
+
+async def stream_message_with_image(
+    system_prompt: str,
+    history: list[ChatMessage],
+    user_message: str,
+    image_bytes: bytes,
+    image_media_type: str = "image/jpeg",
+    model: str = "claude-sonnet-4-6",
+    max_tokens: int = 1024,
+) -> AsyncGenerator[str, None]:
+    """
+    Stream a companion reply where the user's message includes a real image.
+
+    The image is encoded as base64 and passed directly to Claude vision.
+    No tool-use loop — photo reactions don't need web search.
+
+    SSE event types (same as stream_message):
+      {"type": "token",  "text": "..."}
+      {"type": "done",   "full_text": "..."}
+      {"type": "error",  "message": "..."}
+    """
+    client = get_async_client()
+    b64_data = base64.standard_b64encode(image_bytes).decode("utf-8")
+
+    # Build history as plain-text exchanges; attach the image only to the current turn.
+    messages: list[dict] = [{"role": msg.role, "content": msg.content} for msg in history]
+    messages.append({
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": image_media_type,
+                    "data": b64_data,
+                },
+            },
+            {"type": "text", "text": user_message},
+        ],
+    })
+
+    full_text = ""
+    try:
+        async with client.messages.stream(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=messages,
+        ) as stream:
+            async for text in stream.text_stream:
+                full_text += text
+                yield f"data: {json.dumps({'type': 'token', 'text': text})}\n\n"
+    except Exception as exc:
+        yield f"data: {json.dumps({'type': 'error', 'message': str(exc)})}\n\n"
+        return
 
     yield f"data: {json.dumps({'type': 'done', 'full_text': full_text})}\n\n"

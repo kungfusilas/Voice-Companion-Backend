@@ -49,18 +49,34 @@ export function ChatTranscript({
           >
             {/* ── Selfie / image message ── */}
             {msg.imageUrl ? (
-              <div className={`max-w-[72%] rounded-2xl rounded-bl-sm overflow-hidden border ${accentBg}`}>
-                <div className={`px-3 pt-2.5 pb-1 text-xs font-medium opacity-60 ${accentText}`}>
-                  {personaName}
+              msg.role === "user" ? (
+                /* User-sent photo — right-aligned */
+                <div className="max-w-[72%] rounded-2xl rounded-br-sm overflow-hidden border border-white/10 bg-white/10">
+                  <img
+                    src={msg.imageUrl}
+                    alt="Photo you sent"
+                    className="w-full max-w-[250px] block"
+                    style={{ maxHeight: 250, objectFit: "cover" }}
+                  />
+                  {msg.content && msg.content !== "📷" && (
+                    <p className="px-3 py-2 text-xs text-white/70">{msg.content}</p>
+                  )}
                 </div>
-                <img
-                  src={msg.imageUrl}
-                  alt={`${personaName} selfie`}
-                  className="w-full max-w-[250px] block"
-                  style={{ maxHeight: 250, objectFit: "cover" }}
-                />
-                <p className={`px-3 py-2 text-xs ${accentText} opacity-70`}>{msg.content}</p>
-              </div>
+              ) : (
+                /* Companion selfie — left-aligned */
+                <div className={`max-w-[72%] rounded-2xl rounded-bl-sm overflow-hidden border ${accentBg}`}>
+                  <div className={`px-3 pt-2.5 pb-1 text-xs font-medium opacity-60 ${accentText}`}>
+                    {personaName}
+                  </div>
+                  <img
+                    src={msg.imageUrl}
+                    alt={`${personaName} selfie`}
+                    className="w-full max-w-[250px] block"
+                    style={{ maxHeight: 250, objectFit: "cover" }}
+                  />
+                  <p className={`px-3 py-2 text-xs ${accentText} opacity-70`}>{msg.content}</p>
+                </div>
+              )
 
             /* ── Activity card ── */
             ) : msg.activityData ? (
