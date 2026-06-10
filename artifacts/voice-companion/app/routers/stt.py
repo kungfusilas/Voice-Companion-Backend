@@ -54,45 +54,31 @@ async def speech_to_text(
 
     is_guest = user_id.startswith("guest_")
 
-    # Quota check and language resolution run concurrently for authenticated users
-    resolved_language = language.strip()
-    detect_language_auto = False
-
     if not is_guest:
         tier, _ = await get_user_tier(user_id)
         session_id = req.headers.get("X-Session-Id") or None
         estimated_secs = max(1, len(audio_bytes) // 4000)
+        await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
-        # Resolve language in parallel with quota check
-        if not resolved_language:
-            preferred, _ = await asyncio.gather(
-                lang_module.get_preferred_language(user_id),
-                check_voice_quota(user_id, tier, estimated_secs, session_id),
-            )
-            # Use preferred_language as hint; nova-2 auto-detects if it differs
-            resolved_language = preferred
-        else:
-            await check_voice_quota(user_id, tier, estimated_secs, session_id)
-    else:
-        # Guests: use explicit language or fall back to auto-detection
-        if not resolved_language:
-            detect_language_auto = True
-
+    # Always use detect_language=True — never feed the stored preferred_language
+    # into Deepgram because a single wrong auto-detection permanently poisons it,
+    # causing all subsequent calls for that user to return empty transcripts.
+    # The detected language is still saved below (for prompts etc) but is never
+    # used as a Deepgram language hint.
     try:
         result = await deepgram_client.transcribe(
             audio_bytes=audio_bytes,
             model=model,
-            language=resolved_language or "en",
             diarize=diarize,
-            detect_language=detect_language_auto,
+            detect_language=True,
         )
     except DeepgramTranscriptError as e:
         raise HTTPException(status_code=502, detail=f"Deepgram error: {e}")
 
-    # Auto-update preferred_language from detected language (authenticated, non-English detections)
+    # Keep preferred_language in sync with what Deepgram actually heard
     if not is_guest and result.get("detected_language"):
         detected = result["detected_language"]
-        if detected and detected != "en":
+        if detected:
             asyncio.create_task(lang_module.set_preferred_language(user_id, detected))
 
     return result

@@ -478,7 +478,11 @@ export function ChatPage({
     }
     try {
       const transcript = await transcribeAudio(blob);
-      if (transcript.trim()) await sendMessage(transcript);
+      if (transcript.trim()) {
+        await sendMessage(transcript);
+      } else {
+        setError("Couldn't make out what you said — please try again.");
+      }
     } catch (sttErr) {
       if (sttErr instanceof ApiError && sttErr.status === 402) {
         setQuotaErrorDetail(sttErr.detail as QuotaDetail);
