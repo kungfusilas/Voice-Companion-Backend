@@ -1,9 +1,11 @@
 import os
 import logging
+from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse, HTMLResponse
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -159,7 +161,26 @@ async def health():
 
 # Serve the built React frontend in production.
 # In dev, Vite handles /companion/ directly; this directory won't exist unless
-# a production build has been run, so the mount is skipped silently.
-_companion_dist = os.path.join(os.path.dirname(__file__), "..", "dist", "public")
-if os.path.isdir(_companion_dist):
-    app.mount("/", StaticFiles(directory=_companion_dist, html=True), name="companion-frontend")
+# a production build has been run, so the routes are skipped silently.
+_companion_dist = Path(os.path.dirname(__file__)).parent / "dist" / "public"
+_index_html = _companion_dist / "index.html"
+
+if _companion_dist.is_dir():
+    # Mount /assets/ for the Vite-built JS/CSS bundles.
+    # Must be registered before the catch-all routes below.
+    _assets_dir = _companion_dist / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="companion-assets")
+
+    # Serve root explicitly so the Replit liveness probe at /companion/ → / always gets 200.
+    @app.get("/")
+    async def _serve_root() -> FileResponse:
+        return FileResponse(str(_index_html))
+
+    # Catch-all: serve index.html for any client-side SPA route (404-fallback).
+    @app.get("/{full_path:path}")
+    async def _serve_spa(full_path: str) -> FileResponse:
+        candidate = _companion_dist / full_path
+        if candidate.is_file():
+            return FileResponse(str(candidate))
+        return FileResponse(str(_index_html))
