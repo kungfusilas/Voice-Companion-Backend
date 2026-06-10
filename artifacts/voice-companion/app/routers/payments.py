@@ -10,28 +10,36 @@ Products and prices are created on-demand on the first checkout call and cached
 in memory for the lifetime of the process.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-DATABASE — run this SQL in Supabase SQL Editor before using payments:
+DATABASE — run this SQL in Supabase SQL Editor (the `profiles` table must
+exist before any checkout webhook or tier-gating can work):
 
   CREATE TABLE IF NOT EXISTS profiles (
     id                  uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     stripe_customer_id  text,
-    subscription_tier   text        DEFAULT 'free',
-    subscription_status text        DEFAULT 'inactive',
-    billing_period      text        DEFAULT 'monthly',
+    subscription_tier   text        NOT NULL DEFAULT 'free',
+    subscription_status text        NOT NULL DEFAULT 'inactive',
+    billing_period      text        NOT NULL DEFAULT 'monthly',
     access_expires_at   timestamptz,
     subscribed_at       timestamptz,
-    updated_at          timestamptz DEFAULT now()
+    updated_at          timestamptz NOT NULL DEFAULT now()
   );
 
-If the table already exists, add the missing columns:
+  ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
-  ALTER TABLE profiles
-    ADD COLUMN IF NOT EXISTS subscription_tier   text DEFAULT 'free',
-    ADD COLUMN IF NOT EXISTS stripe_customer_id  text,
-    ADD COLUMN IF NOT EXISTS subscription_status text DEFAULT 'inactive',
-    ADD COLUMN IF NOT EXISTS billing_period      text DEFAULT 'monthly',
-    ADD COLUMN IF NOT EXISTS access_expires_at   timestamptz;
+  CREATE POLICY "Users can view own profile"
+    ON profiles FOR SELECT
+    USING (auth.uid() = id);
 
+  CREATE POLICY "Users can insert own profile"
+    ON profiles FOR INSERT
+    WITH CHECK (auth.uid() = id);
+
+  CREATE POLICY "Users can update own profile"
+    ON profiles FOR UPDATE
+    USING (auth.uid() = id);
+
+The backend uses SUPABASE_SERVICE_KEY which bypasses RLS, so the policies
+above are only needed for completeness / any future direct-from-client reads.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 import asyncio
