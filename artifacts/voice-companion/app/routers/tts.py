@@ -16,12 +16,6 @@ def _elevenlabs_http_error(e: ElevenLabsError) -> HTTPException:
     return HTTPException(status_code=status, detail=str(e))
 
 
-class TTSRequest(BaseModel):
-    text: str
-    voice_id: str | None = None
-    model_id: str = DEFAULT_MODEL_ID
-
-
 class PersonaSpeakRequest(BaseModel):
     text: str
     persona_id: str
@@ -36,56 +30,6 @@ async def get_voices():
         return {"voices": voices, "total": len(voices)}
     except ElevenLabsError as e:
         raise _elevenlabs_http_error(e)
-
-
-@router.post("", response_class=Response)
-async def text_to_speech(request: TTSRequest):
-    """Convert text to speech. Returns full audio as audio/mpeg."""
-    if not request.text.strip():
-        raise HTTPException(status_code=422, detail="text must not be empty")
-
-    try:
-        audio = await elevenlabs_client.synthesize(
-            text=request.text,
-            voice_id=request.voice_id,
-            model_id=request.model_id,
-        )
-    except ElevenLabsError as e:
-        raise _elevenlabs_http_error(e)
-
-    return Response(
-        content=audio,
-        media_type="audio/mpeg",
-        headers={"Content-Disposition": 'inline; filename="speech.mp3"'},
-    )
-
-
-@router.post("/stream")
-async def text_to_speech_stream(request: TTSRequest):
-    """Stream audio chunks from ElevenLabs (lower latency)."""
-    if not request.text.strip():
-        raise HTTPException(status_code=422, detail="text must not be empty")
-
-    async def audio_generator():
-        try:
-            async for chunk in elevenlabs_client.synthesize_stream(
-                text=request.text,
-                voice_id=request.voice_id,
-                model_id=request.model_id,
-            ):
-                yield chunk
-        except ElevenLabsError as e:
-            raise RuntimeError(str(e))
-
-    return StreamingResponse(
-        audio_generator(),
-        media_type="audio/mpeg",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Content-Disposition": 'inline; filename="speech.mp3"',
-        },
-    )
 
 
 @router.post("/speak/stream")

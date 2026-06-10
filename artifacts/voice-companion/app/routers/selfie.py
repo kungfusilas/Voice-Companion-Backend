@@ -6,6 +6,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from app.auth_middleware import verify_token
 from app.routers.tier_check import require_premium
+from app.usage import check_message_quota, get_user_tier
 
 router = APIRouter()
 
@@ -70,10 +71,26 @@ async def generate_selfie(
     """
     Generate an AI selfie for a companion using Venice image generation. Premium+.
     Accepts an optional `scene` string to blend context into the image prompt.
-    Returns raw image bytes as image/jpeg.
+    Returns raw image bytes as image/jpeg. Costs 2 message credits.
     POST /api/selfie
     """
     await require_premium(auth_user_id)
+
+    # Selfie generation costs 2 message credits
+    tier, _ = await get_user_tier(auth_user_id)
+    try:
+        await check_message_quota(auth_user_id, tier, None)
+        await check_message_quota(auth_user_id, tier, None)
+    except HTTPException as quota_exc:
+        base_detail = quota_exc.detail if isinstance(quota_exc.detail, dict) else {}
+        raise HTTPException(
+            status_code=quota_exc.status_code,
+            detail={
+                **base_detail,
+                "code": "selfie_quota",
+                "decline_message": "I'd love to, but I've hit my limit for this month — catch me next time? 📸",
+            },
+        ) from quota_exc
 
     base_prompt = _COMPANION_BASE_PROMPTS.get(request.companion_id)
     if not base_prompt:

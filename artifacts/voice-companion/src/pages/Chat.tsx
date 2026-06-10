@@ -301,8 +301,13 @@ export function ChatPage({
                   { role: "assistant", content: `${persona.name} sent you a photo 📸`, imageUrl },
                 ]);
               })
-              .catch(() => {
-                // Companion already responded warmly — silently skip if image gen fails
+              .catch((imgErr: unknown) => {
+                if (imgErr instanceof ApiError && (imgErr.status === 402 || imgErr.status === 429)) {
+                  const d = imgErr.detail as Record<string, unknown> | null;
+                  const msg = d && typeof d.decline_message === "string" ? d.decline_message : null;
+                  if (msg) setMessages((prev) => [...prev, { role: "assistant" as const, content: msg }]);
+                }
+                // Other errors: companion text reply is still visible, silently skip image
               })
               .finally(() => setSelfieLoading(false));
           }
@@ -508,8 +513,19 @@ export function ChatPage({
         ...prev,
         { role: "assistant", content: `${persona.name} sent you a photo 📸`, imageUrl },
       ]);
-    } catch {
-      setError("Couldn't generate selfie — try again");
+    } catch (err: unknown) {
+      if (err instanceof ApiError && (err.status === 402 || err.status === 429)) {
+        const detail = err.detail as Record<string, unknown> | null;
+        const declineMsg = detail && typeof detail.decline_message === "string"
+          ? detail.decline_message : null;
+        if (declineMsg) {
+          setMessages((prev) => [...prev, { role: "assistant" as const, content: declineMsg }]);
+        } else {
+          setQuotaErrorDetail(detail as unknown as QuotaDetail);
+        }
+      } else {
+        setError("Couldn't generate selfie — try again");
+      }
     } finally {
       setSelfieLoading(false);
     }

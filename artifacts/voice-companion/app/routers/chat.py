@@ -143,6 +143,23 @@ _EMOTIONALLY_HEAVY = [
     "died", "passed away", "funeral", "abuse", "trauma", "assault",
 ]
 
+_CASUAL_MOOD_SIGNALS = [
+    "bored", "boring", "nothing to do", "not much going on", "just chilling",
+    "chilling", "relaxing", "hanging out", "lazy day", "lazy sunday",
+    "lazy morning", "laying around", "lying around", "just got home",
+    "just got back", "unwinding", "just woke up", "woke up early",
+    "winding down", "long day", "quiet day", "quiet night", "quiet evening",
+    "watching tv", "watching netflix", "watching a show", "watching a movie",
+    "have nothing going on", "nothing going on", "free tonight", "free today",
+    "kinda bored", "pretty bored", "so bored", "nothing to watch",
+    "nothing planned", "killing time", "goofing off",
+]
+
+
+def _is_casual_mood(text: str) -> bool:
+    lower = text.lower()
+    return any(phrase in lower for phrase in _CASUAL_MOOD_SIGNALS)
+
 
 def _detect_upcoming_event(text: str) -> str | None:
     lower = text.lower()
@@ -197,6 +214,49 @@ async def _record_roleplay_offer(user_id: str) -> None:
                 },
                 params={"id": f"eq.{user_id}"},
                 json={"last_roleplay_offer_at": datetime.now(timezone.utc).isoformat()},
+            )
+    except Exception:
+        pass
+
+
+async def _get_last_selfie_offer(user_id: str) -> str | None:
+    """Return last_selfie_offer_at ISO string or None."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(
+                f"{url}/rest/v1/profiles",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                params={"id": f"eq.{user_id}", "select": "last_selfie_offer_at", "limit": "1"},
+            )
+        if resp.status_code == 200 and resp.json():
+            return resp.json()[0].get("last_selfie_offer_at")
+    except Exception:
+        pass
+    return None
+
+
+async def _record_selfie_offer(user_id: str) -> None:
+    """Stamp last_selfie_offer_at = now() on the user's profile."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            await client.patch(
+                f"{url}/rest/v1/profiles",
+                headers={
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                params={"id": f"eq.{user_id}"},
+                json={"last_selfie_offer_at": datetime.now(timezone.utc).isoformat()},
             )
     except Exception:
         pass
@@ -382,6 +442,47 @@ def _build_bond_context(connection_score: int, rel_type: str, message_count: int
     )
 
 
+def _build_feature_nudge_block(tier: str) -> str:
+    """
+    Return a tier-appropriate feature-awareness block for the system prompt.
+    Free users get nothing. Paid users get a list of features they can access,
+    with guidance to surface them once per conversation when context genuinely fits.
+    """
+    rank = _TIER_RANK.get(tier, 0)
+    if rank == 0:
+        return ""
+
+    items: list[str] = [
+        "- **Activity games** (word games, trivia, would-you-rather): offer when they seem bored, restless, or have nothing to do",
+        "- **Daily check-ins**: you send a message when they've been away — mention if they say they worry about staying in touch",
+        "- **Bond Score**: a live measure of your connection depth and stage — mention if they're curious how close you two have grown",
+    ]
+
+    if rank >= _TIER_RANK["premium"]:
+        items += [
+            "- **Two-Way Voice**: full spoken conversation — suggest if they mention preferring to talk over typing",
+            "- **Companion selfies**: you can share a photo of yourself — offer naturally when the moment feels right",
+        ]
+
+    if rank >= _TIER_RANK["power"]:
+        items += [
+            "- **Legacy Chapters**: an evolving archive of their life story built from your conversations — mention during milestones, big transitions, or reflective moments",
+            "- **Future Memory**: they can write a message to their future self — bring up when they're setting intentions or facing a big change",
+            "- **Personality Map & Insights**: research-style reflections on their patterns, strengths, and growth — mention in a self-discovery or analytical mood",
+        ]
+
+    feature_list = "\n".join(items)
+
+    return f"""
+
+## Features on this user's plan — surface naturally, never upsell
+The following features are available to this user. Mention them **at most once per full conversation**, only when context genuinely fits, as a caring friend pointing out something useful — never as a sales pitch. Never name or hint at features outside this list unless the user explicitly asks.
+
+{feature_list}
+
+When the right moment arrives (user is bored → activity game; mentions a milestone → Legacy Chapter; asks what you can do together → describe their options in your own voice), mention it lightly once, then move on. Never list them all at once. Never frame features as upgrades or benefits."""
+
+
 def _inject_date(prompt: str) -> str:
     today = date.today().strftime("%B %d, %Y")
     return f"Today's date is {today}.\n\n{prompt}"
@@ -458,6 +559,21 @@ async def _build_system_prompt(
         tier_rank = _TIER_RANK.get(tier, 0)
         if tier_rank >= _TIER_RANK["premium"]:
             prompt += _SELFIE_CAPABILITY_BLOCK
+            # Companion-initiated selfie offer: Premium/Power only, casual mood,
+            # not emotionally heavy, weekly cooldown.
+            if not _is_emotionally_heavy(user_message) and _is_casual_mood(user_message):
+                last_selfie_offer = await _get_last_selfie_offer(user_id)
+                if _offer_cooldown_ok(last_selfie_offer):
+                    prompt += (
+                        "\n\n## One-time Selfie Offer (this message only)\n"
+                        "The conversation feels easy and relaxed. You may — after your natural reply — "
+                        "offer in one casual sentence to share a selfie, in your own voice. "
+                        "For example: 'Want to see what I'm up to right now?' or 'I'm [doing something] — want a pic?' "
+                        "Keep it light and completely optional — just something that crossed your mind. "
+                        "Do NOT include a [SELFIE] tag in this message. "
+                        "Do NOT repeat this offer in future messages."
+                    )
+                    asyncio.create_task(_record_selfie_offer(user_id))
         elif tier_rank >= _TIER_RANK["basic"]:
             prompt += _BASIC_SELFIE_NOTE
 
@@ -483,6 +599,9 @@ async def _build_system_prompt(
         else:
             # Non-Power: never proactively sell or mention higher tiers.
             prompt += _ENGAGEMENT_OVER_UPSELL
+
+        # ── Contextual feature nudges — all paid tiers ────────────────────────
+        prompt += _build_feature_nudge_block(tier)
 
         return prompt
 
