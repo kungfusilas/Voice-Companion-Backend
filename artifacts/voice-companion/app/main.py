@@ -3,6 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -95,6 +96,32 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+class _StripCompanionPrefix:
+    """Pure ASGI middleware: strip the /companion path prefix.
+
+    Replit's production reverse proxy does NOT rewrite paths before forwarding
+    to the service (unlike the Vite dev proxy which strips /companion before
+    reaching uvicorn on port 8001). Adding this middleware makes routing work
+    identically in dev and production — FastAPI always sees /api/* paths.
+    In dev the Vite proxy already strips the prefix, so incoming paths never
+    start with /companion and this middleware is a no-op.
+    """
+
+    def __init__(self, app_) -> None:
+        self.app = app_
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope.get("type") in ("http", "websocket"):
+            path: str = scope.get("path", "")
+            if path.startswith("/companion"):
+                stripped = path[len("/companion"):] or "/"
+                scope = {**scope, "path": stripped, "raw_path": stripped.encode("latin-1")}
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(_StripCompanionPrefix)
+
 app.include_router(chat.router,               prefix="/api/chat",               tags=["chat"])
 app.include_router(personas.router,           prefix="/api/personas",           tags=["personas"])
 app.include_router(sessions.router,           prefix="/api/sessions",           tags=["sessions"])
@@ -124,3 +151,11 @@ app.include_router(reports_router.router,      prefix="/api/reports/weekly",    
 @app.get("/api/healthz")
 async def health():
     return {"status": "ok"}
+
+
+# Serve the built React frontend in production.
+# In dev, Vite handles /companion/ directly; this directory won't exist unless
+# a production build has been run, so the mount is skipped silently.
+_companion_dist = os.path.join(os.path.dirname(__file__), "..", "dist", "public")
+if os.path.isdir(_companion_dist):
+    app.mount("/", StaticFiles(directory=_companion_dist, html=True), name="companion-frontend")
