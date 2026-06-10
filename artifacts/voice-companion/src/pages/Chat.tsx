@@ -14,6 +14,7 @@ import {
   chatStream,
   transcribeAudio,
   speakText,
+  speakTextStream,
   fetchProactiveMessages,
   requestSelfie,
   getChatHistory,
@@ -148,7 +149,7 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const busyRef = useRef(false);
-  const { playing: speaking, play: playAudio } = useAudioPlayer();
+  const { playing: speaking, play: playAudio, playStream } = useAudioPlayer();
 
   // Init meter + romantic mode from DB (skip for guests)
   useEffect(() => {
@@ -241,12 +242,38 @@ export function ChatPage({
     let fullReply = "";
     let shouldTriggerWow = false;
 
+    // Sentence-level TTS prefetch — lets audio start before the full reply arrives
+    let firstSentenceEndIdx = 0;
+    let firstSentenceAudioP: Promise<Blob | null> | null = null;
+    let firstSentencePlayP:  Promise<void>       | null = null;
+
     try {
       for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx)) {
         if (event.type === "token") {
           fullReply += event.text ?? "";
           // Strip any [SELFIE:...] tag so it never appears in the live streaming text
           setStreamingText(fullReply.replace(/\[SELFIE[^\]]*\]?/gi, "").trim());
+
+          // Kick off TTS as soon as the first complete sentence arrives (≥20 chars)
+          if (!firstSentenceEndIdx && ttsEnabled) {
+            const m = /^.{20,}?[.!?](?=\s)/s.exec(fullReply);
+            if (m) {
+              firstSentenceEndIdx = m[0].length;
+              const cleanFirst = fullReply.slice(0, firstSentenceEndIdx)
+                .replace(/\*[^*]*\*/g, "")
+                .replace(/\[[^\]]*\]/g, "")
+                .replace(/\([^)]*\)/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+              if (cleanFirst) {
+                firstSentenceAudioP = speakText(cleanFirst, persona.id).catch(() => null);
+                // Play immediately when audio is ready — concurrent with ongoing stream
+                firstSentencePlayP = firstSentenceAudioP
+                  .then(async (blob) => { if (blob) await playAudio(blob); })
+                  .catch(() => {});
+              }
+            }
+          }
         } else if (event.type === "done") {
           fullReply = event.full_text ?? fullReply;
           setStreamingText("");
@@ -298,19 +325,37 @@ export function ChatPage({
 
           // Inline TTS for regular messages only — wow sequence speaks Q10 explicitly
           if (ttsEnabled && fullReply && !shouldTriggerWow) {
-            const spokenText = fullReply
-              .replace(/\*[^*]*\*/g, "")
-              .replace(/\[[^\]]*\]/g, "")
-              .replace(/\([^)]*\)/g, "")
-              .replace(/\s+/g, " ")
-              .trim();
-            if (spokenText) {
+            const cleanTTS = (s: string) =>
+              s.replace(/\*[^*]*\*/g, "")
+               .replace(/\[[^\]]*\]/g, "")
+               .replace(/\([^)]*\)/g, "")
+               .replace(/\s+/g, " ")
+               .trim();
+            const fullSpoken = cleanTTS(fullReply);
+            if (fullSpoken) {
               try {
-                await playAudio(await speakText(spokenText, persona.id));
+                if (firstSentenceEndIdx > 0 && firstSentencePlayP) {
+                  // First sentence was already kicked off during streaming.
+                  // Fetch remaining text TTS now, concurrently while waiting for it to finish.
+                  const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
+                  const remainingP = remainingSpoken
+                    ? speakTextStream(remainingSpoken, persona.id).catch((e: unknown) => {
+                        if (e instanceof ApiError && e.status === 402) setQuotaErrorDetail(e.detail as QuotaDetail);
+                        return null;
+                      })
+                    : Promise.resolve(null);
+                  await firstSentencePlayP;          // wait for first sentence to finish
+                  const remRes = await remainingP;
+                  if (remRes) await playStream(remRes);
+                } else {
+                  // No sentence was prefetched — stream the whole reply directly
+                  const res = await speakTextStream(fullSpoken, persona.id);
+                  await playStream(res);
+                }
               } catch (ttsErr) {
                 if (ttsErr instanceof ApiError) {
                   if (ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
-                  // 401/403/429/5xx — swallow silently; audio is a best-effort enhancement
+                  // 401/403/429/5xx — swallow silently; audio is best-effort
                 }
               }
             }
@@ -386,7 +431,7 @@ export function ChatPage({
         setWowGenerating(false);
       }
     }
-  }, [sessionId, persona.id, persona.name, userId, ttsEnabled, playAudio, romanticMode, isGuest, showUpgradeCard, isPremium]);
+  }, [sessionId, persona.id, persona.name, userId, ttsEnabled, playAudio, playStream, romanticMode, isGuest, showUpgradeCard, isPremium]);
 
   // Romantic mode toggle handler
   const handleRomanticToggle = useCallback(() => {

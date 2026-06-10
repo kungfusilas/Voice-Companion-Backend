@@ -326,6 +326,23 @@ export async function speakText(text: string, persona_id: string): Promise<Blob>
   return res.blob();
 }
 
+/**
+ * Like speakText but returns the raw streaming Response so the caller can
+ * pipe it into an MSE SourceBuffer for near-instant playback.
+ */
+export async function speakTextStream(text: string, persona_id: string): Promise<Response> {
+  const res = await apiFetch(`${BASE}/tts/speak/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, persona_id }),
+  });
+  if (!res.ok) {
+    const { code, detail } = await _parseErrorBody(res);
+    throw new ApiError(res.status, code, detail);
+  }
+  return res;
+}
+
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
 export async function getUsageStatus(): Promise<UsageStatus> {

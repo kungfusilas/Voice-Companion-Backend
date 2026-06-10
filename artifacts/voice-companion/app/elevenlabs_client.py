@@ -6,7 +6,7 @@ from elevenlabs.core.api_error import ApiError
 from elevenlabs.types import VoiceSettings
 
 _FALLBACK_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-DEFAULT_MODEL_ID = "eleven_multilingual_v2"
+DEFAULT_MODEL_ID = "eleven_flash_v2_5"
 
 _sync_client: ElevenLabs | None = None
 _async_client: AsyncElevenLabs | None = None

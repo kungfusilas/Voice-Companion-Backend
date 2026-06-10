@@ -88,6 +88,73 @@ async def text_to_speech_stream(request: TTSRequest):
     )
 
 
+@router.post("/speak/stream")
+async def persona_speak_stream(
+    request: PersonaSpeakRequest,
+    req: Request,
+    user_id: str = Depends(verify_token_or_guest),
+):
+    """
+    Stream speech using the voice assigned to a persona.
+    Returns chunked audio/mpeg — playback can begin as soon as the first chunks arrive.
+    Same auth/quota rules as /speak.
+    """
+    persona = store.get_persona(request.persona_id)
+    if not persona:
+        raise HTTPException(status_code=404, detail="Persona not found")
+
+    if not request.text.strip():
+        raise HTTPException(status_code=422, detail="text must not be empty")
+
+    is_guest = user_id.startswith("guest_")
+    if is_guest:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_required",
+                "required": "premium",
+                "message": "Two-Way Voice requires a Premium plan. Sign in and upgrade in Settings → Pricing.",
+            },
+        )
+    tier, _ = await get_user_tier(user_id)
+    if not is_premium_or_higher(tier):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_required",
+                "required": "premium",
+                "message": "Two-Way Voice requires a Premium plan or higher. Upgrade in Settings → Pricing.",
+            },
+        )
+    session_id = req.headers.get("X-Session-Id") or None
+    estimated_secs = max(1, len(request.text) // 13)
+    await check_voice_quota(user_id, tier, estimated_secs, session_id)
+
+    voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
+
+    async def audio_stream():
+        try:
+            async for chunk in elevenlabs_client.synthesize_stream(
+                text=request.text,
+                voice_id=persona.voice_id,
+                model_id=request.model_id,
+                voice_settings=voice_settings,
+            ):
+                yield chunk
+        except ElevenLabsError as e:
+            raise RuntimeError(str(e))
+
+    return StreamingResponse(
+        audio_stream(),
+        media_type="audio/mpeg",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Content-Disposition": 'inline; filename="speech.mp3"',
+        },
+    )
+
+
 @router.post("/speak")
 async def persona_speak(
     request: PersonaSpeakRequest,
