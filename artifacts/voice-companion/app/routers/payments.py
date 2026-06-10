@@ -160,10 +160,52 @@ async def _user_id_by_customer(customer_id: str) -> str | None:
     return None
 
 
+# ── Supabase profile fetch ─────────────────────────────────────────────────────
+
+async def _get_profile(user_id: str) -> dict | None:
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    if not url:
+        return None
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.get(
+            f"{url}/rest/v1/profiles",
+            headers=_supa_headers(),
+            params={"id": f"eq.{user_id}", "select": "*", "limit": "1"},
+        )
+    if resp.status_code == 200 and resp.json():
+        return resp.json()[0]
+    return None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 class CheckoutRequest(BaseModel):
     plan: str
+
+
+@router.post("/billing-portal")
+async def billing_portal(user_id: str = Depends(verify_token)):
+    if not stripe.api_key:
+        raise HTTPException(503, "Payment system not configured — STRIPE_SECRET_KEY missing")
+
+    profile = await _get_profile(user_id)
+    customer_id = (profile or {}).get("stripe_customer_id")
+    if not customer_id:
+        raise HTTPException(400, "No active subscription found. Upgrade to a paid plan to manage billing.")
+
+    try:
+        session = await asyncio.to_thread(
+            stripe.billing_portal.Session.create,
+            customer=customer_id,
+            return_url=_app_base_url(),
+        )
+    except stripe.StripeError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        logger.error("Billing portal error user=%s: %s", user_id, exc)
+        raise HTTPException(503, "Billing portal unavailable — please try again") from exc
+
+    return {"url": session.url}
 
 
 @router.post("/create-checkout-session")

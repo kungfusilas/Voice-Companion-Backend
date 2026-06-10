@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Check, Loader2, Lock, Info } from "lucide-react";
-import { createCheckoutSession } from "@/lib/api";
+import { ArrowLeft, Check, Loader2, Lock, Info, ExternalLink } from "lucide-react";
+import { createCheckoutSession, openBillingPortal } from "@/lib/api";
 import { LegacyModal } from "@/components/LegacyModal";
 
 interface PricingPageProps {
@@ -140,6 +140,20 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [legacyModalOpen, setLegacyModalOpen] = useState(false);
+  const [portalLoading, setPortalLoading] = useState(false);
+
+  const handleManageSubscription = async () => {
+    if (portalLoading) return;
+    setError(null);
+    setPortalLoading(true);
+    try {
+      const { url } = await openBillingPortal();
+      window.location.href = url;
+    } catch (err: unknown) {
+      setError(parseApiError(err));
+      setPortalLoading(false);
+    }
+  };
 
   const handleSubscribe = async (planKey: string) => {
     if (loading || planKey === currentTier) return;
@@ -202,6 +216,31 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
         <h1 className="text-lg font-semibold text-white">Unlock your companion</h1>
         <p className="text-white/40 text-xs mt-1">Cancel anytime · Billed monthly</p>
       </div>
+
+      {/* Manage subscription — paid users only */}
+      {currentTier !== "free" && !isGuest && (
+        <div className="px-4 pb-3 shrink-0">
+          <button
+            onClick={handleManageSubscription}
+            disabled={portalLoading || !!loading}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+            style={{
+              background: "rgba(255,255,255,0.04)",
+              border: "1px solid rgba(255,255,255,0.10)",
+              color: "rgba(255,255,255,0.55)",
+            }}
+          >
+            {portalLoading ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <>
+                <ExternalLink className="w-3.5 h-3.5" />
+                Manage subscription &amp; billing
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Plan cards */}
       <div className="flex flex-col gap-3 px-4 pb-5">

@@ -361,6 +361,12 @@ export async function getSubscriptionStatus(): Promise<{ tier: string; status: s
   }
 }
 
+export async function openBillingPortal(): Promise<{ url: string }> {
+  const resp = await apiFetch(`${BASE}/billing-portal`, { method: "POST" });
+  if (!resp.ok) throw new Error(await resp.text());
+  return resp.json();
+}
+
 export async function createCheckoutSession(plan: string): Promise<{ url: string }> {
   const resp = await apiFetch(`${BASE}/create-checkout-session`, {
     method: "POST",
