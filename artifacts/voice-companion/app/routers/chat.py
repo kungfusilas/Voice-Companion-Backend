@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 import httpx
-from datetime import date
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
@@ -48,6 +48,9 @@ _TIER_RANK: dict[str, int] = {"free": 0, "basic": 1, "premium": 2, "power": 3, "
 def _is_premium_or_above(tier: str) -> bool:
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["basic"]
 
+def _is_power_or_above(tier: str) -> bool:
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["power"]
+
 def _is_elite(tier: str) -> bool:
     return tier == "elite"
 
@@ -60,6 +63,113 @@ def _select_model(tier: str) -> str:
         return _PREMIUM_MODEL
     return _FREE_MODEL                # free / guest
 
+
+# ── Inline roleplay system prompt block (Power tier only) ─────────────────────
+
+_POWER_ROLEPLAY_INSTRUCTION = """
+
+## Inline Roleplay Capability (Power tier)
+You can enter and exit roleplay mode naturally within this conversation — no separate app needed.
+
+**Entering roleplay:** When the user asks to practice a scenario, rehearse a conversation, or do a roleplay:
+1. Confirm in one brief sentence what you'll play (e.g. "Got it — I'll be the interviewer. What role are you going for and what's the company?" or "I'll be your manager. Give me a bit of context and we'll start.").
+2. Once they provide context, enter character immediately — no preamble.
+3. Stay 100% in character. Keep responses SHORT (1–3 sentences). Create realistic push-back. No coaching or meta-commentary while in character.
+
+**Staying in roleplay:** While in roleplay, you ARE the other person. Do not break character under any circumstances until the user signals they want to stop.
+
+**Exiting roleplay:** When the user signals they want to stop ("ok stop", "let's end", "that's enough", "exit", "done practicing", "out of character", "break character", or similar), warm-exit and give a brief 2–3 sentence coaching debrief: one specific thing they handled well, one thing to try differently. Then return to being yourself naturally.
+"""
+
+
+# ── Upcoming-event detection (for companion-initiated offers) ─────────────────
+
+_UPCOMING_EVENTS: list[tuple[str, list[str]]] = [
+    ("job interview",           ["interview", "interviewing for", "job interview", "technical interview"]),
+    ("difficult conversation",  ["difficult conversation", "hard conversation", "tough conversation", "awkward conversation", "uncomfortable conversation"]),
+    ("first date",              ["first date", "going on a date", "have a date", "date tonight", "date tomorrow"]),
+    ("salary negotiation",      ["salary negotiation", "asking for a raise", "ask for a raise", "counter offer", "negotiate my salary"]),
+    ("presentation",            ["presentation", "public speaking", "giving a speech", "my speech", "presenting to", "present to the team"]),
+    ("difficult conversation",  ["confront my", "talk to my boss about", "break it off", "break up with", "tell my partner", "tell my mom", "tell my dad"]),
+]
+
+_EMOTIONALLY_HEAVY = [
+    "depressed", "suicidal", "self-harm", "panic attack", "grief", "mourning",
+    "can't stop crying", "crying all day", "diagnosed", "terminal", "cancer",
+    "died", "passed away", "funeral", "abuse", "trauma", "assault",
+]
+
+
+def _detect_upcoming_event(text: str) -> str | None:
+    lower = text.lower()
+    for label, keywords in _UPCOMING_EVENTS:
+        if any(kw in lower for kw in keywords):
+            return label
+    return None
+
+
+def _is_emotionally_heavy(text: str) -> bool:
+    lower = text.lower()
+    return any(phrase in lower for phrase in _EMOTIONALLY_HEAVY)
+
+
+# ── Offer-cooldown helpers ────────────────────────────────────────────────────
+
+async def _get_last_roleplay_offer(user_id: str) -> str | None:
+    """Return last_roleplay_offer_at ISO string or None."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(
+                f"{url}/rest/v1/profiles",
+                headers={"apikey": key, "Authorization": f"Bearer {key}"},
+                params={"id": f"eq.{user_id}", "select": "last_roleplay_offer_at", "limit": "1"},
+            )
+        if resp.status_code == 200 and resp.json():
+            return resp.json()[0].get("last_roleplay_offer_at")
+    except Exception:
+        pass
+    return None
+
+
+async def _record_roleplay_offer(user_id: str) -> None:
+    """Stamp last_roleplay_offer_at = now() on the user's profile."""
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            await client.patch(
+                f"{url}/rest/v1/profiles",
+                headers={
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                    "Prefer": "return=minimal",
+                },
+                params={"id": f"eq.{user_id}"},
+                json={"last_roleplay_offer_at": datetime.now(timezone.utc).isoformat()},
+            )
+    except Exception:
+        pass
+
+
+def _offer_cooldown_ok(last_offer_ts: str | None) -> bool:
+    """True when no offer has been made in the past 7 days."""
+    if not last_offer_ts:
+        return True
+    try:
+        ts = datetime.fromisoformat(last_offer_ts.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - ts).days >= 7
+    except Exception:
+        return True
+
+
+# ── Profile / tier fetch ──────────────────────────────────────────────────────
 
 async def _get_user_profile(user_id: str) -> tuple[str, str]:
     """Return (subscription_tier, subscription_status) for an authenticated user."""
@@ -98,6 +208,7 @@ async def _build_system_prompt(
     persona,
     user_id: str,
     user_message: str,
+    tier: str = "free",
     romantic_mode: bool = False,
     onboarding_context: str | None = None,
     is_guest: bool = False,
@@ -106,6 +217,9 @@ async def _build_system_prompt(
     Build the full system prompt.
     For guests, skip Supabase calls and just use the base persona prompt.
     For authenticated users, include memories, relationship context, and drift.
+    Power users get the inline roleplay capability block.
+    Paid users may receive a companion-initiated offer or soft upsell when an
+    upcoming event is detected and the weekly cooldown has elapsed.
     """
     base_prompt = persona.build_system_prompt()
 
@@ -147,6 +261,41 @@ async def _build_system_prompt(
         )
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
+
+        # ── Power: inline roleplay capability ─────────────────────────────
+        if _is_power_or_above(tier):
+            prompt += _POWER_ROLEPLAY_INSTRUCTION
+
+        # ── Companion-initiated offer / soft upsell ────────────────────────
+        # Only fires when: paid tier, event detected, not an emotionally heavy moment,
+        # and the weekly offer cooldown has elapsed.
+        is_paid = _TIER_RANK.get(tier, 0) >= _TIER_RANK["basic"]
+        if is_paid and not _is_emotionally_heavy(user_message):
+            event = _detect_upcoming_event(user_message)
+            if event:
+                last_offer = await _get_last_roleplay_offer(user_id)
+                if _offer_cooldown_ok(last_offer):
+                    if _is_power_or_above(tier):
+                        # Power user — offer to practice inline right now
+                        prompt += (
+                            f"\n\n## One-time Roleplay Offer (this message only)\n"
+                            f"The user mentioned an upcoming {event}. You may naturally weave into your response — "
+                            f"in one sentence only, after you've responded to what they said — an offer to help them "
+                            f"practice by roleplaying the scenario together right here. Keep it warm, optional, "
+                            f"zero pressure. Example style: 'You mentioned the {event} — want me to play the other "
+                            f"person so you can rehearse before it happens?' Do NOT repeat this offer in future messages."
+                        )
+                    else:
+                        # Basic / Premium — soft upsell to Power
+                        prompt += (
+                            f"\n\n## One-time Feature Mention (this message only)\n"
+                            f"The user mentioned an upcoming {event}. You may naturally weave into your response — "
+                            f"in one sentence only, never as a sales pitch — that Power members can use the "
+                            f"Roleplay Simulator on LegacyBond to rehearse conversations like this together. "
+                            f"Keep it conversational and brief. Do NOT repeat this in future messages."
+                        )
+                    asyncio.create_task(_record_roleplay_offer(user_id))
+
         return prompt
 
     except Exception:
@@ -176,8 +325,11 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = await _build_system_prompt(
-        persona, user_id, request.message, request.romantic_mode,
-        request.onboarding_context, is_guest,
+        persona, user_id, request.message,
+        tier=tier,
+        romantic_mode=request.romantic_mode,
+        onboarding_context=request.onboarding_context,
+        is_guest=is_guest,
     )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
@@ -286,8 +438,11 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = await _build_system_prompt(
-        persona, user_id, request.message, request.romantic_mode,
-        request.onboarding_context, is_guest,
+        persona, user_id, request.message,
+        tier=tier,
+        romantic_mode=request.romantic_mode,
+        onboarding_context=request.onboarding_context,
+        is_guest=is_guest,
     )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
