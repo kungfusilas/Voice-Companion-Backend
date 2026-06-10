@@ -3,9 +3,11 @@ Activity endpoints.
 POST /api/activity         — generate a new activity
 POST /api/activity/result  — save a completed activity result
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from app import activities as act_core
+from app.auth_middleware import verify_token
+from app.routers.tier_check import require_premium
 
 router = APIRouter()
 
@@ -24,8 +26,12 @@ class ActivityResultRequest(BaseModel):
 
 
 @router.post("")
-async def start_activity(req: ActivityRequest):
-    """Generate a new activity and return its data."""
+async def start_activity(
+    req: ActivityRequest,
+    auth_user_id: str = Depends(verify_token),
+):
+    """Generate a new activity and return its data. Premium+."""
+    await require_premium(auth_user_id)
     try:
         data = await act_core.generate_activity(req.companion_id, req.activity_type)
         return data
@@ -36,8 +42,12 @@ async def start_activity(req: ActivityRequest):
 
 
 @router.post("/result")
-async def save_activity_result(req: ActivityResultRequest):
-    """Persist an activity result for streak tracking."""
+async def save_activity_result(
+    req: ActivityResultRequest,
+    auth_user_id: str = Depends(verify_token),
+):
+    """Persist an activity result for streak tracking. Premium+."""
+    await require_premium(auth_user_id)
     try:
         from app.relationship import _get_client as _get_db
         db = _get_db()

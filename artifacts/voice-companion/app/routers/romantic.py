@@ -2,13 +2,14 @@
 Romantic Mode endpoint.
 POST /api/romantic-mode
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from app.companions import COMPANION_MAP
+from app.auth_middleware import verify_token
+from app.routers.tier_check import require_premium
 
 router = APIRouter()
 
-# Hardcoded in-character reactions (tone-perfect, zero latency)
 _ON_REACTIONS: dict[str, str] = {
     "companion-aria": "Oh... are we doing this? Okay. I like this side of you.",
     "companion-aeva": (
@@ -37,16 +38,21 @@ class RomanticModeRequest(BaseModel):
 
 
 @router.post("")
-async def set_romantic_mode(req: RomanticModeRequest):
+async def set_romantic_mode(
+    req: RomanticModeRequest,
+    auth_user_id: str = Depends(verify_token),
+):
     """
-    Enable or disable Romantic Mode for a user+companion pair.
+    Enable or disable Romantic Mode for a user+companion pair. Premium+.
     Returns the companion's in-character reaction.
     """
-    if req.companion_id not in COMPANION_MAP:
-        raise HTTPException(status_code=404, detail=f"Companion '{req.companion_id}' not found")
+    await require_premium(auth_user_id)
 
-    # State is owned by the client (localStorage) and sent per-request.
-    # DB persistence is deferred until PostgREST schema cache refreshes.
+    if req.companion_id not in COMPANION_MAP:
+        raise HTTPException(
+            status_code=404, detail=f"Companion '{req.companion_id}' not found"
+        )
+
     reactions = _ON_REACTIONS if req.enabled else _OFF_REACTIONS
     reaction = reactions.get(req.companion_id, "I'm glad you feel comfortable with me.")
 

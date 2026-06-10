@@ -6,6 +6,7 @@ from app import elevenlabs_client
 from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError, COMPANION_VOICE_SETTINGS
 from app.auth_middleware import verify_token_or_guest
 from app.usage import check_voice_quota, get_user_tier
+from app.routers.tier_check import is_premium_or_higher
 
 router = APIRouter()
 
@@ -108,11 +109,28 @@ async def persona_speak(
         raise HTTPException(status_code=422, detail="text must not be empty")
 
     is_guest = user_id.startswith("guest_")
-    if not is_guest:
-        tier, _ = await get_user_tier(user_id)
-        session_id = req.headers.get("X-Session-Id") or None
-        estimated_secs = max(1, len(request.text) // 13)
-        await check_voice_quota(user_id, tier, estimated_secs, session_id)
+    if is_guest:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_required",
+                "required": "premium",
+                "message": "Two-Way Voice requires a Premium plan. Sign in and upgrade in Settings → Pricing.",
+            },
+        )
+    tier, _ = await get_user_tier(user_id)
+    if not is_premium_or_higher(tier):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_required",
+                "required": "premium",
+                "message": "Two-Way Voice requires a Premium plan or higher. Upgrade in Settings → Pricing.",
+            },
+        )
+    session_id = req.headers.get("X-Session-Id") or None
+    estimated_secs = max(1, len(request.text) // 13)
+    await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
 

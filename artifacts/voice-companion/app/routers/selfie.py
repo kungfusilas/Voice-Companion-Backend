@@ -1,8 +1,10 @@
 import os
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import Response
 from pydantic import BaseModel
+from app.auth_middleware import verify_token
+from app.routers.tier_check import require_premium
 
 router = APIRouter()
 
@@ -34,15 +36,23 @@ class SelfieRequest(BaseModel):
 
 
 @router.post("")
-async def generate_selfie(request: SelfieRequest):
+async def generate_selfie(
+    request: SelfieRequest,
+    auth_user_id: str = Depends(verify_token),
+):
     """
-    Generate an AI selfie for a companion.
+    Generate an AI selfie for a companion. Premium+.
     Returns raw image bytes as image/jpeg.
     POST /api/selfie
     """
+    await require_premium(auth_user_id)
+
     prompt = _COMPANION_PROMPTS.get(request.companion_id)
     if not prompt:
-        raise HTTPException(status_code=404, detail=f"No selfie prompt for companion '{request.companion_id}'")
+        raise HTTPException(
+            status_code=404,
+            detail=f"No selfie prompt for companion '{request.companion_id}'",
+        )
 
     api_key = os.environ.get("IMAGINE_API_KEY", "").strip()
     if not api_key:
