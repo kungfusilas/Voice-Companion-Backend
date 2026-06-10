@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useId, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon, ImagePlus } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
@@ -94,10 +94,6 @@ export function ChatPage({
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [selfieLoading, setSelfieLoading] = useState(false);
-  const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
-  const [photoLoading, setPhotoLoading] = useState(false);
-  const photoInputRef = useRef<HTMLInputElement>(null);
-  const cameraMenuRef = useRef<HTMLDivElement>(null);
   const [activityLoading, setActivityLoading] = useState<ActivityType | null>(null);
   const [error, setError] = useState("");
   const [proactiveLabel, setProactiveLabel] = useState<string | null>(null);
@@ -223,18 +219,6 @@ export function ChatPage({
 
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Close camera menu when clicking outside
-  useEffect(() => {
-    if (!cameraMenuOpen) return;
-    const handleClickOutside = (e: MouseEvent) => {
-      if (cameraMenuRef.current && !cameraMenuRef.current.contains(e.target as Node)) {
-        setCameraMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [cameraMenuOpen]);
 
   const sendMessage = useCallback(async (userText: string) => {
     if (busyRef.current || showUpgradeCard) return;
@@ -516,7 +500,6 @@ export function ChatPage({
 
   const handleSelfie = useCallback(async () => {
     if (selfieLoading || busy || isGuest) return;
-    setCameraMenuOpen(false);
     setSelfieLoading(true);
     setError("");
     try {
@@ -531,108 +514,6 @@ export function ChatPage({
       setSelfieLoading(false);
     }
   }, [persona.id, persona.name, userId, selfieLoading, busy, isGuest]);
-
-  const handlePhotoSend = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-
-    if (!isPremium) {
-      setError("Sending photos requires a Premium plan.");
-      return;
-    }
-    if (busyRef.current) return;
-
-    setCameraMenuOpen(false);
-    setPhotoLoading(true);
-    setError("");
-
-    let displayUrl = "";
-    try {
-      const result = await uploadPhoto(file);
-      displayUrl = result.display_url;
-    } catch (err: unknown) {
-      setPhotoLoading(false);
-      if (err instanceof ApiError) {
-        if (err.status === 402 || err.status === 429) {
-          setQuotaErrorDetail(err.detail as QuotaDetail);
-        } else if (err.status === 403) {
-          setError("Sending photos requires a Premium plan.");
-        } else {
-          setError("Couldn't upload photo — try again");
-        }
-      } else {
-        setError("Couldn't upload photo — try again");
-      }
-      return;
-    }
-
-    const caption = "📷";
-    setMessages((prev) => [...prev, { role: "user", content: caption, imageUrl: displayUrl }]);
-    setStreamingText("");
-    busyRef.current = true;
-    setBusy(true);
-    setProactiveLabel(null);
-    setScoreDelta(undefined);
-
-    let fullReply = "";
-    try {
-      for await (const event of chatStream(
-        sessionId, persona.id, caption, userId, romanticMode, false, undefined, displayUrl,
-      )) {
-        if (event.type === "token") {
-          fullReply += event.text ?? "";
-          setStreamingText(fullReply);
-        } else if (event.type === "done") {
-          fullReply = event.full_text ?? fullReply;
-          setStreamingText("");
-          const newMsgs: ChatMessage[] = [{ role: "assistant", content: fullReply }];
-          if (event.stage_up_text) newMsgs.push({ role: "assistant", content: event.stage_up_text });
-          setMessages((prev) => [...prev, ...newMsgs]);
-          if (!isGuest && event.connection_score !== undefined) {
-            setConnectionScore(event.connection_score);
-            setScoreDelta(event.score_delta);
-            setStageName(event.stage_name ?? "");
-            setStageMin(event.stage_min ?? 0);
-            setStageMax(event.stage_max ?? 100);
-          }
-          if (ttsEnabled && fullReply.trim()) {
-            const cleanTTS = fullReply
-              .replace(/\*[^*]*\*/g, "")
-              .replace(/\[[^\]]*\]/g, "")
-              .replace(/\([^)]*\)/g, "")
-              .replace(/\s+/g, " ")
-              .trim();
-            if (cleanTTS) {
-              speakTextStream(cleanTTS, persona.id)
-                .then((res) => playStream(res))
-                .catch(() => {});
-            }
-          }
-        } else if (event.type === "error") {
-          setError(event.message ?? "Couldn't get a response — try again");
-          setStreamingText("");
-        }
-      }
-    } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        if (err.status === 402 || err.status === 429) {
-          setQuotaErrorDetail(err.detail as QuotaDetail);
-        } else if (err.status === 403) {
-          setError("Sending photos requires a Premium plan.");
-        } else {
-          setError("Couldn't get a response — try again");
-        }
-      } else {
-        setError("Couldn't get a response — try again");
-      }
-      setStreamingText("");
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-      setPhotoLoading(false);
-    }
-  }, [isPremium, persona.id, userId, sessionId, romanticMode, isGuest, ttsEnabled, playStream]);
 
   const handleAudio = useCallback(async (blob: Blob) => {
     if (blob.size < 100) {
@@ -990,75 +871,21 @@ export function ChatPage({
           />
         </div>
 
-        {/* Camera menu — authenticated only */}
+        {/* Camera button — authenticated only; one tap requests a selfie */}
         {!isGuest && (
-          <div className="relative" ref={cameraMenuRef}>
-            {/* Hidden file input for photo selection */}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={handlePhotoSend}
-            />
-
-            {/* Camera toggle button */}
-            <motion.button
-              onClick={() => {
-                if (isBusy || selfieLoading || photoLoading) return;
-                setCameraMenuOpen((prev) => !prev);
-              }}
-              disabled={isBusy || selfieLoading || photoLoading}
-              whileTap={{ scale: 0.93 }}
-              title="Photo options 📸"
-              className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${accentColor}`}
-              style={{ background: "rgba(255,255,255,0.04)" }}
-            >
-              {selfieLoading || photoLoading
-                ? <Loader2 className="w-5 h-5 animate-spin" />
-                : <Camera className="w-5 h-5" />
-              }
-            </motion.button>
-
-            {/* Dropdown menu */}
-            <AnimatePresence>
-              {cameraMenuOpen && (
-                <motion.div
-                  initial={{ opacity: 0, y: 6, scale: 0.95 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: 6, scale: 0.95 }}
-                  transition={{ duration: 0.15 }}
-                  className="absolute bottom-14 right-0 z-30 min-w-[170px] rounded-xl overflow-hidden shadow-xl"
-                  style={{
-                    background: "rgba(20,10,30,0.96)",
-                    border: "1px solid rgba(255,255,255,0.12)",
-                    backdropFilter: "blur(12px)",
-                  }}
-                >
-                  <button
-                    onClick={handleSelfie}
-                    disabled={selfieLoading || busy}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Camera className="w-4 h-4 shrink-0 opacity-70" />
-                    Ask for a selfie
-                  </button>
-                  <div className="h-px bg-white/10" />
-                  <button
-                    onClick={() => {
-                      setCameraMenuOpen(false);
-                      photoInputRef.current?.click();
-                    }}
-                    disabled={busy || photoLoading}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm text-white/80 hover:bg-white/10 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <ImagePlus className="w-4 h-4 shrink-0 opacity-70" />
-                    Send a photo
-                  </button>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+          <motion.button
+            onClick={handleSelfie}
+            disabled={isBusy || selfieLoading}
+            whileTap={{ scale: 0.93 }}
+            title="Ask for a selfie 📸"
+            className={`w-12 h-12 rounded-full border flex items-center justify-center transition disabled:opacity-40 disabled:cursor-not-allowed ${accentColor}`}
+            style={{ background: "rgba(255,255,255,0.04)" }}
+          >
+            {selfieLoading
+              ? <Loader2 className="w-5 h-5 animate-spin" />
+              : <Camera className="w-5 h-5" />
+            }
+          </motion.button>
         )}
 
         <PushToTalkButton
