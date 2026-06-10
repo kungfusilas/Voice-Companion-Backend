@@ -24,14 +24,16 @@ _COMPANION_BASE_PROMPTS: dict[str, str] = {
         "casual everyday outfit, warm soft lighting, looking directly at camera, "
         "sharp focus, ultra-detailed, natural candid selfie"
     ),
-    # Aeva: East Asian woman, long straight black hair with blunt bangs, composed confident
+    # Aeva: East Asian woman, long sleek straight black hair with middle part, NO bangs,
+    # light brown eyes, defined arched brows, cat-eye liner, small stud earrings, polished glamorous editorial style
     "companion-aeva": (
         "photorealistic selfie portrait of an East Asian woman in her mid-twenties, "
-        "long straight jet-black hair with blunt straight-cut bangs across the forehead, "
-        "dark brown almond-shaped eyes, porcelain light skin, minimal natural makeup, "
-        "composed calm confident expression with a hint of intensity, "
-        "sophisticated elegant style, soft even studio-quality lighting, "
-        "looking directly at camera, sharp focus, ultra-detailed, natural selfie"
+        "long sleek straight jet-black hair with a clean center middle part, no bangs, "
+        "light brown almond-shaped eyes, defined arched dark brows, subtle cat-eye liner, "
+        "small diamond stud earrings, porcelain light skin, polished editorial makeup, "
+        "glamorous confident composed expression, sophisticated high-fashion style, "
+        "black turtleneck, soft even studio-quality lighting, "
+        "looking directly at camera, sharp focus, ultra-detailed, editorial selfie"
     ),
     # Ember: Black woman, natural coily afro updo, warm deep skin, bright warm smile
     "companion-ember": (
