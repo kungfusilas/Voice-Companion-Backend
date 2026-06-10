@@ -5,7 +5,7 @@ import { ChatPage } from "@/pages/Chat";
 import { AuthPage } from "@/pages/Auth";
 import { PricingPage } from "@/pages/Pricing";
 import { Hub } from "@/pages/Hub";
-import { getSubscriptionStatus } from "@/lib/api";
+import { getSubscriptionStatus, registerSession } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
@@ -72,6 +72,9 @@ export default function App() {
       .then(async ({ data: { session } }) => {
         setSession(session);
         if (session) {
+          let sid = sessionStorage.getItem("bondai_session_id");
+          if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem("bondai_session_id", sid); }
+          registerSession(sid).catch(() => {});
           try {
             const { tier, status, subscribedAt, billingPeriod, accessExpiresAt } = await getSubscriptionStatus();
             setSubscriptionTier(tier);
@@ -98,9 +101,12 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
       if (newSession) {
-        // Signed in — clear guest state, fetch tier
+        // Signed in — clear guest state, register session ID, fetch tier
         setGuestId(null);
         localStorage.removeItem("bondai_guest_id");
+        let sid = sessionStorage.getItem("bondai_session_id");
+        if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem("bondai_session_id", sid); }
+        registerSession(sid).catch(() => {});
         setSubCheckDone(false);
         getSubscriptionStatus().then(({ tier, status, subscribedAt, billingPeriod, accessExpiresAt }) => {
           setSubscriptionTier(tier);
@@ -115,7 +121,8 @@ export default function App() {
         // If on auth screen, navigate to companion-select (effectiveScreen enforces paywall)
         setScreen((prev) => prev === "auth" || prev === "loading" ? "companion-select" : prev);
       } else {
-        // Signed out — clear subscription state and go to companion-select
+        // Signed out — clear subscription state and session ID
+        sessionStorage.removeItem("bondai_session_id");
         setPersona(null);
         setSubscriptionTier("free");
         setSubscriptionStatus("inactive");

@@ -1,9 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from app import store
 from app import elevenlabs_client
 from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError, COMPANION_VOICE_SETTINGS
+from app.auth_middleware import verify_token_or_guest
+from app.usage import check_voice_quota, get_user_tier
 
 router = APIRouter()
 
@@ -86,11 +88,17 @@ async def text_to_speech_stream(request: TTSRequest):
 
 
 @router.post("/speak")
-async def persona_speak(request: PersonaSpeakRequest):
+async def persona_speak(
+    request: PersonaSpeakRequest,
+    req: Request,
+    user_id: str = Depends(verify_token_or_guest),
+):
     """
     Speak text using the voice assigned to a persona, with per-companion
-    voice tuning (stability, style, similarity_boost).
-    Returns full audio as audio/mpeg.
+    voice tuning. Returns full audio as audio/mpeg.
+
+    Requires authentication for paid users. Voice quota is deducted based on
+    estimated duration (~13 characters per second).
     """
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -98,6 +106,13 @@ async def persona_speak(request: PersonaSpeakRequest):
 
     if not request.text.strip():
         raise HTTPException(status_code=422, detail="text must not be empty")
+
+    is_guest = user_id.startswith("guest_")
+    if not is_guest:
+        tier, _ = await get_user_tier(user_id)
+        session_id = req.headers.get("X-Session-Id") or None
+        estimated_secs = max(1, len(request.text) // 13)
+        await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
 

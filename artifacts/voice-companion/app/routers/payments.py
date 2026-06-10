@@ -54,6 +54,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from app.auth_middleware import verify_token
+from app.usage_config import TOPUP_PACKS
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -224,6 +225,72 @@ async def _get_profile(user_id: str) -> dict | None:
     return None
 
 
+def _sync_get_or_create_topup_price(pack_key: str) -> str:
+    """Find or create a one-time Stripe Price for a top-up pack (thread-safe after first call)."""
+    if pack_key in _price_ids:
+        return _price_ids[pack_key]
+
+    pack = TOPUP_PACKS[pack_key]
+    products = stripe.Product.list(active=True, limit=100)
+    product = next(
+        (
+            p for p in products.auto_paging_iter()
+            if p.name == pack["name"] and (p.metadata or {}).get("type") == "topup"
+        ),
+        None,
+    )
+    if not product:
+        product = stripe.Product.create(
+            name=pack["name"],
+            metadata={"type": "topup", "pack": pack_key},
+        )
+
+    prices = stripe.Price.list(product=product.id, active=True, limit=100)
+    price = next(
+        (p for p in prices.auto_paging_iter() if p.unit_amount == pack["amount"] and not p.recurring),
+        None,
+    )
+    if not price:
+        price = stripe.Price.create(product=product.id, unit_amount=pack["amount"], currency="usd")
+
+    _price_ids[pack_key] = price.id
+    return price.id
+
+
+async def _apply_topup_credits(
+    user_id: str,
+    kind: str,
+    credits: int,
+    event_id: str,
+) -> None:
+    """
+    Atomically add top-up credits via Supabase RPC.
+    Idempotent: the DB function checks event_id to skip duplicate webhook events.
+    """
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    if not url:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{url}/rest/v1/rpc/apply_topup_credits",
+                headers=_supa_headers(),
+                json={
+                    "p_user_id": user_id,
+                    "p_kind": kind,
+                    "p_credits": credits,
+                    "p_event_id": event_id,
+                },
+            )
+        if resp.status_code not in (200, 204):
+            logger.error(
+                "apply_topup_credits failed user=%s kind=%s credits=%s status=%s: %s",
+                user_id, kind, credits, resp.status_code, resp.text[:200],
+            )
+    except Exception as exc:
+        logger.error("apply_topup_credits error user=%s: %s", user_id, exc)
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 class CheckoutRequest(BaseModel):
@@ -260,18 +327,41 @@ async def create_checkout_session(
     req: CheckoutRequest,
     user_id: str = Depends(verify_token),
 ):
-    if req.plan not in PLANS:
-        raise HTTPException(400, f"Unknown plan '{req.plan}'. Choose: {list(PLANS)}")
+    if req.plan not in PLANS and req.plan not in TOPUP_PACKS:
+        raise HTTPException(400, f"Unknown plan or pack '{req.plan}'")
 
     if not stripe.api_key:
         raise HTTPException(503, "Payment system not configured — STRIPE_SECRET_KEY missing")
 
+    base = _app_base_url()
+
+    # ── Top-up pack (one-time credit purchase) ────────────────────────────────
+    if req.plan in TOPUP_PACKS:
+        try:
+            price_id = await asyncio.to_thread(_sync_get_or_create_topup_price, req.plan)
+            session = await asyncio.to_thread(
+                stripe.checkout.Session.create,
+                mode="payment",
+                line_items=[{"price": price_id, "quantity": 1}],
+                success_url=f"{base}?checkout=topup_success&pack={req.plan}",
+                cancel_url=f"{base}?checkout=cancelled",
+                client_reference_id=user_id,
+                metadata={"user_id": user_id, "pack": req.plan, "type": "topup"},
+                customer_creation="if_required",
+            )
+        except stripe.StripeError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        except Exception as exc:
+            logger.error("Topup checkout error pack=%s user=%s: %s", req.plan, user_id, exc)
+            raise HTTPException(503, "Checkout unavailable — please try again") from exc
+        return {"url": session.url}
+
+    # ── Subscription plan ─────────────────────────────────────────────────────
     plan = PLANS[req.plan]
     is_one_time = plan.get("interval") is None
 
     try:
         price_id = await asyncio.to_thread(_sync_get_or_create_price, req.plan)
-        base = _app_base_url()
 
         if is_one_time:
             # 5-year one-time purchase — use payment mode
@@ -330,40 +420,56 @@ async def stripe_webhook(request: Request):
         if event["type"] == "checkout.session.completed":
             user_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("user_id")
             customer_id = obj.get("customer")
-            plan = (obj.get("metadata") or {}).get("plan", "basic")
+            metadata = obj.get("metadata") or {}
 
-            # Derive base tier and billing period from the plan key
-            if plan.endswith("_5year"):
-                base_tier = plan[:-6]          # "basic_5year" → "basic"
-                billing_period = "5year"
-                access_expires_at: str | None = (
-                    datetime.datetime.utcnow() + datetime.timedelta(days=5 * 365)
-                ).isoformat()
-            elif plan.endswith("_annual"):
-                base_tier = plan[:-7]          # "basic_annual" → "basic"
-                billing_period = "annual"
-                access_expires_at = None
+            # ── Top-up pack: apply credits and skip subscription logic ────────
+            if metadata.get("type") == "topup":
+                pack_key = metadata.get("pack", "")
+                if user_id and pack_key and pack_key in TOPUP_PACKS:
+                    pack_cfg = TOPUP_PACKS[pack_key]
+                    await _apply_topup_credits(
+                        user_id, pack_cfg["kind"], pack_cfg["credits"], obj.get("id", "")
+                    )
+                    logger.info(
+                        "Topup applied user=%s pack=%s credits=%s",
+                        user_id, pack_key, pack_cfg["credits"],
+                    )
             else:
-                base_tier = plan
-                billing_period = "monthly"
-                access_expires_at = None
+                # ── Subscription activation ───────────────────────────────────
+                plan = metadata.get("plan", "basic")
 
-            if user_id:
-                update: dict[str, object] = {
-                    "subscription_tier": base_tier,
-                    "subscription_status": "active",
-                    "billing_period": billing_period,
-                    "subscribed_at": datetime.datetime.utcnow().isoformat(),
-                }
-                if customer_id:
-                    update["stripe_customer_id"] = customer_id
-                if access_expires_at:
-                    update["access_expires_at"] = access_expires_at
-                await _upsert_profile(user_id, **update)
-                logger.info(
-                    "Subscription activated user=%s tier=%s period=%s",
-                    user_id, base_tier, billing_period,
-                )
+                # Derive base tier and billing period from the plan key
+                if plan.endswith("_5year"):
+                    base_tier = plan[:-6]          # "basic_5year" → "basic"
+                    billing_period = "5year"
+                    access_expires_at: str | None = (
+                        datetime.datetime.utcnow() + datetime.timedelta(days=5 * 365)
+                    ).isoformat()
+                elif plan.endswith("_annual"):
+                    base_tier = plan[:-7]          # "basic_annual" → "basic"
+                    billing_period = "annual"
+                    access_expires_at = None
+                else:
+                    base_tier = plan
+                    billing_period = "monthly"
+                    access_expires_at = None
+
+                if user_id:
+                    update: dict[str, object] = {
+                        "subscription_tier": base_tier,
+                        "subscription_status": "active",
+                        "billing_period": billing_period,
+                        "subscribed_at": datetime.datetime.utcnow().isoformat(),
+                    }
+                    if customer_id:
+                        update["stripe_customer_id"] = customer_id
+                    if access_expires_at:
+                        update["access_expires_at"] = access_expires_at
+                    await _upsert_profile(user_id, **update)
+                    logger.info(
+                        "Subscription activated user=%s tier=%s period=%s",
+                        user_id, base_tier, billing_period,
+                    )
 
         elif event["type"] == "customer.subscription.deleted":
             # Only fires for recurring subscriptions (monthly/annual), not 5-year one-time.

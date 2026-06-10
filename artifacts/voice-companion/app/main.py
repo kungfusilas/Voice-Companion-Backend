@@ -26,6 +26,7 @@ from app.routers import personality as personality_router
 from app.routers import analysis as analysis_router
 from app.routers import onboarding as onboarding_router
 from app.routers import reports as reports_router
+from app.routers import usage as usage_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -146,6 +147,7 @@ app.include_router(personality_router.router,   prefix="/api/personality",      
 app.include_router(analysis_router.router,     prefix="/api/analysis",           tags=["analysis"])
 app.include_router(onboarding_router.router,   prefix="/api/onboarding",         tags=["onboarding"])
 app.include_router(reports_router.router,      prefix="/api/reports/weekly",      tags=["reports"])
+app.include_router(usage_router.router,        prefix="/api",                     tags=["usage"])
 
 
 @app.get("/api/healthz")

@@ -21,9 +21,13 @@ import {
   setRomanticMode,
   submitWaitlist,
   requestWowMoment,
+  ApiError,
+  getUsageStatus,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
+import { QuotaModal } from "@/components/QuotaModal";
+import type { QuotaDetail } from "@/components/QuotaModal";
 
 // ── Onboarding questions ──────────────────────────────────────────────────────
 
@@ -121,6 +125,26 @@ export function ChatPage({
   const wowDoneRef = useRef(false);
   const [showUpgradeCard, setShowUpgradeCard] = useState(false);
   const [wowGenerating, setWowGenerating] = useState(false);
+  const [quotaErrorDetail, setQuotaErrorDetail] = useState<QuotaDetail | null>(null);
+
+  // ── 80% usage warning — shown once per browser session ────────────────────
+  useEffect(() => {
+    if (isGuest) return;
+    const warnKey = `usage_80pct_${userId}`;
+    if (sessionStorage.getItem(warnKey)) return;
+    getUsageStatus().then((status) => {
+      const msgPct = status.msgs_allowance > 0
+        ? status.msgs_used / (status.msgs_allowance + status.topup_msgs)
+        : 0;
+      const voicePct = status.voice_allowance > 0
+        ? status.voice_seconds_used / (status.voice_allowance + status.topup_voice_seconds)
+        : 0;
+      if (Math.max(msgPct, voicePct) >= 0.8) {
+        setError(`You've used ${Math.round(Math.max(msgPct, voicePct) * 100)}% of your monthly allowance.`);
+        sessionStorage.setItem(warnKey, "1");
+      }
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const busyRef = useRef(false);
   const { playing: speaking, play: playAudio } = useAudioPlayer();
@@ -237,7 +261,11 @@ export function ChatPage({
               .replace(/\s+/g, " ")
               .trim();
             if (spokenText) {
-              try { await playAudio(await speakText(spokenText, persona.id)); } catch {}
+              try {
+                await playAudio(await speakText(spokenText, persona.id));
+              } catch (ttsErr) {
+                if (ttsErr instanceof ApiError && ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+              }
             }
           }
 
@@ -249,7 +277,19 @@ export function ChatPage({
         }
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Connection error");
+      if (e instanceof ApiError) {
+        if (e.status === 402) {
+          setQuotaErrorDetail(e.detail as QuotaDetail);
+        } else if (e.status === 429) {
+          setError((e.detail as Record<string, string> | null)?.message ?? "Hourly limit reached — try again soon.");
+        } else if (e.status === 401) {
+          setError("Your account was opened on another device. Please sign in again.");
+        } else {
+          setError(e.message);
+        }
+      } else {
+        setError(e instanceof Error ? e.message : "Connection error");
+      }
       setStreamingText("");
     } finally {
       busyRef.current = false;
@@ -383,8 +423,12 @@ export function ChatPage({
     try {
       const transcript = await transcribeAudio(blob);
       if (transcript.trim()) await sendMessage(transcript);
-    } catch {
-      setError("Transcription failed — try again");
+    } catch (sttErr) {
+      if (sttErr instanceof ApiError && sttErr.status === 402) {
+        setQuotaErrorDetail(sttErr.detail as QuotaDetail);
+      } else {
+        setError("Transcription failed — try again");
+      }
     } finally {
       resetRecorder();
     }
@@ -824,6 +868,12 @@ export function ChatPage({
           </motion.div>
         )}
       </AnimatePresence>
+
+      <QuotaModal
+        detail={quotaErrorDetail}
+        onClose={() => setQuotaErrorDetail(null)}
+        onUpgrade={() => { setQuotaErrorDetail(null); onBack(); }}
+      />
     </motion.div>
   );
 }

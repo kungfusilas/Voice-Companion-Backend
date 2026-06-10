@@ -14,6 +14,7 @@ async function apiFetch(input: RequestInfo, init: RequestInit = {}): Promise<Res
   } = await supabase.auth.getSession();
   const token = session?.access_token;
   const guestId = !token ? localStorage.getItem("bondai_guest_id") : null;
+  const sessionId = sessionStorage.getItem("bondai_session_id");
 
   return fetch(input, {
     ...init,
@@ -21,6 +22,7 @@ async function apiFetch(input: RequestInfo, init: RequestInit = {}): Promise<Res
       ...(init.headers as Record<string, string> | undefined),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(guestId ? { "X-Guest-ID": guestId } : {}),
+      ...(sessionId ? { "X-Session-Id": sessionId } : {}),
     },
   });
 }
@@ -32,6 +34,28 @@ export async function apiFetchJSON<T>(input: RequestInfo, init: RequestInit = {}
   const res = await apiFetch(input, init);
   if (!res.ok) throw new Error(`API error ${res.status}`);
   return res.json() as Promise<T>;
+}
+
+// ── Structured API error ──────────────────────────────────────────────────────
+
+/** Thrown by API calls when the server returns a non-2xx status. */
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+    public readonly detail: unknown,
+  ) {
+    super(code);
+    Object.setPrototypeOf(this, ApiError.prototype);
+  }
+}
+
+async function _parseErrorBody(res: Response): Promise<{ code: string; detail: unknown }> {
+  let body: unknown;
+  try { body = await res.clone().json(); } catch { body = await res.text(); }
+  const d = (body as Record<string, unknown> | null)?.detail ?? body;
+  const code = (d as Record<string, unknown> | null)?.code as string | undefined ?? String(res.status);
+  return { code, detail: d };
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -80,6 +104,17 @@ export interface RelationshipStats {
   drift_acknowledged_at: string | null;
   romantic_mode: boolean;
   romantic_mode_unlocked: boolean;
+}
+
+export interface UsageStatus {
+  msgs_used: number;
+  msgs_allowance: number;
+  topup_msgs: number;
+  voice_seconds_used: number;
+  voice_allowance: number;
+  topup_voice_seconds: number;
+  usage_period_start: string | null;
+  renews_at: string | null;
 }
 
 // ── Activities ────────────────────────────────────────────────────────────────
@@ -212,7 +247,10 @@ export async function* chatStream(
       onboarding_context: onboarding_context ?? undefined,
     }),
   });
-  if (!res.ok || !res.body) throw new Error(await res.text());
+  if (!res.ok || !res.body) {
+    const { code, detail } = await _parseErrorBody(res);
+    throw new ApiError(res.status, code, detail);
+  }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -266,7 +304,10 @@ export async function transcribeAudio(blob: Blob): Promise<string> {
   const form = new FormData();
   form.append("audio", blob, "recording.webm");
   const res = await apiFetch(`${BASE}/stt`, { method: "POST", body: form });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const { code, detail } = await _parseErrorBody(res);
+    throw new ApiError(res.status, code, detail);
+  }
   return (await res.json()).transcript as string;
 }
 
@@ -278,8 +319,28 @@ export async function speakText(text: string, persona_id: string): Promise<Blob>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, persona_id }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const { code, detail } = await _parseErrorBody(res);
+    throw new ApiError(res.status, code, detail);
+  }
   return res.blob();
+}
+
+// ── Usage ─────────────────────────────────────────────────────────────────────
+
+export async function getUsageStatus(): Promise<UsageStatus> {
+  const res = await apiFetch(`${BASE}/usage/status`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json() as Promise<UsageStatus>;
+}
+
+export async function registerSession(sessionId: string): Promise<void> {
+  await apiFetch(`${BASE}/session/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId }),
+  });
+  // fire-and-forget — errors ignored
 }
 
 // ── Proactive messages ────────────────────────────────────────────────────────

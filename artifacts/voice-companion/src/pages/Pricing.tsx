@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { ArrowLeft, Check, Loader2, Lock, Info, ExternalLink, Calendar } from "lucide-react";
-import { createCheckoutSession, openBillingPortal } from "@/lib/api";
+import { createCheckoutSession, openBillingPortal, getUsageStatus } from "@/lib/api";
+import type { UsageStatus } from "@/lib/api";
 import { LegacyModal } from "@/components/LegacyModal";
 
 type BillingPeriod = "monthly" | "annual" | "5year";
@@ -155,6 +156,35 @@ function InfoTooltip({ text }: { text: string }) {
   );
 }
 
+function UsageBar({
+  label, used, allowance, topup, isVoice = false, className = "",
+}: {
+  label: string; used: number; allowance: number; topup: number;
+  isVoice?: boolean; className?: string;
+}) {
+  const total = allowance + topup;
+  const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 0;
+  const barColor = pct >= 80 ? "#f87171" : pct >= 60 ? "#fbbf24" : "#a78bfa";
+  const displayUsed  = isVoice ? `${Math.round(used / 60)}m`  : String(used);
+  const displayTotal = isVoice ? `${Math.round(total / 60)}m` : String(total);
+  return (
+    <div className={className}>
+      <div className="flex items-center justify-between mb-1">
+        <span className="text-[10px] text-white/40">{label}</span>
+        <span className="text-[10px] text-white/30">
+          {displayUsed} / {displayTotal}{topup > 0 ? " (incl. pack)" : ""}
+        </span>
+      </div>
+      <div className="h-1 rounded-full overflow-hidden" style={{ background: "rgba(255,255,255,0.07)" }}>
+        <div
+          className="h-full rounded-full transition-all duration-500"
+          style={{ width: `${pct}%`, background: barColor }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function parseApiError(raw: unknown): string {
   if (!(raw instanceof Error)) return "Checkout failed — try again";
   try {
@@ -191,6 +221,12 @@ export function PricingPage({
   const [error, setError] = useState<string | null>(null);
   const [legacyModalOpen, setLegacyModalOpen] = useState(false);
   const [portalLoading, setPortalLoading] = useState(false);
+  const [usage, setUsage] = useState<UsageStatus | null>(null);
+
+  useEffect(() => {
+    if (isGuest || currentTier === "free") return;
+    getUsageStatus().then(setUsage).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleManageSubscription = async () => {
     if (portalLoading) return;
@@ -278,6 +314,40 @@ export function PricingPage({
         <h1 className="text-lg font-semibold text-white">Unlock your companion</h1>
         <p className="text-white/40 text-xs mt-1">Cancel anytime · Multiple billing options</p>
       </div>
+
+      {/* Usage this month — paid users only */}
+      {isPaidUser && usage && (
+        <div
+          className="mx-4 mb-2 px-4 py-3 rounded-xl shrink-0"
+          style={{ background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.07)" }}
+        >
+          <p className="text-[10px] text-white/35 font-medium uppercase tracking-wider mb-2.5">
+            Usage This Month
+          </p>
+          <UsageBar
+            label="Messages"
+            used={usage.msgs_used}
+            allowance={usage.msgs_allowance}
+            topup={usage.topup_msgs}
+          />
+          {usage.voice_allowance > 0 && (
+            <UsageBar
+              label="Voice"
+              used={usage.voice_seconds_used}
+              allowance={usage.voice_allowance}
+              topup={usage.topup_voice_seconds}
+              isVoice
+              className="mt-2"
+            />
+          )}
+          {usage.renews_at && (
+            <p className="text-[10px] text-white/25 mt-2.5 flex items-center gap-1.5">
+              <Calendar className="w-2.5 h-2.5 shrink-0" />
+              Resets {new Date(usage.renews_at).toLocaleDateString("en-US", { month: "long", day: "numeric" })}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Billing period toggle */}
       <div className="px-4 pb-3 shrink-0">

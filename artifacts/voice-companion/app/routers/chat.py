@@ -3,7 +3,7 @@ import json
 import asyncio
 import httpx
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
 from app import store, claude, venice_client
@@ -17,6 +17,7 @@ from app import relationship
 from app import scoring
 from app.companions import ROMANTIC_MODE_PROMPTS
 from app.auth_middleware import verify_token_or_guest
+from app.usage import check_message_quota
 
 router = APIRouter()
 
@@ -39,7 +40,7 @@ def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
 
 _FREE_MODEL    = "claude-haiku-4-5-20251001"
 _PREMIUM_MODEL = "claude-sonnet-4-6"
-_POWER_MODEL   = "claude-opus-4-6"
+_POWER_MODEL   = "claude-sonnet-4-6"
 
 # Tier hierarchy used for feature gating
 _TIER_RANK: dict[str, int] = {"free": 0, "basic": 1, "premium": 2, "power": 3, "elite": 4}
@@ -153,7 +154,7 @@ async def _build_system_prompt(
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_guest)):
+async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify_token_or_guest)):
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -165,6 +166,10 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_gues
     # Paywall: authenticated users must have an active paid subscription
     if not is_guest and (tier == "free" or sub_status != "active"):
         raise HTTPException(status_code=402, detail="Subscription required")
+
+    # Usage quota check (authenticated users only)
+    if not is_guest:
+        await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -247,7 +252,7 @@ async def chat(request: ChatRequest, user_id: str = Depends(verify_token_or_gues
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_or_guest)):
+async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends(verify_token_or_guest)):
     """
     Stream the companion reply as SSE.
 
@@ -271,6 +276,10 @@ async def chat_stream(request: ChatRequest, user_id: str = Depends(verify_token_
     # Paywall: authenticated users must have an active paid subscription
     if not is_guest and (tier == "free" or sub_status != "active"):
         raise HTTPException(status_code=402, detail="Subscription required")
+
+    # Usage quota check (authenticated users only)
+    if not is_guest:
+        await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
 
     persona = store.get_persona(request.persona_id)
     if not persona:

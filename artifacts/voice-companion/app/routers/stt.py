@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Depends, Request
 from app import deepgram_client
 from app.deepgram_client import DeepgramTranscriptError
+from app.auth_middleware import verify_token_or_guest
+from app.usage import check_voice_quota, get_user_tier
 
 router = APIRouter()
 
-# Audio MIME types we accept and their Deepgram-compatible labels
 _SUPPORTED_TYPES = {
     "audio/webm",
     "audio/webm;codecs=opus",
@@ -18,40 +19,37 @@ _SUPPORTED_TYPES = {
     "audio/flac",
     "audio/m4a",
     "audio/aac",
-    "video/webm",   # Chrome MediaRecorder sometimes uses this for audio
+    "video/webm",
 }
 
 
 @router.post("")
 async def speech_to_text(
+    req: Request,
     audio: UploadFile = File(..., description="Audio file to transcribe"),
     model: str = Query("nova-2", description="Deepgram model — nova-2 recommended"),
     language: str = Query("en", description="BCP-47 language code, e.g. 'en', 'es', 'fr'"),
     diarize: bool = Query(False, description="Identify multiple speakers"),
+    user_id: str = Depends(verify_token_or_guest),
 ):
     """
     Transcribe speech from an uploaded audio file.
-
-    Accepts any common audio format: webm, ogg, mp3, wav, flac, mp4, m4a.
-    Returns a full transcript, per-word timings, and confidence scores.
-
-    **Typical frontend flow (browser MediaRecorder):**
-    ```js
-    const recorder = new MediaRecorder(stream);
-    recorder.ondataavailable = async (e) => {
-      const form = new FormData();
-      form.append('audio', e.data, 'recording.webm');
-      const res = await fetch('/api/stt', { method: 'POST', body: form });
-      const { transcript } = await res.json();
-    };
-    ```
+    Requires authentication for paid users. Voice quota is deducted based on
+    estimated audio duration (webm/opus ≈ 4 000 bytes/sec).
     """
     audio_bytes = await audio.read()
     if not audio_bytes:
         raise HTTPException(status_code=422, detail="Uploaded audio file is empty")
 
-    if len(audio_bytes) > 25 * 1024 * 1024:  # 25 MB guard
+    if len(audio_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB)")
+
+    is_guest = user_id.startswith("guest_")
+    if not is_guest:
+        tier, _ = await get_user_tier(user_id)
+        session_id = req.headers.get("X-Session-Id") or None
+        estimated_secs = max(1, len(audio_bytes) // 4000)
+        await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     try:
         result = await deepgram_client.transcribe(
