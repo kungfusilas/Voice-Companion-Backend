@@ -4,6 +4,7 @@ Stripe payments router.
   POST /api/create-checkout-session  — create Stripe Checkout session (auth required)
   POST /api/stripe-webhook           — handle Stripe webhook events (no auth)
   GET  /api/subscription-status      — return current user's subscription tier (auth required)
+  POST /api/billing-portal           — create Stripe Customer Portal session (auth required)
 
 Products and prices are created on-demand on the first checkout call and cached
 in memory for the lifetime of the process.
@@ -16,6 +17,8 @@ DATABASE — run this SQL in Supabase SQL Editor before using payments:
     stripe_customer_id  text,
     subscription_tier   text        DEFAULT 'free',
     subscription_status text        DEFAULT 'inactive',
+    billing_period      text        DEFAULT 'monthly',
+    access_expires_at   timestamptz,
     subscribed_at       timestamptz,
     updated_at          timestamptz DEFAULT now()
   );
@@ -25,7 +28,9 @@ If the table already exists, add the missing columns:
   ALTER TABLE profiles
     ADD COLUMN IF NOT EXISTS subscription_tier   text DEFAULT 'free',
     ADD COLUMN IF NOT EXISTS stripe_customer_id  text,
-    ADD COLUMN IF NOT EXISTS subscription_status text DEFAULT 'inactive';
+    ADD COLUMN IF NOT EXISTS subscription_status text DEFAULT 'inactive',
+    ADD COLUMN IF NOT EXISTS billing_period      text DEFAULT 'monthly',
+    ADD COLUMN IF NOT EXISTS access_expires_at   timestamptz;
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
@@ -48,12 +53,26 @@ logger = logging.getLogger(__name__)
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
 # ── Plan definitions ──────────────────────────────────────────────────────────
+# "interval": "month" | "year" | None   (None = one-time payment, not subscription)
+# Prices in cents. Annual = monthly × 12 × 0.95. 5-year = monthly × 60 × 0.90.
 
 PLANS: dict[str, dict] = {
-    "basic":   {"name": "Companion Basic",   "amount": 1299,  "label": "Basic"},
-    "premium": {"name": "Companion Premium", "amount": 3999,  "label": "Premium"},
-    "power":   {"name": "Companion Power",   "amount": 8999,  "label": "Power"},
-    "elite":   {"name": "Companion Elite",   "amount": 14999, "label": "Elite"},
+    # ── Monthly ───────────────────────────────────────────────────────────────
+    "basic":          {"name": "Companion Basic",   "amount": 1299,   "base": "basic",   "interval": "month"},
+    "premium":        {"name": "Companion Premium", "amount": 3999,   "base": "premium", "interval": "month"},
+    "power":          {"name": "Companion Power",   "amount": 8999,   "base": "power",   "interval": "month"},
+    # ── Annual (5% off) ───────────────────────────────────────────────────────
+    "basic_annual":   {"name": "Companion Basic",   "amount": 14809,  "base": "basic",   "interval": "year"},
+    "premium_annual": {"name": "Companion Premium", "amount": 45589,  "base": "premium", "interval": "year"},
+    "power_annual":   {"name": "Companion Power",   "amount": 102589, "base": "power",   "interval": "year"},
+    # ── 5-Year one-time (10% off) ─────────────────────────────────────────────
+    # Stripe does not support recurring intervals > 1 year, so these are
+    # one-time payments (mode="payment"). Access expiry is tracked in our DB.
+    "basic_5year":    {"name": "Companion Basic",   "amount": 70146,  "base": "basic",   "interval": None},
+    "premium_5year":  {"name": "Companion Premium", "amount": 215946, "base": "premium", "interval": None},
+    "power_5year":    {"name": "Companion Power",   "amount": 485946, "base": "power",   "interval": None},
+    # ── Legacy (kept for backward compat) ────────────────────────────────────
+    "elite":          {"name": "Companion Elite",   "amount": 14999,  "base": "elite",   "interval": "month"},
 }
 
 _price_ids: dict[str, str] = {}
@@ -66,7 +85,9 @@ def _sync_get_or_create_price(plan_key: str) -> str:
         return _price_ids[plan_key]
 
     plan = PLANS[plan_key]
+    interval = plan.get("interval")  # "month", "year", or None (one-time)
 
+    # Find or create the Product — shared across all billing periods for the same tier
     products = stripe.Product.list(active=True, limit=100)
     product = next(
         (p for p in products.auto_paging_iter() if p.name == plan["name"]),
@@ -75,23 +96,43 @@ def _sync_get_or_create_price(plan_key: str) -> str:
     if not product:
         product = stripe.Product.create(name=plan["name"])
 
+    # Find or create the matching Price
     prices = stripe.Price.list(product=product.id, active=True, limit=100)
-    price = next(
-        (
-            p for p in prices.auto_paging_iter()
-            if p.unit_amount == plan["amount"]
-            and p.recurring
-            and p.recurring.interval == "month"
-        ),
-        None,
-    )
-    if not price:
-        price = stripe.Price.create(
-            product=product.id,
-            unit_amount=plan["amount"],
-            currency="usd",
-            recurring={"interval": "month"},
+
+    if interval:
+        # Recurring price (monthly or annual)
+        price = next(
+            (
+                p for p in prices.auto_paging_iter()
+                if p.unit_amount == plan["amount"]
+                and p.recurring
+                and p.recurring.interval == interval
+            ),
+            None,
         )
+        if not price:
+            price = stripe.Price.create(
+                product=product.id,
+                unit_amount=plan["amount"],
+                currency="usd",
+                recurring={"interval": interval},
+            )
+    else:
+        # One-time price (5-year prepayment)
+        price = next(
+            (
+                p for p in prices.auto_paging_iter()
+                if p.unit_amount == plan["amount"]
+                and not p.recurring
+            ),
+            None,
+        )
+        if not price:
+            price = stripe.Price.create(
+                product=product.id,
+                unit_amount=plan["amount"],
+                currency="usd",
+            )
 
     _price_ids[plan_key] = price.id
     return price.id
@@ -160,8 +201,6 @@ async def _user_id_by_customer(customer_id: str) -> str | None:
     return None
 
 
-# ── Supabase profile fetch ─────────────────────────────────────────────────────
-
 async def _get_profile(user_id: str) -> dict | None:
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:
@@ -219,18 +258,36 @@ async def create_checkout_session(
     if not stripe.api_key:
         raise HTTPException(503, "Payment system not configured — STRIPE_SECRET_KEY missing")
 
+    plan = PLANS[req.plan]
+    is_one_time = plan.get("interval") is None
+
     try:
         price_id = await asyncio.to_thread(_sync_get_or_create_price, req.plan)
         base = _app_base_url()
-        session = await asyncio.to_thread(
-            stripe.checkout.Session.create,
-            mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
-            success_url=f"{base}?checkout=success&plan={req.plan}",
-            cancel_url=f"{base}?checkout=cancelled",
-            client_reference_id=user_id,
-            metadata={"user_id": user_id, "plan": req.plan},
-        )
+
+        if is_one_time:
+            # 5-year one-time purchase — use payment mode
+            session = await asyncio.to_thread(
+                stripe.checkout.Session.create,
+                mode="payment",
+                line_items=[{"price": price_id, "quantity": 1}],
+                success_url=f"{base}?checkout=success&plan={req.plan}",
+                cancel_url=f"{base}?checkout=cancelled",
+                client_reference_id=user_id,
+                metadata={"user_id": user_id, "plan": req.plan},
+                customer_creation="always",  # ensure customer_id available for future upgrades
+            )
+        else:
+            # Monthly or annual subscription
+            session = await asyncio.to_thread(
+                stripe.checkout.Session.create,
+                mode="subscription",
+                line_items=[{"price": price_id, "quantity": 1}],
+                success_url=f"{base}?checkout=success&plan={req.plan}",
+                cancel_url=f"{base}?checkout=cancelled",
+                client_reference_id=user_id,
+                metadata={"user_id": user_id, "plan": req.plan},
+            )
     except stripe.StripeError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -266,22 +323,52 @@ async def stripe_webhook(request: Request):
             user_id = obj.get("client_reference_id") or (obj.get("metadata") or {}).get("user_id")
             customer_id = obj.get("customer")
             plan = (obj.get("metadata") or {}).get("plan", "basic")
+
+            # Derive base tier and billing period from the plan key
+            if plan.endswith("_5year"):
+                base_tier = plan[:-6]          # "basic_5year" → "basic"
+                billing_period = "5year"
+                access_expires_at: str | None = (
+                    datetime.datetime.utcnow() + datetime.timedelta(days=5 * 365)
+                ).isoformat()
+            elif plan.endswith("_annual"):
+                base_tier = plan[:-7]          # "basic_annual" → "basic"
+                billing_period = "annual"
+                access_expires_at = None
+            else:
+                base_tier = plan
+                billing_period = "monthly"
+                access_expires_at = None
+
             if user_id:
-                await _upsert_profile(
-                    user_id,
-                    stripe_customer_id=customer_id,
-                    subscription_tier=plan,
-                    subscription_status="active",
-                    subscribed_at=datetime.datetime.utcnow().isoformat(),
+                update: dict[str, object] = {
+                    "subscription_tier": base_tier,
+                    "subscription_status": "active",
+                    "billing_period": billing_period,
+                    "subscribed_at": datetime.datetime.utcnow().isoformat(),
+                }
+                if customer_id:
+                    update["stripe_customer_id"] = customer_id
+                if access_expires_at:
+                    update["access_expires_at"] = access_expires_at
+                await _upsert_profile(user_id, **update)
+                logger.info(
+                    "Subscription activated user=%s tier=%s period=%s",
+                    user_id, base_tier, billing_period,
                 )
-                logger.info("Subscription activated user=%s plan=%s", user_id, plan)
 
         elif event["type"] == "customer.subscription.deleted":
+            # Only fires for recurring subscriptions (monthly/annual), not 5-year one-time.
             customer_id = obj.get("customer")
             if customer_id:
                 user_id = await _user_id_by_customer(customer_id)
                 if user_id:
-                    await _upsert_profile(user_id, subscription_tier="free", subscription_status="inactive")
+                    await _upsert_profile(
+                        user_id,
+                        subscription_tier="free",
+                        subscription_status="inactive",
+                        billing_period="monthly",
+                    )
                     logger.info("Subscription cancelled user=%s", user_id)
 
     except Exception as exc:
@@ -303,14 +390,44 @@ async def subscription_status(user_id: str = Depends(verify_token)):
         resp = await client.get(
             f"{url}/rest/v1/profiles",
             headers=_supa_headers(),
-            params={"id": f"eq.{user_id}", "select": "subscription_tier,subscription_status,subscribed_at", "limit": "1"},
+            params={
+                "id": f"eq.{user_id}",
+                "select": "subscription_tier,subscription_status,subscribed_at,billing_period,access_expires_at",
+                "limit": "1",
+            },
         )
 
     if resp.status_code == 200 and resp.json():
         row = resp.json()[0]
+        tier = row.get("subscription_tier", "free")
+        status = row.get("subscription_status", "inactive")
+        billing_period = row.get("billing_period") or "monthly"
+        access_expires_at = row.get("access_expires_at")
+
+        # 5-year users: treat as active until expiry date, then downgrade
+        if billing_period == "5year" and status == "active" and access_expires_at:
+            try:
+                expires = datetime.datetime.fromisoformat(access_expires_at.replace("Z", "+00:00"))
+                if expires.tzinfo is None:
+                    expires = expires.replace(tzinfo=datetime.timezone.utc)
+                if expires < datetime.datetime.now(datetime.timezone.utc):
+                    tier = "free"
+                    status = "inactive"
+            except (ValueError, AttributeError):
+                pass
+
         return {
-            "tier": row.get("subscription_tier", "free"),
-            "status": row.get("subscription_status", "inactive"),
+            "tier": tier,
+            "status": status,
             "subscribed_at": row.get("subscribed_at"),
+            "billing_period": billing_period,
+            "access_expires_at": access_expires_at,
         }
-    return {"tier": "free", "status": "inactive", "subscribed_at": None}
+
+    return {
+        "tier": "free",
+        "status": "inactive",
+        "subscribed_at": None,
+        "billing_period": "monthly",
+        "access_expires_at": None,
+    }

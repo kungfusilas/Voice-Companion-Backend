@@ -23,6 +23,19 @@ const BG_STYLE: React.CSSProperties = {
   background: "linear-gradient(145deg, #0d0d1a 0%, #0f0720 50%, #0d0d1a 100%)",
 };
 
+function formatPlanLabel(planKey: string): string {
+  if (!planKey) return "";
+  if (planKey.endsWith("_5year")) {
+    const tier = planKey.slice(0, -6);
+    return `${tier.charAt(0).toUpperCase() + tier.slice(1)} (5-Year)`;
+  }
+  if (planKey.endsWith("_annual")) {
+    const tier = planKey.slice(0, -7);
+    return `${tier.charAt(0).toUpperCase() + tier.slice(1)} (Annual)`;
+  }
+  return planKey.charAt(0).toUpperCase() + planKey.slice(1);
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("loading");
   const [session, setSession] = useState<Session | null>(null);
@@ -31,6 +44,8 @@ export default function App() {
   const [subscriptionTier, setSubscriptionTier] = useState("free");
   const [subscriptionStatus, setSubscriptionStatus] = useState("inactive");
   const [subscribedAt, setSubscribedAt] = useState<string | null>(null);
+  const [billingPeriod, setBillingPeriod] = useState("monthly");
+  const [accessExpiresAt, setAccessExpiresAt] = useState<string | null>(null);
   const [subCheckDone, setSubCheckDone] = useState(false);
   const [checkoutMessage, setCheckoutMessage] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -40,8 +55,9 @@ export default function App() {
     // Check for Stripe checkout return params
     const params = new URLSearchParams(window.location.search);
     if (params.get("checkout") === "success") {
-      const plan = params.get("plan");
-      setCheckoutMessage(plan ? `🎉 You're on ${plan.charAt(0).toUpperCase() + plan.slice(1)}!` : "🎉 Subscription activated!");
+      const plan = params.get("plan") ?? "";
+      const label = formatPlanLabel(plan);
+      setCheckoutMessage(label ? `🎉 You're on ${label}!` : "🎉 Subscription activated!");
       window.history.replaceState({}, "", window.location.pathname);
     } else if (params.get("checkout") === "cancelled") {
       window.history.replaceState({}, "", window.location.pathname);
@@ -57,16 +73,17 @@ export default function App() {
         setSession(session);
         if (session) {
           try {
-            const { tier, status, subscribedAt } = await getSubscriptionStatus();
+            const { tier, status, subscribedAt, billingPeriod, accessExpiresAt } = await getSubscriptionStatus();
             setSubscriptionTier(tier);
             setSubscriptionStatus(status);
             setSubscribedAt(subscribedAt);
+            setBillingPeriod(billingPeriod);
+            setAccessExpiresAt(accessExpiresAt);
           } catch {
             // Subscription check failed — fail open (treat as unpaid, show pricing)
           } finally {
             setSubCheckDone(true);
           }
-          // Screen is set by effectiveScreen based on tier/status
           setScreen("companion-select");
         } else {
           // Guest — no subscription check needed
@@ -85,10 +102,12 @@ export default function App() {
         setGuestId(null);
         localStorage.removeItem("bondai_guest_id");
         setSubCheckDone(false);
-        getSubscriptionStatus().then(({ tier, status, subscribedAt }) => {
+        getSubscriptionStatus().then(({ tier, status, subscribedAt, billingPeriod, accessExpiresAt }) => {
           setSubscriptionTier(tier);
           setSubscriptionStatus(status);
           setSubscribedAt(subscribedAt);
+          setBillingPeriod(billingPeriod);
+          setAccessExpiresAt(accessExpiresAt);
           setSubCheckDone(true);
         }).catch(() => {
           setSubCheckDone(true); // fail open — effectiveScreen will show pricing
@@ -100,6 +119,8 @@ export default function App() {
         setPersona(null);
         setSubscriptionTier("free");
         setSubscriptionStatus("inactive");
+        setBillingPeriod("monthly");
+        setAccessExpiresAt(null);
         setSubCheckDone(false);
         setScreen("companion-select");
       }
@@ -116,6 +137,9 @@ export default function App() {
   // Authenticated users must have an active paid subscription to access
   // companion features. While the sub check is still in-flight we show a
   // spinner; once done, unpaid users are forced to the pricing screen.
+  // 5-year users have subscription_status="active" set by the backend
+  // (downgraded server-side once access_expires_at passes), so the existing
+  // check covers them without any special-casing here.
   const effectiveScreen: Screen = (() => {
     if (screen === "loading") return "loading";
     if (screen === "auth") return "auth";          // always reachable
@@ -266,6 +290,8 @@ export default function App() {
             <PricingPage
               key="pricing"
               currentTier={subscriptionTier}
+              currentBillingPeriod={billingPeriod}
+              accessExpiresAt={accessExpiresAt}
               onBack={() => setScreen("companion-select")}
               isGuest={isGuest}
               onSignIn={() => setScreen("auth")}

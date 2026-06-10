@@ -1,11 +1,15 @@
 import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
-import { ArrowLeft, Check, Loader2, Lock, Info, ExternalLink } from "lucide-react";
+import { ArrowLeft, Check, Loader2, Lock, Info, ExternalLink, Calendar } from "lucide-react";
 import { createCheckoutSession, openBillingPortal } from "@/lib/api";
 import { LegacyModal } from "@/components/LegacyModal";
 
+type BillingPeriod = "monthly" | "annual" | "5year";
+
 interface PricingPageProps {
   currentTier: string;
+  currentBillingPeriod?: string;
+  accessExpiresAt?: string | null;
   onBack: () => void;
   isGuest?: boolean;
   onSignIn?: () => void;
@@ -15,8 +19,6 @@ const PLANS = [
   {
     key: "basic",
     name: "Basic",
-    price: "$12.99",
-    period: "/mo",
     description: "Perfect for getting started",
     features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Daily check-ins"],
     accent: "violet",
@@ -29,8 +31,6 @@ const PLANS = [
   {
     key: "premium",
     name: "Premium",
-    price: "$39.99",
-    period: "/mo",
     description: "Deeper connections, more features",
     features: ["Everything in Basic", "Two-Way Voice 🎙️", "Companion selfies 📸", "Activity games", "Priority responses"],
     accent: "rose",
@@ -43,8 +43,6 @@ const PLANS = [
   {
     key: "power",
     name: "Power",
-    price: "$89.99",
-    period: "/mo",
     description: "The full experience, unlimited",
     features: ["Everything in Premium", "Unlimited messages", "Advanced memory", "Personality Map 🧠", "Session Debrief 🔬", "Weekly Insight Report 📊", "Earliest new features", "Power user badge"],
     accent: "amber",
@@ -56,12 +54,44 @@ const PLANS = [
   },
 ] as const;
 
+// ── Pricing data per billing period ───────────────────────────────────────────
+
+const PERIOD_PRICES: Record<string, Record<BillingPeriod, string>> = {
+  basic:   { monthly: "$12.99",   annual: "$148.09",   "5year": "$701.46" },
+  premium: { monthly: "$39.99",   annual: "$455.89",   "5year": "$2,159.46" },
+  power:   { monthly: "$89.99",   annual: "$1,025.89", "5year": "$4,859.46" },
+};
+
+const PERIOD_SUFFIX: Record<BillingPeriod, string> = {
+  monthly: "/mo",
+  annual:  "/yr",
+  "5year": "",
+};
+
+const PERIOD_DESC: Record<BillingPeriod, string> = {
+  monthly: "billed monthly",
+  annual:  "billed annually · save 5%",
+  "5year": "one-time · 5 years · save 10%",
+};
+
+// ── Plan key construction ─────────────────────────────────────────────────────
+
+function planKey(basePlan: string, period: BillingPeriod): string {
+  if (period === "annual") return `${basePlan}_annual`;
+  if (period === "5year")  return `${basePlan}_5year`;
+  return basePlan;
+}
+
+// ── Tier colours ──────────────────────────────────────────────────────────────
+
 const TIER_COLORS: Record<string, string> = {
   basic:   "text-violet-400",
   premium: "text-rose-400",
   power:   "text-amber-400",
   free:    "text-white/40",
 };
+
+// ── Feature tooltip info ──────────────────────────────────────────────────────
 
 const FEATURE_INFO: Record<string, string> = {
   "All 4 companions":       "Choose from Aria, Aeva, and more. Each companion has a unique personality, voice, and way of connecting. Find the one that feels right.",
@@ -79,6 +109,8 @@ const FEATURE_INFO: Record<string, string> = {
   "Session Debrief 🔬":     "After each session, receive a behavioral breakdown of how you showed up: negative self-talk, deflection, openness, patterns. Specific. Private. Powerful.",
   "Weekly Insight Report 📊": "Every Monday, a private report from your week — emotional themes, mood arc, what your companion noticed. Like a therapist's notes, written for you.",
 };
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 
 function InfoTooltip({ text }: { text: string }) {
   const [open, setOpen] = useState(false);
@@ -136,7 +168,25 @@ function parseApiError(raw: unknown): string {
   return raw.message || "Checkout failed — try again";
 }
 
-export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingPageProps) {
+function formatExpiry(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-US", {
+    year: "numeric", month: "long", day: "numeric",
+  });
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
+
+export function PricingPage({
+  currentTier,
+  currentBillingPeriod,
+  accessExpiresAt,
+  onBack,
+  isGuest,
+  onSignIn,
+}: PricingPageProps) {
+  const effectivePeriod = (currentBillingPeriod ?? "monthly") as BillingPeriod;
+
+  const [selectedPeriod, setSelectedPeriod] = useState<BillingPeriod>(effectivePeriod);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [legacyModalOpen, setLegacyModalOpen] = useState(false);
@@ -155,22 +205,28 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
     }
   };
 
-  const handleSubscribe = async (planKey: string) => {
-    if (loading || planKey === currentTier) return;
+  const handleSubscribe = async (basePlan: string) => {
+    const key = planKey(basePlan, selectedPeriod);
+    if (loading) return;
+    // Exact match: same tier AND same period → already subscribed
+    if (basePlan === currentTier && effectivePeriod === selectedPeriod) return;
     if (isGuest) {
       onSignIn?.();
       return;
     }
     setError(null);
-    setLoading(planKey);
+    setLoading(key);
     try {
-      const { url } = await createCheckoutSession(planKey);
+      const { url } = await createCheckoutSession(key);
       window.location.href = url;
     } catch (err: unknown) {
       setError(parseApiError(err));
       setLoading(null);
     }
   };
+
+  const isPaidUser = currentTier !== "free" && !isGuest;
+  const is5YearUser = isPaidUser && effectivePeriod === "5year";
 
   return (
     <motion.div
@@ -191,12 +247,18 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
         <div className="text-right">
           <p className="text-[11px] text-white/30">Current plan</p>
           <p className={`text-xs font-medium capitalize ${TIER_COLORS[currentTier] ?? TIER_COLORS.free}`}>
-            {currentTier === "free" ? "Free" : currentTier}
+            {currentTier === "free"
+              ? "Free"
+              : effectivePeriod === "annual"
+                ? `${currentTier} · annual`
+                : effectivePeriod === "5year"
+                  ? `${currentTier} · 5-year`
+                  : currentTier}
           </p>
         </div>
       </div>
 
-      {/* Error banner — shown above plan cards so it's always visible */}
+      {/* Error banner */}
       {error && (
         <div className="mx-4 mb-1 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-center shrink-0">
           <p className="text-xs text-red-400">{error}</p>
@@ -212,41 +274,84 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
       )}
 
       {/* Title */}
-      <div className="text-center px-5 pb-4 shrink-0">
+      <div className="text-center px-5 pb-3 shrink-0">
         <h1 className="text-lg font-semibold text-white">Unlock your companion</h1>
-        <p className="text-white/40 text-xs mt-1">Cancel anytime · Billed monthly</p>
+        <p className="text-white/40 text-xs mt-1">Cancel anytime · Multiple billing options</p>
       </div>
 
-      {/* Manage subscription — paid users only */}
-      {currentTier !== "free" && !isGuest && (
+      {/* Billing period toggle */}
+      <div className="px-4 pb-3 shrink-0">
+        <div
+          className="flex rounded-xl p-0.5"
+          style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)" }}
+        >
+          {(["monthly", "annual", "5year"] as BillingPeriod[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => setSelectedPeriod(p)}
+              className={`flex-1 py-2 text-[11px] font-medium rounded-[10px] transition-all ${
+                selectedPeriod === p
+                  ? "bg-violet-600/50 text-white shadow-sm"
+                  : "text-white/40 hover:text-white/60"
+              }`}
+            >
+              {p === "monthly" ? "Monthly" : p === "annual" ? "Annual −5%" : "5-Year −10%"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Manage subscription / 5-year expiry — paid users only */}
+      {isPaidUser && (
         <div className="px-4 pb-3 shrink-0">
-          <button
-            onClick={handleManageSubscription}
-            disabled={portalLoading || !!loading}
-            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-            style={{
-              background: "rgba(255,255,255,0.04)",
-              border: "1px solid rgba(255,255,255,0.10)",
-              color: "rgba(255,255,255,0.55)",
-            }}
-          >
-            {portalLoading ? (
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            ) : (
-              <>
-                <ExternalLink className="w-3.5 h-3.5" />
-                Manage subscription &amp; billing
-              </>
-            )}
-          </button>
+          {is5YearUser ? (
+            <div
+              className="flex items-center gap-2.5 px-3 py-2.5 rounded-xl"
+              style={{ background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.18)" }}
+            >
+              <Calendar className="w-3.5 h-3.5 text-violet-400 shrink-0" />
+              <div>
+                <p className="text-[11px] font-medium text-violet-300">5-Year Plan — nothing to cancel</p>
+                {accessExpiresAt && (
+                  <p className="text-[10px] text-white/35 mt-0.5">
+                    Access until {formatExpiry(accessExpiresAt)}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={handleManageSubscription}
+              disabled={portalLoading || !!loading}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(255,255,255,0.10)",
+                color: "rgba(255,255,255,0.55)",
+              }}
+            >
+              {portalLoading ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  Manage subscription &amp; billing
+                </>
+              )}
+            </button>
+          )}
         </div>
       )}
 
       {/* Plan cards */}
       <div className="flex flex-col gap-3 px-4 pb-5">
         {PLANS.map((plan, i) => {
-          const isCurrent = currentTier === plan.key;
-          const isLoading = loading === plan.key;
+          const isCurrent = currentTier === plan.key && effectivePeriod === selectedPeriod;
+          const key = planKey(plan.key, selectedPeriod);
+          const isLoading = loading === key;
+          const price = PERIOD_PRICES[plan.key]?.[selectedPeriod] ?? "";
+          const suffix = PERIOD_SUFFIX[selectedPeriod];
+          const desc = PERIOD_DESC[selectedPeriod];
 
           return (
             <motion.div
@@ -277,8 +382,11 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
                   <p className="text-[11px] text-white/40 mt-0.5">{plan.description}</p>
                 </div>
                 <div className="text-right">
-                  <span className="text-lg font-bold text-white">{plan.price}</span>
-                  <span className="text-white/40 text-xs">{plan.period}</span>
+                  <div className="flex items-baseline gap-0.5">
+                    <span className="text-lg font-bold text-white">{price}</span>
+                    {suffix && <span className="text-white/40 text-xs">{suffix}</span>}
+                  </div>
+                  <p className="text-[10px] text-white/30 mt-0.5">{desc}</p>
                 </div>
               </div>
 
@@ -326,7 +434,6 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
             border: "1px solid rgba(251,191,36,0.18)",
           }}
         >
-          {/* Subtle aged texture */}
           <div
             className="absolute inset-0 rounded-2xl pointer-events-none opacity-[0.06]"
             style={{
@@ -371,11 +478,11 @@ export function PricingPage({ currentTier, onBack, isGuest, onSignIn }: PricingP
             Cannot be purchased · Can only be earned
           </div>
         </motion.div>
-      </div>{/* end plan cards */}
+      </div>
 
       {/* Footer note */}
       <p className="text-center text-[10px] text-white/20 pb-5 px-6 shrink-0">
-        Payments processed securely by Stripe. Cancel anytime from your account settings.
+        Payments processed securely by Stripe. Monthly &amp; annual plans cancel anytime. 5-year plans are one-time prepayments — no recurring charge.
       </p>
 
       <LegacyModal open={legacyModalOpen} onClose={() => setLegacyModalOpen(false)} />
