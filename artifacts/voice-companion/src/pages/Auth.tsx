@@ -64,12 +64,29 @@ export function AuthPage({ onAuth }: Props) {
         if (error) throw error;
         setMessage("Check your email to confirm your account, then sign in.");
       } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        // Supabase can return error=null but session=null when email is
+        // unconfirmed. Guard against this so we never silently bounce the user.
+        if (!data.session) {
+          setMessage("Please confirm your email before signing in — check your inbox for a verification link.");
+          return;
+        }
+        // Session is confirmed — hand off to App. Navigation is handled by
+        // onAuthStateChange so we do NOT call onAuth() here to avoid a
+        // race where session state isn't set yet when the screen switches.
         onAuth();
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      // Map common Supabase error strings to friendlier copy
+      if (msg.toLowerCase().includes("invalid login credentials") || msg.toLowerCase().includes("invalid credentials")) {
+        setError("Incorrect email or password. Please try again.");
+      } else if (msg.toLowerCase().includes("email not confirmed")) {
+        setMessage("Please confirm your email before signing in — check your inbox for a verification link.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }

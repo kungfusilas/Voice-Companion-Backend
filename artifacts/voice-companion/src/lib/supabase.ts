@@ -1,14 +1,5 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-// Use sessionStorage instead of localStorage so auth tokens do not persist
-// across browser sessions (more secure; user logs in fresh per tab session).
-const sessionStorageAdapter = {
-  getItem: (key: string): string | null => sessionStorage.getItem(key),
-  setItem: (key: string, value: string): void =>
-    sessionStorage.setItem(key, value),
-  removeItem: (key: string): void => sessionStorage.removeItem(key),
-};
-
 function buildClient(): { client: SupabaseClient; configured: boolean } {
   const rawUrl = (import.meta.env.VITE_SUPABASE_URL as string | undefined) ?? "";
   const rawKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ?? "";
@@ -28,7 +19,10 @@ function buildClient(): { client: SupabaseClient; configured: boolean } {
       configured ? rawKey : "placeholder-anon-key",
       {
         auth: {
-          storage: sessionStorageAdapter,
+          // Use localStorage so sessions survive page reloads and mobile
+          // app backgrounding (sessionStorage is cleared when iOS unloads
+          // the page, which silently logs users out on every return visit).
+          storage: window.localStorage,
           persistSession: true,
           autoRefreshToken: true,
           detectSessionInUrl: true,
@@ -43,7 +37,6 @@ function buildClient(): { client: SupabaseClient; configured: boolean } {
     const client = createClient(
       "https://placeholder.supabase.co",
       "placeholder-anon-key",
-      { auth: { storage: sessionStorageAdapter } }
     );
     return { client, configured: false };
   }
