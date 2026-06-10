@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — LegacyBond AI</title>
+  <meta name="description" content="Privacy Policy for LegacyBond AI LLC." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300;14..32,400;14..32,500;14..32,600;14..32,700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0a0a12;
+      --bg2: #0f0f1c;
+      --bg3: #13131f;
+      --purple: #7c5cbf;
+      --purple-light: #9b7de0;
+      --purple-dim: rgba(124,92,191,0.15);
+      --text: #f0eeff;
+      --text-muted: rgba(240,238,255,0.5);
+      --text-dim: rgba(240,238,255,0.28);
+      --border: rgba(124,92,191,0.18);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: rgba(124,92,191,0.3); border-radius: 3px; }
+
+    /* ── Nav ── */
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 clamp(1.25rem, 5vw, 3rem);
+      height: 64px;
+      background: rgba(10,10,18,0.9);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none; color: var(--text);
+    }
+    .nav-logo-icon {
+      width: 30px; height: 30px; border-radius: 9px;
+      background: linear-gradient(135deg, #7c5cbf, #e05a8a);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px; flex-shrink: 0;
+    }
+    .nav-logo-text { font-size: 15px; font-weight: 600; }
+    .nav-logo-text span { color: var(--purple-light); }
+
+    .btn-nav {
+      display: inline-flex; align-items: center;
+      padding: 7px 18px;
+      background: linear-gradient(135deg, #7c5cbf, #6b4cb0);
+      color: #fff; font-size: 13px; font-weight: 600;
+      border-radius: 999px; text-decoration: none;
+      border: 1px solid rgba(255,255,255,0.1);
+      transition: opacity 0.2s;
+    }
+    .btn-nav:hover { opacity: 0.85; }
+
+    /* ── Layout ── */
+    .page-wrap {
+      max-width: 800px;
+      margin: 0 auto;
+      padding: clamp(40px, 6vw, 80px) clamp(1.25rem, 5vw, 2.5rem);
+    }
+
+    /* ── Header ── */
+    .page-header {
+      margin-bottom: 52px;
+      padding-bottom: 32px;
+      border-bottom: 1px solid var(--border);
+    }
+    .page-header h1 {
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -0.025em;
+      margin-bottom: 10px;
+      background: linear-gradient(135deg, #f0eeff 30%, #c4aeff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .page-meta {
+      font-size: 13.5px;
+      color: var(--text-dim);
+      display: flex; flex-wrap: wrap; gap: 20px;
+    }
+    .page-meta span { display: flex; align-items: center; gap: 6px; }
+
+    /* ── TOC ── */
+    .toc {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px 28px;
+      margin-bottom: 52px;
+    }
+    .toc h2 {
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--purple-light);
+      margin-bottom: 16px;
+    }
+    .toc ol {
+      list-style: decimal;
+      padding-left: 20px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 6px 24px;
+    }
+    .toc li { font-size: 13.5px; }
+    .toc a {
+      text-decoration: none;
+      color: var(--text-muted);
+      transition: color 0.2s;
+    }
+    .toc a:hover { color: var(--purple-light); }
+
+    /* ── Sections ── */
+    .section {
+      margin-bottom: 52px;
+      scroll-margin-top: 80px;
+    }
+    .section-number {
+      display: inline-block;
+      font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--purple-light);
+      margin-bottom: 6px;
+    }
+    .section h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.015em;
+      margin-bottom: 16px;
+      color: var(--text);
+    }
+    .section p {
+      font-size: 14.5px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .section p:last-child { margin-bottom: 0; }
+
+    .section ul, .section ol {
+      padding-left: 20px;
+      margin-bottom: 12px;
+      display: flex; flex-direction: column; gap: 7px;
+    }
+    .section li {
+      font-size: 14.5px;
+      color: var(--text-muted);
+      line-height: 1.65;
+    }
+
+    .section a {
+      color: var(--purple-light);
+      text-decoration: underline;
+      text-decoration-color: rgba(155,125,224,0.35);
+      text-underline-offset: 3px;
+    }
+    .section a:hover { text-decoration-color: var(--purple-light); }
+
+    .highlight-box {
+      background: var(--purple-dim);
+      border: 1px solid rgba(124,92,191,0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin: 14px 0;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .highlight-box strong { color: var(--text); }
+
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0;
+      font-size: 14px;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .data-table th {
+      background: rgba(124,92,191,0.15);
+      color: var(--purple-light);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      padding: 10px 16px;
+      text-align: left;
+    }
+    .data-table td {
+      padding: 11px 16px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      font-size: 13.5px;
+    }
+    .data-table tr:last-child td { border-bottom: none; }
+    .data-table tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+
+    .section-divider {
+      height: 1px;
+      background: var(--border);
+      margin-bottom: 52px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 36px clamp(1.25rem, 5vw, 3rem);
+    }
+    .footer-inner {
+      max-width: 800px;
+      margin: 0 auto;
+      display: flex; flex-wrap: wrap;
+      justify-content: space-between; align-items: center;
+      gap: 16px;
+    }
+    .footer-logo {
+      display: flex; align-items: center; gap: 8px;
+      text-decoration: none; color: var(--text-dim);
+      font-size: 14px;
+    }
+    .footer-logo-icon {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(135deg, #7c5cbf, #e05a8a);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px;
+    }
+    .footer-links {
+      display: flex; gap: 24px; list-style: none;
+    }
+    .footer-links a {
+      text-decoration: none;
+      color: var(--text-dim); font-size: 13px;
+      transition: color 0.2s;
+    }
+    .footer-links a:hover { color: var(--text-muted); }
+    .footer-copy { font-size: 12px; color: var(--text-dim); }
+  </style>
+</head>
+<body>
+
+  <!-- ── NAV ── -->
+  <nav>
+    <a href="/" class="nav-logo">
+      <div class="nav-logo-icon">✦</div>
+      <span class="nav-logo-text">LegacyBond <span>AI</span></span>
+    </a>
+    <a href="/companion/" class="btn-nav">Start Free →</a>
+  </nav>
+
+  <!-- ── CONTENT ── -->
+  <div class="page-wrap">
+
+    <div class="page-header">
+      <h1>Privacy Policy</h1>
+      <div class="page-meta">
+        <span>📅 Effective Date: June 9, 2026</span>
+        <span>🏢 LegacyBond AI LLC</span>
+      </div>
+    </div>
+
+    <!-- TOC -->
+    <div class="toc">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Information We Collect</a></li>
+        <li><a href="#s2">How We Use Your Information</a></li>
+        <li><a href="#s3">Third-Party Processors</a></li>
+        <li><a href="#s4">Long-Term Memory &amp; Retention</a></li>
+        <li><a href="#s5">Voice Data</a></li>
+        <li><a href="#s6">Cookies &amp; Sessions</a></li>
+        <li><a href="#s7">Children's Privacy</a></li>
+        <li><a href="#s8">Your Rights (GDPR / CCPA)</a></li>
+        <li><a href="#s9">Account &amp; Data Deletion</a></li>
+        <li><a href="#s10">Data Security</a></li>
+        <li><a href="#s11">Changes to This Policy</a></li>
+        <li><a href="#s12">Contact</a></li>
+      </ol>
+    </div>
+
+    <p style="font-size:14.5px; color:var(--text-muted); margin-bottom:48px; line-height:1.75;">
+      This Privacy Policy describes how <strong style="color:var(--text);">LegacyBond AI LLC</strong> ("Company," "we," "us," or "our") collects, uses, stores, and shares information when you use the LegacyBond AI platform, including our website, application, APIs, and all related services (collectively, the "Service"). By using the Service, you agree to the practices described here. If you do not agree, please do not use the Service.
+    </p>
+
+    <!-- 1 -->
+    <div class="section" id="s1">
+      <span class="section-number">Section 01</span>
+      <h2>Information We Collect</h2>
+      <p>We collect information you provide directly, information generated through your use of the Service, and limited technical data required to operate the platform.</p>
+
+      <p><strong style="color:var(--text);">Account &amp; Identity Information.</strong> When you create an account, we collect:</p>
+      <ul>
+        <li>Email address</li>
+        <li>Display name (if provided)</li>
+        <li>Google account profile data (name, email, profile photo URL) when you sign in with Google via OAuth</li>
+        <li>Account creation timestamp and authentication metadata managed by Supabase Auth</li>
+      </ul>
+
+      <p><strong style="color:var(--text);">Conversation &amp; Memory Data.</strong> As you use the Service:</p>
+      <ul>
+        <li>Text messages and AI companion responses from your chat sessions</li>
+        <li>Long-term memories extracted from your conversations (goals, relationships, events, and personal context your companion remembers)</li>
+        <li>Session metadata (timestamps, companion selected, session duration)</li>
+        <li>Bond Score history, daily check-in responses, and weekly insight reports</li>
+        <li>Personality map data, goal tracking entries, and roleplay or activity session logs</li>
+      </ul>
+
+      <p><strong style="color:var(--text);">Payment Information.</strong> When you subscribe to a paid plan:</p>
+      <ul>
+        <li>Subscription tier, status, and billing cycle dates — stored in our database</li>
+        <li>Stripe customer ID and subscription ID — stored in our database as references</li>
+        <li>Card numbers, CVV codes, and full payment details are <strong style="color:var(--text);">never stored by us</strong> — they are handled exclusively by Stripe and subject to Stripe's PCI-DSS compliance</li>
+      </ul>
+
+      <p><strong style="color:var(--text);">Usage Analytics.</strong> We collect basic usage data to improve the Service, including feature usage frequency, error events, and session activity patterns. This data is used in aggregate and is not linked to individual conversations.</p>
+
+      <p><strong style="color:var(--text);">Guest Sessions.</strong> If you use the Service without creating an account, a random guest identifier is stored locally in your browser. Guest conversation data is stored temporarily and linked only to that local identifier, not to any personal identity.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 2 -->
+    <div class="section" id="s2">
+      <span class="section-number">Section 02</span>
+      <h2>How We Use Your Information</h2>
+      <p>We use the information we collect for the following purposes:</p>
+      <ul>
+        <li><strong style="color:var(--text);">Providing the Service</strong> — to operate the AI companion experience, retrieve your memories in conversations, process payments, and deliver features you have subscribed to</li>
+        <li><strong style="color:var(--text);">Personalization</strong> — to build and maintain your companion's understanding of you across sessions, including long-term memory, personality insights, and growth tracking</li>
+        <li><strong style="color:var(--text);">Account management</strong> — to authenticate you, manage your subscription, send billing receipts, and respond to support requests</li>
+        <li><strong style="color:var(--text);">Email communications</strong> — to send account verification emails, password resets, subscription notifications, and (with your consent) product updates via Resend</li>
+        <li><strong style="color:var(--text);">Safety &amp; abuse prevention</strong> — to detect and prevent fraudulent activity, violations of our Terms of Service, and misuse of the platform</li>
+        <li><strong style="color:var(--text);">Product improvement</strong> — to analyze aggregate, anonymized usage patterns and improve our AI systems, features, and reliability</li>
+        <li><strong style="color:var(--text);">Legal compliance</strong> — to comply with applicable laws, regulations, and legal processes</li>
+      </ul>
+
+      <div class="highlight-box">
+        <strong>We will never sell your personal data or individual conversation content to third parties.</strong> Data shared with our processors (listed in Section 3) is limited strictly to what is necessary to deliver the services they provide on our behalf.
+      </div>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 3 -->
+    <div class="section" id="s3">
+      <span class="section-number">Section 03</span>
+      <h2>Third-Party Processors</h2>
+      <p>We work with the following third-party service providers to operate the Service. Each processor receives only the data necessary to perform their specific function.</p>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Processor</th>
+            <th>Purpose</th>
+            <th>Data Shared</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong style="color:var(--text);">Supabase</strong></td>
+            <td>Database, authentication, and storage infrastructure</td>
+            <td>Account data, conversation history, memory data, session data</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Stripe</strong></td>
+            <td>Payment processing and subscription management</td>
+            <td>Email address, subscription details; payment card data is processed directly by Stripe and never passes through our servers</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Anthropic</strong></td>
+            <td>Large language model powering AI companion responses (Claude)</td>
+            <td>Conversation messages and system context needed to generate responses; Anthropic does not use this data to train its models under our enterprise agreement</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">ElevenLabs</strong></td>
+            <td>Text-to-speech voice synthesis for companion audio output</td>
+            <td>AI-generated companion text to be converted to audio; no personal user data is shared</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Deepgram</strong></td>
+            <td>Speech-to-text transcription for voice input</td>
+            <td>Audio recordings of your spoken input during voice sessions; transcriptions are returned to us and the audio is not retained by Deepgram beyond processing</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Resend</strong></td>
+            <td>Transactional email delivery (account verification, notifications)</td>
+            <td>Your email address and the content of transactional emails</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Google</strong></td>
+            <td>OAuth authentication ("Sign in with Google")</td>
+            <td>Public profile data (name, email, profile photo) returned by Google during authentication; governed by <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p>Each of these processors maintains their own privacy practices and security standards. We encourage you to review their policies. Links: <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase</a> · <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe</a> · <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener">Anthropic</a> · <a href="https://elevenlabs.io/privacy" target="_blank" rel="noopener">ElevenLabs</a> · <a href="https://deepgram.com/privacy" target="_blank" rel="noopener">Deepgram</a> · <a href="https://resend.com/privacy" target="_blank" rel="noopener">Resend</a>.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 4 -->
+    <div class="section" id="s4">
+      <span class="section-number">Section 04</span>
+      <h2>Long-Term Memory &amp; Retention</h2>
+      <p>A core feature of LegacyBond AI is long-term memory — your companion builds a persistent understanding of you across conversations. This includes remembered facts about the people in your life, your goals, significant events, emotional patterns, and personal context you've shared.</p>
+
+      <p><strong style="color:var(--text);">What is stored.</strong> Memory entries are structured records extracted by our AI from your conversations. They may include names of people you've mentioned, goals you've set, milestones you've shared, challenges you've described, and preferences you've expressed.</p>
+
+      <p><strong style="color:var(--text);">How long it is kept.</strong> Memory data is retained for as long as your account is active. It is the foundation of the relationship your companion builds with you over time and is not automatically deleted between sessions.</p>
+
+      <p><strong style="color:var(--text);">How to review and delete memories.</strong> You can view your stored memories through the app's memory settings. You may request deletion of specific memories or all memory data at any time by:</p>
+      <ul>
+        <li>Using the in-app memory management feature (where available)</li>
+        <li>Emailing <a href="mailto:support@legacybond.ai">support@legacybond.ai</a> with a request to delete specific or all memory data</li>
+      </ul>
+
+      <div class="highlight-box">
+        <strong>Deleting memories is permanent.</strong> Once memory data is deleted, your companion will no longer have access to that context. This cannot be undone.
+      </div>
+
+      <p><strong style="color:var(--text);">Conversation history.</strong> Full chat session transcripts are retained to support memory extraction and continuity features. You may request deletion of conversation history by contacting support.</p>
+
+      <p><strong style="color:var(--text);">Future memory.</strong> Some plans include a "future memory" or legacy feature that stores messages intended for future access. This data is retained indefinitely unless you request deletion.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 5 -->
+    <div class="section" id="s5">
+      <span class="section-number">Section 05</span>
+      <h2>Voice Data</h2>
+      <p>LegacyBond AI supports voice input and voice output. Here is how each is handled:</p>
+
+      <p><strong style="color:var(--text);">Voice Input (Speech-to-Text).</strong> When you use voice input, your audio recording is transmitted in real time to Deepgram for transcription. The resulting text transcript is stored in our systems as part of your conversation history. We do not retain the raw audio recordings on our servers — audio is sent directly to Deepgram and the transcript is returned to us.</p>
+
+      <p><strong style="color:var(--text);">Voice Output (Text-to-Speech).</strong> When your companion speaks, the companion's text response is sent to ElevenLabs to generate an audio file. The audio is streamed to your device and is not permanently stored in your account. No personal data about you is included in the TTS request — only the companion's text.</p>
+
+      <p><strong style="color:var(--text);">Consent.</strong> Voice features require explicit browser permission to access your microphone. You may revoke microphone permission at any time through your browser settings. Revoking permission disables voice input but does not affect text-based features.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 6 -->
+    <div class="section" id="s6">
+      <span class="section-number">Section 06</span>
+      <h2>Cookies &amp; Sessions</h2>
+      <p>We use a minimal set of cookies and browser storage to operate the Service:</p>
+
+      <p><strong style="color:var(--text);">Authentication sessions.</strong> Supabase Auth sets a secure, HTTP-only session cookie to maintain your logged-in state. This cookie is essential for the Service to function and is deleted when you sign out or when the session expires.</p>
+
+      <p><strong style="color:var(--text);">Local storage.</strong> We store a small number of non-sensitive preferences and identifiers in your browser's local storage, including:</p>
+      <ul>
+        <li>A guest session identifier (if you use the Service without an account)</li>
+        <li>UI state preferences such as onboarding completion status</li>
+      </ul>
+
+      <p><strong style="color:var(--text);">No advertising or tracking cookies.</strong> We do not use cookies for advertising, cross-site tracking, or behavioral profiling. We do not embed third-party advertising trackers.</p>
+
+      <p>You can clear cookies and local storage at any time through your browser settings. Clearing session cookies will sign you out of the Service.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 7 -->
+    <div class="section" id="s7">
+      <span class="section-number">Section 07</span>
+      <h2>Children's Privacy</h2>
+      <p>The Service is intended exclusively for users who are <strong style="color:var(--text);">18 years of age or older</strong>. We do not knowingly collect personal information from anyone under 18.</p>
+      <p>If you are under 18, you are not permitted to use the Service. If we become aware that we have collected personal information from a person under 18, we will take steps to delete that information and close the associated account as promptly as possible.</p>
+      <p>If you believe a minor has created an account or provided us with personal information, please contact us immediately at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a>.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 8 -->
+    <div class="section" id="s8">
+      <span class="section-number">Section 08</span>
+      <h2>Your Rights (GDPR / CCPA)</h2>
+      <p>Depending on where you live, you may have specific rights regarding your personal data. We honor these rights regardless of your location to the extent practicable.</p>
+
+      <p><strong style="color:var(--text);">Rights available to all users:</strong></p>
+      <ul>
+        <li><strong style="color:var(--text);">Access</strong> — You may request a copy of the personal data we hold about you.</li>
+        <li><strong style="color:var(--text);">Correction</strong> — You may request correction of inaccurate or incomplete personal data.</li>
+        <li><strong style="color:var(--text);">Deletion</strong> — You may request deletion of your personal data, subject to certain legal retention requirements. See Section 9 for details.</li>
+        <li><strong style="color:var(--text);">Portability</strong> — You may request an export of your data in a machine-readable format.</li>
+        <li><strong style="color:var(--text);">Objection / Restriction</strong> — You may object to or request restriction of certain processing of your data.</li>
+        <li><strong style="color:var(--text);">Withdraw consent</strong> — Where processing is based on consent, you may withdraw it at any time without affecting prior processing.</li>
+      </ul>
+
+      <div class="highlight-box">
+        <strong>GDPR (European Users).</strong> If you are located in the European Economic Area, United Kingdom, or Switzerland, you have rights under the General Data Protection Regulation or equivalent national laws. Our legal basis for processing your data is typically: (a) contract performance (providing the Service you signed up for); (b) legitimate interests (security, fraud prevention, product improvement); or (c) your consent (e.g., marketing emails). You also have the right to lodge a complaint with your local supervisory authority.
+      </div>
+
+      <div class="highlight-box" style="margin-top:12px;">
+        <strong>CCPA (California Users).</strong> If you are a California resident, the California Consumer Privacy Act gives you the right to know what personal information we collect, the right to delete it, the right to opt out of its sale (we do not sell personal data), and the right not to be discriminated against for exercising these rights. To exercise your rights, contact us at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a>.
+      </div>
+
+      <p>To exercise any of these rights, email us at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a> with the subject line "Privacy Rights Request." We will respond within 30 days (or as required by applicable law).</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 9 -->
+    <div class="section" id="s9">
+      <span class="section-number">Section 09</span>
+      <h2>Account &amp; Data Deletion</h2>
+      <p>You may request deletion of your account and all associated personal data at any time by emailing <a href="mailto:support@legacybond.ai">support@legacybond.ai</a> with the subject line "Delete My Account."</p>
+
+      <p><strong style="color:var(--text);">What is deleted.</strong> Upon a confirmed deletion request, we will delete:</p>
+      <ul>
+        <li>Your account credentials and profile information</li>
+        <li>All conversation history and memory data</li>
+        <li>Bond Score history, goals, and all other user-generated content</li>
+        <li>Your Supabase Auth record</li>
+      </ul>
+
+      <p><strong style="color:var(--text);">What may be retained.</strong> We may retain the following data after account deletion as required by law or legitimate business necessity:</p>
+      <ul>
+        <li>Billing records and transaction history as required by financial regulations (typically up to 7 years)</li>
+        <li>Anonymized, aggregated data that cannot identify you</li>
+        <li>Information required to resolve open disputes or enforce our Terms of Service</li>
+      </ul>
+
+      <p>Deletion requests are processed within 30 days. Once deletion is complete, your data cannot be recovered.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 10 -->
+    <div class="section" id="s10">
+      <span class="section-number">Section 10</span>
+      <h2>Data Security</h2>
+      <p>We implement commercially reasonable technical and organizational security measures to protect your personal data against unauthorized access, alteration, disclosure, or destruction. These measures include:</p>
+      <ul>
+        <li>Encryption of data in transit (TLS/HTTPS for all connections)</li>
+        <li>Encryption of data at rest in Supabase's managed infrastructure</li>
+        <li>Row-level security policies to ensure users can only access their own data</li>
+        <li>API authentication enforced on all protected endpoints</li>
+        <li>Secrets and credentials stored as environment variables, never in source code</li>
+      </ul>
+
+      <div class="highlight-box">
+        <strong>No system is completely secure.</strong> While we work hard to protect your data, we cannot guarantee absolute security. If you believe your account has been compromised, please contact us immediately at <a href="mailto:support@legacybond.ai">support@legacybond.ai</a>.
+      </div>
+
+      <p>In the event of a data breach that affects your personal information, we will notify you in accordance with applicable law.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 11 -->
+    <div class="section" id="s11">
+      <span class="section-number">Section 11</span>
+      <h2>Changes to This Policy</h2>
+      <p>We may update this Privacy Policy from time to time to reflect changes in our practices, the Service, or applicable law. When we make material changes, we will:</p>
+      <ul>
+        <li>Post the updated policy on this page with a new effective date</li>
+        <li>Notify you by email (if you have an account) at least 14 days before the changes take effect for material updates</li>
+      </ul>
+      <p>Your continued use of the Service after the effective date of any updated policy constitutes your acceptance of the changes. If you do not agree to the updated policy, you must stop using the Service.</p>
+    </div>
+    <div class="section-divider"></div>
+
+    <!-- 12 -->
+    <div class="section" id="s12">
+      <span class="section-number">Section 12</span>
+      <h2>Contact</h2>
+      <p>If you have any questions, concerns, or requests regarding this Privacy Policy or how we handle your data, please contact us:</p>
+      <div class="highlight-box" style="margin-top:16px;">
+        <strong style="display:block; margin-bottom:8px;">LegacyBond AI LLC</strong>
+        <span style="display:block; margin-bottom:4px;">📧 Email: <a href="mailto:support@legacybond.ai">support@legacybond.ai</a></span>
+        <span style="display:block;">🌐 Website: <a href="/">legacybond.ai</a></span>
+      </div>
+      <p style="margin-top:16px;">We aim to respond to all privacy-related inquiries within 2 business days.</p>
+    </div>
+
+  </div><!-- end page-wrap -->
+
+  <!-- ── FOOTER ── -->
+  <footer>
+    <div class="footer-inner">
+      <a href="/" class="footer-logo">
+        <div class="footer-logo-icon">✦</div>
+        <span>LegacyBond AI</span>
+      </a>
+      <ul class="footer-links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/privacy">Privacy Policy</a></li>
+        <li><a href="/terms">Terms of Service</a></li>
+        <li><a href="mailto:support@legacybond.ai">Contact</a></li>
+      </ul>
+      <p class="footer-copy">© 2026 LegacyBond AI LLC. All rights reserved.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

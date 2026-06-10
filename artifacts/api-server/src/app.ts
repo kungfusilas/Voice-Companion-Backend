@@ -31,11 +31,13 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Static pages — resolve from dist/ back up to workspace root
-const LANDING_HTML = fileURLToPath(new URL("../../../landing.html", import.meta.url));
-const TERMS_HTML   = fileURLToPath(new URL("../../../terms.html",   import.meta.url));
+const LANDING_HTML  = fileURLToPath(new URL("../../../landing.html",  import.meta.url));
+const TERMS_HTML    = fileURLToPath(new URL("../../../terms.html",    import.meta.url));
+const PRIVACY_HTML  = fileURLToPath(new URL("../../../privacy.html",  import.meta.url));
 
 app.get("/", (_req, res) => { res.sendFile(LANDING_HTML); });
-app.get("/terms", (_req, res) => { res.sendFile(TERMS_HTML); });
+app.get("/terms",   (_req, res) => { res.sendFile(TERMS_HTML); });
+app.get("/privacy", (_req, res) => { res.sendFile(PRIVACY_HTML); });
 
 // Email verification — called when user clicks the link in the verification email.
 // Supabase appends token_hash + type; we verify server-side, then redirect into the
