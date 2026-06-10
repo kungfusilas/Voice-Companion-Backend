@@ -131,7 +131,7 @@ async def synthesize_stream(
         )
         if voice_settings is not None:
             kwargs["voice_settings"] = voice_settings
-        async for chunk in await client.text_to_speech.convert(**kwargs):
+        async for chunk in client.text_to_speech.convert(**kwargs):
             if chunk:
                 yield chunk
     except ApiError as e:

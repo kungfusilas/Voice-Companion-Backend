@@ -195,5 +195,17 @@ export function useAudioPlayer() {
     });
   }, [play, stop]);
 
-  return { playing, play, playStream, stop };
+  /**
+   * Call this synchronously inside a user-gesture handler (e.g. onPointerDown)
+   * to prime the AudioContext for iOS Safari, which requires resume() to be
+   * called within a gesture before any async audio playback can succeed.
+   */
+  const unlock = useCallback(() => {
+    const ctx = _ctx();
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+  }, [_ctx]);
+
+  return { playing, play, playStream, stop, unlock };
 }

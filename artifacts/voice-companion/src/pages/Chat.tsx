@@ -148,7 +148,7 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const busyRef = useRef(false);
-  const { playing: speaking, play: playAudio, playStream } = useAudioPlayer();
+  const { playing: speaking, play: playAudio, playStream, unlock: unlockAudio } = useAudioPlayer();
 
   // Init meter + romantic mode from DB (skip for guests)
   useEffect(() => {
@@ -522,11 +522,14 @@ export function ChatPage({
     }
     try {
       const transcript = await transcribeAudio(blob);
-      if (transcript.trim()) {
-        await sendMessage(transcript);
-      } else {
+      if (!transcript.trim()) {
         setError("Couldn't make out what you said — please try again.");
+        return;
       }
+      // Reset immediately once we have the transcript — don't hold "processing"
+      // state through the entire sendMessage / TTS playback chain (can be 10+ s).
+      resetRecorder();
+      await sendMessage(transcript);
     } catch (sttErr) {
       if (sttErr instanceof ApiError && sttErr.status === 402) {
         setQuotaErrorDetail(sttErr.detail as QuotaDetail);
@@ -534,6 +537,7 @@ export function ChatPage({
         setError("Transcription failed — try again");
       }
     } finally {
+      // Safety-net: ensure we always return to idle on any error path.
       resetRecorder();
     }
   }, [sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -885,7 +889,7 @@ export function ChatPage({
 
         <PushToTalkButton
           state={recorderState}
-          onStart={start}
+          onStart={() => { unlockAudio(); start(); }}
           onStop={stop}
           disabled={busy || showUpgradeCard}
           nsfw={persona.nsfw_mode}
