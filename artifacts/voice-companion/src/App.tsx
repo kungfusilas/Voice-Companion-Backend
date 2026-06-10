@@ -52,14 +52,17 @@ export default function App() {
 
   // ── Auth session management ──────────────────────────────────────────────
   useEffect(() => {
-    // Check for Stripe checkout return params
+    // Check for Stripe checkout return params and signin deep-link
     const params = new URLSearchParams(window.location.search);
+    const shouldSignIn = params.get("signin") === "1";
     if (params.get("checkout") === "success") {
       const plan = params.get("plan") ?? "";
       const label = formatPlanLabel(plan);
       setCheckoutMessage(label ? `🎉 You're on ${label}!` : "🎉 Subscription activated!");
       window.history.replaceState({}, "", window.location.pathname);
     } else if (params.get("checkout") === "cancelled") {
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (shouldSignIn) {
       window.history.replaceState({}, "", window.location.pathname);
     }
 
@@ -89,13 +92,13 @@ export default function App() {
           }
           setScreen("companion-select");
         } else {
-          // Guest — no subscription check needed
-          setScreen("companion-select");
+          // Guest — go to auth if ?signin=1 was in the URL, else companion-select
+          setScreen(shouldSignIn ? "auth" : "companion-select");
         }
       })
       .catch(() => {
         // Supabase unavailable on load — still show the app, just as guest
-        setScreen("companion-select");
+        setScreen(shouldSignIn ? "auth" : "companion-select");
       });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
@@ -287,6 +290,7 @@ export default function App() {
               key="companion-select"
               onSelect={handleCompanionSelect}
               onSignOut={session ? handleSignOut : undefined}
+              onSignIn={!session ? () => setScreen("auth") : undefined}
               onUpgrade={() => setScreen("pricing")}
               onHub={session ? handleOpenHub : undefined}
               subscriptionTier={subscriptionTier}

@@ -54,12 +54,13 @@ const COMPANIONS: CompanionConfig[] = [
 interface CompanionSelectProps {
   onSelect: (persona: Persona) => void;
   onSignOut?: () => void;
+  onSignIn?: () => void;
   onUpgrade?: () => void;
   onHub?: () => void;
   subscriptionTier?: string;
 }
 
-export function CompanionSelect({ onSelect, onSignOut, onUpgrade, onHub, subscriptionTier }: CompanionSelectProps) {
+export function CompanionSelect({ onSelect, onSignOut, onSignIn, onUpgrade, onHub, subscriptionTier }: CompanionSelectProps) {
   const handlePick = (companion: CompanionConfig) => {
     const persona: Persona = {
       id: companion.id,
@@ -107,6 +108,18 @@ export function CompanionSelect({ onSelect, onSignOut, onUpgrade, onHub, subscri
                 className="flex items-center gap-1 text-[11px] px-2.5 py-1 rounded-full border border-violet-500/30 text-violet-400/80 hover:text-violet-300 hover:border-violet-400/50 transition-colors capitalize"
               >
                 {subscriptionTier && subscriptionTier !== "free" ? subscriptionTier : "Plans"}
+              </button>
+            )}
+            {!onSignOut && onSignIn && (
+              <button
+                onClick={onSignIn}
+                className="flex items-center gap-1 text-[11px] px-3 py-1.5 rounded-full font-semibold transition-colors text-white"
+                style={{
+                  background: "linear-gradient(135deg, #7c3aed, #6d28d9)",
+                  boxShadow: "0 2px 8px rgba(124,58,237,0.35)",
+                }}
+              >
+                Log in
               </button>
             )}
             {onSignOut && (

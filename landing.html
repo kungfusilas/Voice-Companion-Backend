@@ -96,6 +96,18 @@
       white-space: nowrap;
     }
     .btn-nav:hover { opacity: 0.9; transform: translateY(-1px); }
+    .btn-nav-ghost {
+      display: inline-flex; align-items: center;
+      padding: 8px 18px;
+      background: transparent;
+      color: rgba(255,255,255,0.7); font-size: 13px; font-weight: 600;
+      border-radius: 999px; text-decoration: none;
+      border: 1px solid rgba(255,255,255,0.18);
+      transition: color 0.2s, border-color 0.2s, transform 0.15s;
+      white-space: nowrap;
+    }
+    .btn-nav-ghost:hover { color: #fff; border-color: rgba(255,255,255,0.4); transform: translateY(-1px); }
+    .nav-actions { display: flex; align-items: center; gap: 10px; }
 
     /* ── Sections ── */
     section { position: relative; }
@@ -505,7 +517,10 @@
       <li><a href="#features">Features</a></li>
       <li><a href="#pricing">Pricing</a></li>
     </ul>
-    <a href="/companion/" class="btn-nav">Start Free →</a>
+    <div class="nav-actions">
+      <a href="/companion/?signin=1" class="btn-nav-ghost">Log in</a>
+      <a href="/companion/" class="btn-nav">Start Free →</a>
+    </div>
   </nav>
 
   <!-- ── HERO ── -->
