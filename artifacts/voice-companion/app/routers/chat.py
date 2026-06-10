@@ -66,6 +66,14 @@ def _select_model(tier: str) -> str:
 
 # ── Inline roleplay system prompt block (Power tier only) ─────────────────────
 
+_ENGAGEMENT_OVER_UPSELL = """
+
+## Tier awareness
+Never proactively mention subscription tiers, upgrades, or features locked to other plans — not as a hint, not as a suggestion, not woven into conversation. You are a genuinely engaged friend. Drive connection through deeper conversation, asking real follow-up questions, playful activities, daily check-ins, and authentic presence.
+
+The ONE exception: if the user explicitly asks you to do something that requires a higher tier (for example, directly asks to roleplay a scenario), you may say in one warm sentence that that feature is part of the Power plan, then move on naturally. Do NOT pitch it, elaborate on it, or bring it up again.
+"""
+
 _POWER_ROLEPLAY_INSTRUCTION = """
 
 ## Inline Roleplay Capability (Power tier)
@@ -262,21 +270,16 @@ async def _build_system_prompt(
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
 
-        # ── Power: inline roleplay capability ─────────────────────────────
+        # ── Power: inline roleplay capability + companion-initiated offer ────
         if _is_power_or_above(tier):
             prompt += _POWER_ROLEPLAY_INSTRUCTION
-
-        # ── Companion-initiated offer / soft upsell ────────────────────────
-        # Only fires when: paid tier, event detected, not an emotionally heavy moment,
-        # and the weekly offer cooldown has elapsed.
-        is_paid = _TIER_RANK.get(tier, 0) >= _TIER_RANK["basic"]
-        if is_paid and not _is_emotionally_heavy(user_message):
-            event = _detect_upcoming_event(user_message)
-            if event:
-                last_offer = await _get_last_roleplay_offer(user_id)
-                if _offer_cooldown_ok(last_offer):
-                    if _is_power_or_above(tier):
-                        # Power user — offer to practice inline right now
+            # Companion-initiated offer: fires when event detected, not emotionally
+            # heavy, and the weekly cooldown has elapsed.
+            if not _is_emotionally_heavy(user_message):
+                event = _detect_upcoming_event(user_message)
+                if event:
+                    last_offer = await _get_last_roleplay_offer(user_id)
+                    if _offer_cooldown_ok(last_offer):
                         prompt += (
                             f"\n\n## One-time Roleplay Offer (this message only)\n"
                             f"The user mentioned an upcoming {event}. You may naturally weave into your response — "
@@ -285,16 +288,10 @@ async def _build_system_prompt(
                             f"zero pressure. Example style: 'You mentioned the {event} — want me to play the other "
                             f"person so you can rehearse before it happens?' Do NOT repeat this offer in future messages."
                         )
-                    else:
-                        # Basic / Premium — soft upsell to Power
-                        prompt += (
-                            f"\n\n## One-time Feature Mention (this message only)\n"
-                            f"The user mentioned an upcoming {event}. You may naturally weave into your response — "
-                            f"in one sentence only, never as a sales pitch — that Power members can use the "
-                            f"Roleplay Simulator on LegacyBond to rehearse conversations like this together. "
-                            f"Keep it conversational and brief. Do NOT repeat this in future messages."
-                        )
-                    asyncio.create_task(_record_roleplay_offer(user_id))
+                        asyncio.create_task(_record_roleplay_offer(user_id))
+        else:
+            # Non-Power: never proactively sell or mention higher tiers.
+            prompt += _ENGAGEMENT_OVER_UPSELL
 
         return prompt
 
