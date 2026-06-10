@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon } from "lucide-react";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
-import { ConnectionMeter } from "@/components/ConnectionMeter";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
 import { TextInput } from "@/components/TextInput";
 import { MemoriesPanel } from "@/components/MemoriesPanel";
@@ -683,18 +682,6 @@ export function ChatPage({
             : "Claude · standard"}
         </span>
       </div>
-
-      {/* ── Connection Meter (authenticated only) ── */}
-      {!isGuest && stageName && (
-        <ConnectionMeter
-          score={connectionScore}
-          stageName={stageName}
-          stageMin={stageMin}
-          stageMax={stageMax}
-          relType={relType}
-          scoreDelta={scoreDelta}
-        />
-      )}
 
       {/* ── Proactive label ── */}
       {proactiveLabel && (
