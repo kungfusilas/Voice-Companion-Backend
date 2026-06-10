@@ -10,23 +10,46 @@ from app.routers.tier_check import require_premium
 router = APIRouter()
 
 _VENICE_IMAGE_URL = "https://api.venice.ai/api/v1/image/generate"
+_VENICE_IMAGE_MODEL = "flux-2-max"
 
+# Prompts are written from the actual companion avatar images — descriptions must
+# match what the user sees on the companion-select screen exactly.
 _COMPANION_BASE_PROMPTS: dict[str, str] = {
+    # Aria: young blonde woman, high ponytail, blue eyes, metal braces, beaming smile
     "companion-aria": (
-        "cute shy Asian girl with long black hair, soft smile, casual cozy outfit, "
-        "warm lighting, selfie style photo, photorealistic"
+        "photorealistic selfie portrait of a young woman in her early twenties, "
+        "blonde hair pulled back in a neat high ponytail, bright blue eyes, "
+        "metal dental braces on teeth, huge beaming open smile showing braces, "
+        "fair light complexion, bubbly energetic happy expression, "
+        "casual everyday outfit, warm soft lighting, looking directly at camera, "
+        "sharp focus, ultra-detailed, natural candid selfie"
     ),
+    # Aeva: East Asian woman, long straight black hair with blunt bangs, composed confident
     "companion-aeva": (
-        "confident beautiful woman with wavy auburn hair, bold glamorous style, "
-        "dramatic lighting, selfie style photo, photorealistic"
+        "photorealistic selfie portrait of an East Asian woman in her mid-twenties, "
+        "long straight jet-black hair with blunt straight-cut bangs across the forehead, "
+        "dark brown almond-shaped eyes, porcelain light skin, minimal natural makeup, "
+        "composed calm confident expression with a hint of intensity, "
+        "sophisticated elegant style, soft even studio-quality lighting, "
+        "looking directly at camera, sharp focus, ultra-detailed, natural selfie"
     ),
+    # Ember: Black woman, natural coily afro updo, warm deep skin, bright warm smile
     "companion-ember": (
-        "energetic girl with bright red hair in a ponytail, sporty outfit, "
-        "big smile, outdoor selfie, natural lighting, photorealistic"
+        "photorealistic selfie portrait of a Black woman in her mid-twenties, "
+        "natural coily afro-textured hair styled in a voluminous updo puff, "
+        "warm deep brown ebony skin with golden undertones, warm brown eyes, "
+        "subtle eye makeup, bright warm genuine radiant smile, "
+        "nurturing warm approachable expression, natural warm lighting, "
+        "looking directly at camera, sharp focus, ultra-detailed, natural selfie"
     ),
+    # Kai: white man, short brown hair, chiseled jaw, brown eyes, confident smile
     "companion-kai": (
-        "calm handsome man with dark hair, gentle expression, casual style, "
-        "natural lighting, selfie photo, photorealistic"
+        "photorealistic selfie portrait of a white man in his early thirties, "
+        "short neatly styled brown hair with slight texture, brown eyes, "
+        "strong defined chiseled jawline, clean-shaven, light complexion with slight tan, "
+        "confident charming subtle smile, athletic build, dark black v-neck t-shirt, "
+        "natural studio lighting, looking directly at camera, "
+        "sharp focus, ultra-detailed, natural selfie"
     ),
 }
 
@@ -44,8 +67,8 @@ async def generate_selfie(
 ):
     """
     Generate an AI selfie for a companion using Venice image generation. Premium+.
-    Accepts an optional `scene` string to blend imaginative context into the prompt.
-    Returns raw image bytes as image/png.
+    Accepts an optional `scene` string to blend context into the image prompt.
+    Returns raw image bytes as image/jpeg.
     POST /api/selfie
     """
     await require_premium(auth_user_id)
@@ -57,7 +80,7 @@ async def generate_selfie(
             detail=f"No selfie prompt for companion '{request.companion_id}'",
         )
 
-    # Blend scene context into the base prompt when provided
+    # Blend optional scene context into the base identity prompt
     scene = (request.scene or "").strip()
     prompt = f"{base_prompt}, {scene}" if scene else base_prompt
 
@@ -66,7 +89,7 @@ async def generate_selfie(
         raise HTTPException(status_code=503, detail="Image generation not configured")
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
                 _VENICE_IMAGE_URL,
                 headers={
@@ -74,7 +97,7 @@ async def generate_selfie(
                     "Content-Type": "application/json",
                 },
                 json={
-                    "model":          "fluently-xl",
+                    "model":          _VENICE_IMAGE_MODEL,
                     "prompt":         prompt,
                     "width":          1024,
                     "height":         1024,
@@ -82,7 +105,6 @@ async def generate_selfie(
                     "safe_mode":      False,
                     "hide_watermark": True,
                     "return_binary":  False,
-                    "style_preset":   "Photographic",
                 },
             )
 
@@ -111,7 +133,7 @@ async def generate_selfie(
 
         return Response(
             content=img_bytes,
-            media_type="image/png",
+            media_type="image/jpeg",
             headers={"Cache-Control": "no-store"},
         )
 
