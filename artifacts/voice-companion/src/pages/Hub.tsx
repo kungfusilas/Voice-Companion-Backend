@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -11,6 +11,7 @@ import { WeeklyInsight } from "./WeeklyInsight";
 import { PersonalityMap } from "./PersonalityMap";
 import { ConversationDebrief } from "./ConversationDebrief";
 import { LegacyModal } from "@/components/LegacyModal";
+import { LegacyChapters } from "./LegacyChapters";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -32,9 +33,10 @@ const BASE_TABS = [
 ] as const;
 
 const POWER_TABS = [
-  { id: "your-profile",    label: "Your Profile",        icon: Brain         },
-  { id: "session-debrief", label: "Session Debrief",     icon: MessageSquare },
-  { id: "weekly-insight",  label: "Weekly Insight",      icon: BarChart2     },
+  { id: "your-profile",      label: "Your Profile",        icon: Brain         },
+  { id: "session-debrief",   label: "Session Debrief",     icon: MessageSquare },
+  { id: "weekly-insight",    label: "Weekly Insight",      icon: BarChart2     },
+  { id: "legacy-chapters",   label: "Legacy Chapters",     icon: ScrollText    },
 ] as const;
 
 type BaseTab  = typeof BASE_TABS[number]["id"];
@@ -266,6 +268,11 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
           {tab === "session-debrief" && isPowerHub && (
             <motion.div key="session-debrief" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <ConversationDebrief />
+            </motion.div>
+          )}
+          {tab === "legacy-chapters" && (
+            <motion.div key="legacy-chapters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <LegacyChapters userId="" currentPersona={currentPersona} isPower={isPowerHub} />
             </motion.div>
           )}
         </AnimatePresence>

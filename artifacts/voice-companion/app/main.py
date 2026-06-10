@@ -27,6 +27,7 @@ from app.routers import analysis as analysis_router
 from app.routers import onboarding as onboarding_router
 from app.routers import reports as reports_router
 from app.routers import usage as usage_router
+from app.routers import legacy_chapters as legacy_chapters_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -148,6 +149,7 @@ app.include_router(analysis_router.router,     prefix="/api/analysis",          
 app.include_router(onboarding_router.router,   prefix="/api/onboarding",         tags=["onboarding"])
 app.include_router(reports_router.router,      prefix="/api/reports/weekly",      tags=["reports"])
 app.include_router(usage_router.router,        prefix="/api",                     tags=["usage"])
+app.include_router(legacy_chapters_router.router, prefix="/api/legacy-chapters",   tags=["legacy-chapters"])
 
 
 @app.get("/api/healthz")

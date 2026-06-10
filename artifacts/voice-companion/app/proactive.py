@@ -26,11 +26,13 @@ import random
 import logging
 from datetime import datetime, timezone, timedelta
 
+from fastapi import HTTPException
 from supabase import create_client, Client
 
 from app import claude
 from app import activities as act_core
 from app.companions import COMPANION_MAP, build_system_prompt
+from app.usage import get_user_tier, check_message_quota
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +126,18 @@ async def check_and_send_proactive_messages() -> None:
                 continue
 
             message = message.strip().strip('"').strip("'")
+
+            # Deduct 1 message from quota; skip if user is over their limit
+            try:
+                tier, _ = await get_user_tier(user_id)
+                await check_message_quota(user_id, tier, None)
+            except HTTPException:
+                logger.info("Proactive check-in skipped — quota reached user=%s", user_id)
+                continue
+            except Exception as exc:
+                logger.warning("Quota check error user=%s: %s", user_id, exc)
+                continue
+
             db.table("proactive_messages").insert({
                 "user_id": user_id,
                 "companion_id": companion_id,
@@ -179,6 +193,18 @@ async def check_and_send_daily_activity() -> None:
                 continue
 
             intro = data.get("companion_intro", "")
+
+            # Deduct 1 message from quota; skip if user is over their limit
+            try:
+                tier, _ = await get_user_tier(user_id)
+                await check_message_quota(user_id, tier, None)
+            except HTTPException:
+                logger.info("Daily activity skipped — quota reached user=%s", user_id)
+                continue
+            except Exception as exc:
+                logger.warning("Quota check error user=%s: %s", user_id, exc)
+                continue
+
             db.table("proactive_messages").insert({
                 "user_id": user_id,
                 "companion_id": companion_id,

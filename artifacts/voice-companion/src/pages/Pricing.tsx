@@ -21,7 +21,7 @@ const PLANS = [
     key: "basic",
     name: "Basic",
     description: "Perfect for getting started",
-    features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Daily check-ins", "Activity games", "Bond Score"],
+    features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Daily check-ins", "Companion-initiated check-ins", "Activity games", "Bond Score"],
     accent: "violet",
     gradient: "from-violet-600/20 to-violet-900/10",
     border: "border-violet-500/30",
@@ -45,7 +45,7 @@ const PLANS = [
     key: "power",
     name: "Power",
     description: "The full experience",
-    features: ["Everything in Premium", "Roleplay Simulator", "Highest message allowance", "Top-up packs available", "Personality Map 🧠", "Session Debrief 🔬", "Weekly Insight Report 📊", "Deep Communication Analysis", "Earliest new features", "Power user badge"],
+    features: ["Everything in Premium", "Roleplay Simulator", "Monthly Legacy Chapter 📖", "Highest message allowance", "Top-up packs available", "Personality Map 🧠", "Session Debrief 🔬", "Weekly Insight Report 📊", "Deep Communication Analysis", "Earliest new features", "Power user badge"],
     accent: "amber",
     gradient: "from-amber-600/20 to-amber-900/10",
     border: "border-amber-500/30",
@@ -113,6 +113,8 @@ const FEATURE_INFO: Record<string, string> = {
   "Bond Score":               "Tracks the health and depth of your relationship with your companion over time. Grows through consistency, honesty, and openness.",
   "Roleplay Simulator":       "Practice real social scenarios — job interviews, difficult conversations, first dates — with an AI that pushes back, stays in character, and coaches you after.",
   "Deep Communication Analysis": "After major conversations, an AI breakdown of your communication patterns, emotional tone, listening quality, and relationship dynamics.",
+  "Companion-initiated check-ins": "Your companion reaches out first — a gentle, in-character message after a period of inactivity. Available on every plan, counts against your monthly allowance.",
+  "Monthly Legacy Chapter 📖":    "Once a month, your companion writes a polished 800-1,500 word narrative chapter of your life — drawn from your conversations and memories. Your story, written chapter by chapter.",
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
