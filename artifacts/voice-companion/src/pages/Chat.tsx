@@ -471,6 +471,11 @@ export function ChatPage({
   }, [persona.id, persona.name, userId, selfieLoading, busy, isGuest]);
 
   const handleAudio = useCallback(async (blob: Blob) => {
+    if (blob.size < 100) {
+      setError("Recording was too short — hold the button while speaking.");
+      resetRecorder();
+      return;
+    }
     try {
       const transcript = await transcribeAudio(blob);
       if (transcript.trim()) await sendMessage(transcript);
@@ -485,7 +490,10 @@ export function ChatPage({
     }
   }, [sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { state: recorderState, start, stop, reset: resetRecorder } = useVoiceRecorder(handleAudio);
+  const { state: recorderState, start, stop, reset: resetRecorder } = useVoiceRecorder(
+    handleAudio,
+    (msg) => setError(msg),
+  );
   const isBusy = busy || recorderState === "processing";
 
   const handleBack = useCallback(() => {

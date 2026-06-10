@@ -1,49 +1,92 @@
-import { useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback, useEffect } from "react";
 
 export type RecorderState = "idle" | "recording" | "processing";
 
-export function useVoiceRecorder(onAudio: (blob: Blob) => void) {
+/**
+ * Push-to-talk voice recorder.
+ *
+ * `start` and `stop` are **permanently stable** (empty dep arrays) —
+ * they read current state via a ref instead of closing over it.
+ * This prevents Framer Motion from re-registering gesture handlers
+ * mid-press whenever React re-renders (which caused the flicker + "release
+ * does nothing" regression).
+ *
+ * `onAudio` is also kept in a ref so the latest callback is always used
+ * without making start/stop unstable.
+ */
+export function useVoiceRecorder(
+  onAudio: (blob: Blob) => void,
+  onError?: (message: string) => void,
+) {
   const [state, setState] = useState<RecorderState>("idle");
+
+  const stateRef         = useRef<RecorderState>("idle");
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const chunksRef        = useRef<Blob[]>([]);
+  const onAudioRef       = useRef(onAudio);
+  const onErrorRef       = useRef(onError);
 
+  useEffect(() => { onAudioRef.current = onAudio; },  [onAudio]);
+  useEffect(() => { onErrorRef.current = onError; },  [onError]);
+
+  const _setState = useCallback((s: RecorderState) => {
+    stateRef.current = s;
+    setState(s);
+  }, []);
+
+  // ── start — STABLE (no state/onAudio deps) ─────────────────────────────
   const start = useCallback(async () => {
-    if (state !== "idle") return;
+    if (stateRef.current !== "idle") return;
+
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-        ? "audio/webm;codecs=opus"
-        : "audio/webm";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      chunksRef.current = [];
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      recorder.onstop = () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(chunksRef.current, { type: mimeType });
-        setState("processing");
-        onAudio(blob);
-      };
-
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setState("recording");
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
-      console.error("Microphone access denied:", err);
+      const msg =
+        err instanceof Error && err.name === "NotAllowedError"
+          ? "Microphone permission denied — allow mic access and try again."
+          : "Could not access microphone — please check your device settings.";
+      onErrorRef.current?.(msg);
+      return;
     }
-  }, [state, onAudio]);
 
+    // Guard: user may have released before getUserMedia resolved
+    if (stateRef.current !== "idle") {
+      stream.getTracks().forEach((t) => t.stop());
+      return;
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/webm";
+    const recorder = new MediaRecorder(stream, { mimeType });
+    chunksRef.current = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(chunksRef.current, { type: mimeType });
+      _setState("processing");
+      onAudioRef.current(blob);
+    };
+
+    recorder.start();
+    mediaRecorderRef.current = recorder;
+    _setState("recording");
+  }, [_setState]); // STABLE — reads stateRef, not state
+
+  // ── stop — STABLE (no state deps) ─────────────────────────────────────
   const stop = useCallback(() => {
-    if (mediaRecorderRef.current && state === "recording") {
+    if (mediaRecorderRef.current && stateRef.current === "recording") {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current = null;
     }
-  }, [state]);
+  }, []); // STABLE — reads stateRef, not state
 
-  const reset = useCallback(() => setState("idle"), []);
+  const reset = useCallback(() => _setState("idle"), [_setState]);
 
   return { state, start, stop, reset };
 }

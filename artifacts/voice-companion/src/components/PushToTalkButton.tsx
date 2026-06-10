@@ -52,7 +52,7 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
       <motion.button
         onPointerDown={onStart}
         onPointerUp={onStop}
-        onPointerLeave={onStop}
+        onPointerCancel={onStop}
         disabled={disabled || isProcessing}
         className={`relative w-16 h-16 rounded-full bg-gradient-to-b shadow-lg flex items-center justify-center cursor-pointer select-none outline-none disabled:opacity-40 disabled:cursor-not-allowed ${isRecording ? activeColor : idleColor}`}
         whileTap={{ scale: 0.93 }}
