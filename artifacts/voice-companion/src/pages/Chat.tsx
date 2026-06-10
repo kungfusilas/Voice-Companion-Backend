@@ -16,6 +16,7 @@ import {
   speakText,
   fetchProactiveMessages,
   requestSelfie,
+  getChatHistory,
   getRelationshipStats,
   startActivity,
   setRomanticMode,
@@ -182,25 +183,41 @@ export function ChatPage({
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load proactive messages (skip for guests)
+  // Load conversation history + proactive messages on mount (authenticated users only)
   useEffect(() => {
     if (isGuest) return;
     let cancelled = false;
-    fetchProactiveMessages(userId, persona.id)
-      .then((data) => {
-        if (cancelled || !data.messages.length) return;
-        const msgs: ChatMessage[] = data.messages.map((m) => ({
-          role: "assistant" as const,
-          content: m.message,
-          proactive: true,
-          activityData: m.activity_data ?? undefined,
-        }));
-        setMessages(msgs);
+
+    (async () => {
+      const [histResult, proactResult] = await Promise.allSettled([
+        getChatHistory(persona.id, 20),
+        fetchProactiveMessages(userId, persona.id),
+      ]);
+      if (cancelled) return;
+
+      const histMsgs: ChatMessage[] =
+        histResult.status === "fulfilled" && histResult.value.length > 0
+          ? histResult.value.map((m) => ({ role: m.role as "user" | "assistant", content: m.content }))
+          : [];
+
+      const proactiveMsgs: ChatMessage[] =
+        proactResult.status === "fulfilled" && proactResult.value.messages.length > 0
+          ? proactResult.value.messages.map((m) => ({
+              role: "assistant" as const,
+              content: m.message,
+              proactive: true,
+              activityData: m.activity_data ?? undefined,
+            }))
+          : [];
+
+      if (proactiveMsgs.length > 0) {
         setProactiveLabel(`💭 ${persona.name} was thinking about you while you were away`);
-      })
-      .catch(() => {});
+      }
+      setMessages([...histMsgs, ...proactiveMsgs]);
+    })();
+
     return () => { cancelled = true; };
-  }, [persona.id, persona.name, userId, isGuest]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useCallback(async (userText: string) => {
     if (busyRef.current || showUpgradeCard) return;
@@ -228,13 +245,40 @@ export function ChatPage({
       for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx)) {
         if (event.type === "token") {
           fullReply += event.text ?? "";
-          setStreamingText(fullReply);
+          // Strip any [SELFIE:...] tag so it never appears in the live streaming text
+          setStreamingText(fullReply.replace(/\[SELFIE[^\]]*\]?/gi, "").trim());
         } else if (event.type === "done") {
           fullReply = event.full_text ?? fullReply;
           setStreamingText("");
-          const newMsgs: ChatMessage[] = [{ role: "assistant", content: fullReply }];
+
+          // Detect [SELFIE] / [SELFIE: scene] trigger tag for premium users
+          const selfieTagMatch = isPremium
+            ? fullReply.match(/\[SELFIE(?::\s*([^\]]*))?\]/i)
+            : null;
+          const displayReply = selfieTagMatch
+            ? fullReply.replace(/\[SELFIE[^\]]*\]/gi, "").trim()
+            : fullReply;
+
+          const newMsgs: ChatMessage[] = [{ role: "assistant", content: displayReply }];
           if (event.stage_up_text) newMsgs.push({ role: "assistant", content: event.stage_up_text });
           setMessages((prev) => [...prev, ...newMsgs]);
+
+          // Auto-trigger selfie when companion included the tag
+          if (selfieTagMatch) {
+            const scene = selfieTagMatch[1]?.trim() || undefined;
+            setSelfieLoading(true);
+            requestSelfie(persona.id, userId, scene)
+              .then((imageUrl) => {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: "assistant", content: `${persona.name} sent you a photo 📸`, imageUrl },
+                ]);
+              })
+              .catch(() => {
+                // Companion already responded warmly — silently skip if image gen fails
+              })
+              .finally(() => setSelfieLoading(false));
+          }
 
           if (!isGuest && event.connection_score !== undefined) {
             setConnectionScore(event.connection_score);
@@ -335,7 +379,7 @@ export function ChatPage({
         setWowGenerating(false);
       }
     }
-  }, [sessionId, persona.id, userId, ttsEnabled, playAudio, romanticMode, isGuest, showUpgradeCard]);
+  }, [sessionId, persona.id, persona.name, userId, ttsEnabled, playAudio, romanticMode, isGuest, showUpgradeCard, isPremium]);
 
   // Romantic mode toggle handler
   const handleRomanticToggle = useCallback(() => {

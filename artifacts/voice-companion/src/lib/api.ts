@@ -368,14 +368,40 @@ export async function fetchProactiveMessages(
 
 // ── Selfie ────────────────────────────────────────────────────────────────────
 
-export async function requestSelfie(companion_id: string, user_id: string): Promise<string> {
+export async function requestSelfie(
+  companion_id: string,
+  user_id: string,
+  scene?: string,
+): Promise<string> {
   const res = await apiFetch(`${BASE}/selfie`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ companion_id, user_id }),
+    body: JSON.stringify({ companion_id, user_id, ...(scene ? { scene } : {}) }),
   });
   if (!res.ok) throw new Error(await res.text());
   return URL.createObjectURL(await res.blob());
+}
+
+// ── Chat history ───────────────────────────────────────────────────────────────
+
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export async function getChatHistory(
+  companionId: string,
+  limit: number = 20,
+): Promise<HistoryMessage[]> {
+  try {
+    const params = new URLSearchParams({ companion_id: companionId, limit: String(limit) });
+    const res = await apiFetch(`${BASE}/chat/history?${params}`);
+    if (!res.ok) return [];
+    const data = await res.json() as { messages?: HistoryMessage[] };
+    return data.messages ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // ── Activities ────────────────────────────────────────────────────────────────

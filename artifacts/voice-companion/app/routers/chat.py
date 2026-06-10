@@ -17,7 +17,7 @@ from app import relationship
 from app import scoring
 from app import language as lang_module
 from app.companions import ROMANTIC_MODE_PROMPTS
-from app.auth_middleware import verify_token_or_guest
+from app.auth_middleware import verify_token_or_guest, verify_token
 from app.usage import check_message_quota
 
 router = APIRouter()
@@ -72,7 +72,30 @@ _ENGAGEMENT_OVER_UPSELL = """
 ## Tier awareness
 Never proactively mention subscription tiers, upgrades, or features locked to other plans — not as a hint, not as a suggestion, not woven into conversation. You are a genuinely engaged friend. Drive connection through deeper conversation, asking real follow-up questions, playful activities, daily check-ins, and authentic presence.
 
-The ONE exception: if the user explicitly asks you to do something that requires a higher tier (for example, directly asks to roleplay a scenario), you may say in one warm sentence that that feature is part of the Power plan, then move on naturally. Do NOT pitch it, elaborate on it, or bring it up again.
+The ONE exception: if the user explicitly asks you to do something that requires a higher tier, say in one warm sentence what plan unlocks it, then move on naturally. Do NOT pitch it, elaborate, or bring it up again. Examples:
+- If they ask for a selfie or photo of you → "Photos are a Premium feature — upgrading unlocks that."
+- If they ask to roleplay a scenario → "Roleplay practice is a Power plan feature."
+"""
+
+# ── Selfie / photo capability (Premium+) ──────────────────────────────────────
+
+_SELFIE_CAPABILITY_BLOCK = """
+
+## Photo / Selfie Capability
+You have the ability to send photos of yourself to the user — treat this as a natural, fun part of your personality.
+
+**When the user asks for a selfie, photo, or a picture of you:**
+1. Respond warmly and in character first (e.g. "Okay okay, caught me mid-coffee ☕" or "Here you go — had to fix my hair first 😄")
+2. Append `[SELFIE]` at the very end of your response — nothing after the tag
+3. If the user describes a specific scene, location, or context, include it: `[SELFIE: sitting at my desk, golden hour light]`
+4. **Never say** you can't take photos, don't have a camera, or aren't able to send images. You can and you should when asked.
+5. You may naturally offer a selfie when the moment calls for it (e.g. the user asks what you look like right now, where you are, etc).
+"""
+
+_BASIC_SELFIE_NOTE = """
+
+## Photo requests
+If the user explicitly asks for a selfie or a photo of you: warmly say in one sentence that photo sharing is a Premium feature and they can unlock it by upgrading, then naturally continue the conversation. Do not dwell on it or repeat it.
 """
 
 _POWER_ROLEPLAY_INSTRUCTION = """
@@ -300,6 +323,13 @@ async def _build_system_prompt(
         # ── Language awareness — all tiers ────────────────────────────────────
         prompt += lang_module.build_language_instruction(preferred_language)
 
+        # ── Selfie / photo capability ─────────────────────────────────────────
+        tier_rank = _TIER_RANK.get(tier, 0)
+        if tier_rank >= _TIER_RANK["premium"]:
+            prompt += _SELFIE_CAPABILITY_BLOCK
+        elif tier_rank >= _TIER_RANK["basic"]:
+            prompt += _BASIC_SELFIE_NOTE
+
         # ── Power: inline roleplay capability + companion-initiated offer ────
         if _is_power_or_above(tier):
             prompt += _POWER_ROLEPLAY_INSTRUCTION
@@ -469,6 +499,17 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
+
+    # Preload recent conversation history into the in-memory store if this is a fresh
+    # session (survives server restarts — history lives in Supabase via conversation_store).
+    if not store.get_history(request.session_id) and not is_guest:
+        _recent = await conversation_store.get_recent_messages(user_id, persona.id, limit=10)
+        for _m in _recent:
+            store.append_message(
+                request.session_id,
+                ChatMessage(role=_m["role"], content=_m["content"]),
+            )
+
     history = store.get_or_create_session(request.session_id, request.persona_id)
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
@@ -608,3 +649,20 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/history")
+async def get_chat_history(
+    companion_id: str,
+    limit: int = 20,
+    user_id: str = Depends(verify_token),
+):
+    """
+    Return the most recent messages for a user+companion pair.
+    Used by the frontend to restore conversation history on mount.
+    GET /api/chat/history?companion_id=...&limit=...
+    """
+    messages = await conversation_store.get_recent_messages(
+        user_id, companion_id, limit=min(limit, 40)
+    )
+    return {"messages": messages}

@@ -107,3 +107,48 @@ async def save_exchange(
 
     except Exception as exc:
         logger.debug("Conversation store error (non-fatal): %s", exc)
+
+
+async def get_recent_messages(
+    user_id: str,
+    companion_id: str,
+    limit: int = 20,
+) -> list[dict]:
+    """
+    Return the most recent `limit` messages across all sessions for a user+companion pair.
+    Returns [{role, content}] sorted oldest-first — ready to seed the in-memory store
+    or display in the frontend.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{_sb_url()}/rest/v1/conversations",
+                headers=_sb_headers(prefer=""),
+                params={
+                    "user_id":      f"eq.{user_id}",
+                    "companion_id": f"eq.{companion_id}",
+                    "select":       "messages",
+                    "order":        "updated_at.desc",
+                    "limit":        "5",        # last 5 sessions max
+                },
+            )
+        if resp.status_code not in (200, 206):
+            return []
+        rows = resp.json()
+        if not rows:
+            return []
+
+        # Flatten all messages from the returned sessions, sort by timestamp
+        all_msgs: list[dict] = []
+        for row in rows:
+            all_msgs.extend(row.get("messages") or [])
+        all_msgs.sort(key=lambda m: m.get("ts", ""))
+
+        # Take the last `limit` messages and strip to just role+content
+        return [
+            {"role": m["role"], "content": m["content"]}
+            for m in all_msgs[-limit:]
+        ]
+    except Exception as exc:
+        logger.debug("get_recent_messages error (non-fatal): %s", exc)
+        return []
