@@ -127,9 +127,11 @@ async def check_and_send_proactive_messages() -> None:
 
             message = message.strip().strip('"').strip("'")
 
-            # Deduct 1 message from quota; skip if user is over their limit
+            # Paid-tier gate + quota deduction (free users get no proactive messages)
             try:
                 tier, _ = await get_user_tier(user_id)
+                if tier not in ("basic", "premium", "power", "elite"):
+                    continue
                 await check_message_quota(user_id, tier, None)
             except HTTPException:
                 logger.info("Proactive check-in skipped — quota reached user=%s", user_id)
@@ -194,9 +196,11 @@ async def check_and_send_daily_activity() -> None:
 
             intro = data.get("companion_intro", "")
 
-            # Deduct 1 message from quota; skip if user is over their limit
+            # Paid-tier gate + quota deduction (free users get no proactive activities)
             try:
                 tier, _ = await get_user_tier(user_id)
+                if tier not in ("basic", "premium", "power", "elite"):
+                    continue
                 await check_message_quota(user_id, tier, None)
             except HTTPException:
                 logger.info("Daily activity skipped — quota reached user=%s", user_id)

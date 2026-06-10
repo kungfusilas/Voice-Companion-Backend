@@ -113,7 +113,7 @@ const FEATURE_INFO: Record<string, string> = {
   "Bond Score":               "Tracks the health and depth of your relationship with your companion over time. Grows through consistency, honesty, and openness.",
   "Roleplay Simulator":       "Practice real social scenarios — job interviews, difficult conversations, first dates — with an AI that pushes back, stays in character, and coaches you after.",
   "Deep Communication Analysis": "After major conversations, an AI breakdown of your communication patterns, emotional tone, listening quality, and relationship dynamics.",
-  "Companion-initiated check-ins": "Your companion reaches out first — a gentle, in-character message after a period of inactivity. Available on every plan, counts against your monthly allowance.",
+  "Companion-initiated check-ins": "Your companion reaches out first — a gentle, in-character message after a period of inactivity. Included on all paid plans; counts against your monthly allowance.",
   "Monthly Legacy Chapter 📖":    "Once a month, your companion writes a polished 800-1,500 word narrative chapter of your life — drawn from your conversations and memories. Your story, written chapter by chapter.",
 };
 
