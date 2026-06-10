@@ -1,12 +1,14 @@
 """
 Romantic Mode endpoint.
 POST /api/romantic-mode
+
+Available to all authenticated users — romantic depth emerges naturally
+through conversation across all paid tiers. Not tier-gated.
 """
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from app.companions import COMPANION_MAP
 from app.auth_middleware import verify_token
-from app.routers.tier_check import require_premium
 
 router = APIRouter()
 
@@ -40,14 +42,12 @@ class RomanticModeRequest(BaseModel):
 @router.post("")
 async def set_romantic_mode(
     req: RomanticModeRequest,
-    auth_user_id: str = Depends(verify_token),
+    _: str = Depends(verify_token),
 ):
     """
-    Enable or disable Romantic Mode for a user+companion pair. Premium+.
+    Enable or disable Romantic Mode for a user+companion pair.
     Returns the companion's in-character reaction.
     """
-    await require_premium(auth_user_id)
-
     if req.companion_id not in COMPANION_MAP:
         raise HTTPException(
             status_code=404, detail=f"Companion '{req.companion_id}' not found"

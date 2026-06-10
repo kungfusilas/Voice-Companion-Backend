@@ -21,7 +21,7 @@ const PLANS = [
     key: "basic",
     name: "Basic",
     description: "Perfect for getting started",
-    features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Daily check-ins"],
+    features: ["All 4 companions", "Voice & text chat", "Long-term memory", "Daily check-ins", "Activity games", "Bond Score"],
     accent: "violet",
     gradient: "from-violet-600/20 to-violet-900/10",
     border: "border-violet-500/30",
@@ -33,7 +33,7 @@ const PLANS = [
     key: "premium",
     name: "Premium",
     description: "Deeper connections, more features",
-    features: ["Everything in Basic", "Two-Way Voice 🎙️", "Companion selfies 📸", "Activity games", "Higher monthly usage allowance"],
+    features: ["Everything in Basic", "Two-Way Voice 🎙️", "Companion selfies 📸", "Higher monthly usage allowance"],
     accent: "rose",
     gradient: "from-rose-600/20 to-rose-900/10",
     border: "border-rose-500/30",
@@ -45,7 +45,7 @@ const PLANS = [
     key: "power",
     name: "Power",
     description: "The full experience",
-    features: ["Everything in Premium", "Highest message allowance", "Top-up packs available", "Personality Map 🧠", "Session Debrief 🔬", "Weekly Insight Report 📊", "Earliest new features", "Power user badge"],
+    features: ["Everything in Premium", "Roleplay Simulator", "Highest message allowance", "Top-up packs available", "Personality Map 🧠", "Session Debrief 🔬", "Weekly Insight Report 📊", "Deep Communication Analysis", "Earliest new features", "Power user badge"],
     accent: "amber",
     gradient: "from-amber-600/20 to-amber-900/10",
     border: "border-amber-500/30",
@@ -109,6 +109,10 @@ const FEATURE_INFO: Record<string, string> = {
   "Personality Map 🧠":     "Over time, your companion builds a private map of who you are — your communication style, attachment style, leadership style, and emotional triggers. No quiz. No form. Just conversation.",
   "Session Debrief 🔬":     "After each session, receive a behavioral breakdown of how you showed up: negative self-talk, deflection, openness, patterns. Specific. Private. Powerful.",
   "Weekly Insight Report 📊": "Every Monday, a private report from your week — emotional themes, mood arc, what your companion noticed. Like a therapist's notes, written for you.",
+  "Two-Way Voice 🎙️":        "Your companion speaks back to you in a real, expressive voice — natural conversation, not robotic playback. Like a call with someone who truly knows you.",
+  "Bond Score":               "Tracks the health and depth of your relationship with your companion over time. Grows through consistency, honesty, and openness.",
+  "Roleplay Simulator":       "Practice real social scenarios — job interviews, difficult conversations, first dates — with an AI that pushes back, stays in character, and coaches you after.",
+  "Deep Communication Analysis": "After major conversations, an AI breakdown of your communication patterns, emotional tone, listening quality, and relationship dynamics.",
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────

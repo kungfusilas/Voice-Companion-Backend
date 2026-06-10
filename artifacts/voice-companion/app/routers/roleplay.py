@@ -23,7 +23,7 @@ from app import claude
 from app.models import ChatMessage
 from app.auth_middleware import verify_token
 from app.routers.hearts import award_hearts
-from app.routers.tier_check import require_premium
+from app.routers.tier_check import require_power
 
 router = APIRouter()
 
@@ -201,7 +201,7 @@ async def get_scenarios():
 
 @router.post("/start")
 async def start_session(req: StartRequest, user_id: str = Depends(verify_token)):
-    await require_premium(user_id)
+    await require_power(user_id)
     scenario = next((s for s in SCENARIOS if s["id"] == req.scenario_id), None)
     if not scenario:
         raise HTTPException(status_code=404, detail="Scenario not found")
@@ -224,7 +224,7 @@ async def start_session(req: StartRequest, user_id: str = Depends(verify_token))
 
 @router.post("/message")
 async def send_message(req: MessageRequest, user_id: str = Depends(verify_token)):
-    await require_premium(user_id)
+    await require_power(user_id)
     session = _sessions.get(req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -279,7 +279,7 @@ async def send_message(req: MessageRequest, user_id: str = Depends(verify_token)
 
 @router.post("/end")
 async def end_session(req: EndRequest, user_id: str = Depends(verify_token)):
-    await require_premium(user_id)
+    await require_power(user_id)
     session = _sessions.get(req.session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")

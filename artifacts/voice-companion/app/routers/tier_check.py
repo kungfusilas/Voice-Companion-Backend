@@ -70,8 +70,50 @@ def is_premium_or_higher(tier: str) -> bool:
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
 
 
+def is_power_or_higher(tier: str) -> bool:
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["power"]
+
+
+def is_paid(tier: str) -> bool:
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["basic"]
+
+
 async def require_premium(user_id: str) -> None:
     """Raise HTTP 403 if the authenticated user is below Premium tier."""
     tier = await fetch_tier(user_id)
     if not is_premium_or_higher(tier):
         raise HTTPException(status_code=403, detail=_403_DETAIL)
+
+
+async def require_power(user_id: str) -> None:
+    """Raise HTTP 403 if the authenticated user is below Power tier."""
+    tier = await fetch_tier(user_id)
+    if not is_power_or_higher(tier):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_required",
+                "required": "power",
+                "message": (
+                    "This feature requires a Power plan. "
+                    "Upgrade in Settings → Pricing."
+                ),
+            },
+        )
+
+
+async def require_paid(user_id: str) -> None:
+    """Raise HTTP 403 if the user is on the free tier (no active subscription)."""
+    tier = await fetch_tier(user_id)
+    if not is_paid(tier):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "plan_required",
+                "required": "basic",
+                "message": (
+                    "This feature requires an active subscription. "
+                    "Upgrade in Settings → Pricing."
+                ),
+            },
+        )

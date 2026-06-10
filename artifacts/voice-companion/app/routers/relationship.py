@@ -1,8 +1,13 @@
+"""
+Relationship stats and type endpoints.
+
+Available to all authenticated users — relationship depth emerges naturally
+through conversation across all paid tiers. Not tier-gated.
+"""
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from app import relationship
 from app.auth_middleware import verify_token
-from app.routers.tier_check import require_premium
 
 router = APIRouter()
 
@@ -16,10 +21,9 @@ class SetTypeRequest(BaseModel):
 @router.post("/type")
 async def set_relationship_type(
     req: SetTypeRequest,
-    auth_user_id: str = Depends(verify_token),
+    _: str = Depends(verify_token),
 ):
-    """Save the chosen relationship type for a user+companion pair. Premium+."""
-    await require_premium(auth_user_id)
+    """Save the chosen relationship type for a user+companion pair."""
     await relationship.upsert_relationship_type(
         req.user_id, req.companion_id, req.relationship_type
     )
@@ -30,9 +34,8 @@ async def set_relationship_type(
 async def get_relationship(
     user_id: str,
     companion_id: str,
-    auth_user_id: str = Depends(verify_token),
+    _: str = Depends(verify_token),
 ):
-    """Return the current relationship stats for a user+companion pair. Premium+."""
-    await require_premium(auth_user_id)
+    """Return the current relationship stats for a user+companion pair."""
     stats = await relationship.get_stats(user_id, companion_id)
     return stats
