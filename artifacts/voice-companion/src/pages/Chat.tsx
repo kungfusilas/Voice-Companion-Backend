@@ -308,7 +308,10 @@ export function ChatPage({
               try {
                 await playAudio(await speakText(spokenText, persona.id));
               } catch (ttsErr) {
-                if (ttsErr instanceof ApiError && ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+                if (ttsErr instanceof ApiError) {
+                  if (ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+                  // 401/403/429/5xx — swallow silently; audio is a best-effort enhancement
+                }
               }
             }
           }
@@ -350,7 +353,11 @@ export function ChatPage({
         .replace(/\s+/g, " ")
         .trim();
       if (spoken) {
-        try { await playAudio(await speakText(spoken, persona.id)); } catch {}
+        try {
+          await playAudio(await speakText(spoken, persona.id));
+        } catch (ttsErr) {
+          if (ttsErr instanceof ApiError && ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+        }
       }
     };
 

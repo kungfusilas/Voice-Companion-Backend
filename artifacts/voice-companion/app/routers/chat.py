@@ -16,7 +16,7 @@ from app import conversation_store
 from app import relationship
 from app import scoring
 from app import language as lang_module
-from app.companions import ROMANTIC_MODE_PROMPTS
+from app.companions import ROMANTIC_MODE_PROMPTS, build_system_prompt as companions_build_system_prompt
 from app.auth_middleware import verify_token_or_guest, verify_token
 from app.usage import check_message_quota
 
@@ -278,7 +278,7 @@ async def _build_system_prompt(
     Paid users may receive a companion-initiated offer when an upcoming event
     is detected and the weekly cooldown has elapsed.
     """
-    base_prompt = persona.build_system_prompt()
+    base_prompt = companions_build_system_prompt(persona)
 
     if is_guest:
         prompt = _inject_date(base_prompt)
@@ -430,7 +430,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     stage_up_text = ""
     if old_stage != new_stage_name:
         stage_up_text = await scoring.generate_stage_up_reaction(
-            persona.name, persona.build_system_prompt(), new_stage_name, rel_type
+            persona.name, companions_build_system_prompt(persona), new_stage_name, rel_type
         )
 
     if is_premium:
@@ -568,7 +568,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     stage_up_text = ""
                     if old_stage_name != new_stage_name:
                         stage_up_text = await scoring.generate_stage_up_reaction(
-                            persona.name, persona.build_system_prompt(), new_stage_name, rel_type
+                            persona.name, companions_build_system_prompt(persona), new_stage_name, rel_type
                         )
 
                     # ── Drift detection every 10 messages ────────────────────
