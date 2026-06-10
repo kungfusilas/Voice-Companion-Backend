@@ -15,14 +15,16 @@ async def extract_and_save(
     persona_id: str,
     user_message: str,
     assistant_reply: str,
+    language: str = "en",
 ) -> None:
     """
     Fire-and-forget: ask Haiku whether this exchange is worth remembering.
     If yes, embed the content with legacy tags and persist to pgvector.
     Errors are silently swallowed — never blocks or slows chat.
+    Pass `language` so memories are stored in the conversation language.
     """
     try:
-        result = await memory.should_remember(user_message, assistant_reply)
+        result = await memory.should_remember(user_message, assistant_reply, language=language)
         if result:
             await memory.save_memory(
                 user_id=user_id,

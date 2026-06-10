@@ -1,8 +1,10 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Depends, Request
 from app import deepgram_client
 from app.deepgram_client import DeepgramTranscriptError
 from app.auth_middleware import verify_token_or_guest
 from app.usage import check_voice_quota, get_user_tier
+from app import language as lang_module
 
 router = APIRouter()
 
@@ -28,12 +30,18 @@ async def speech_to_text(
     req: Request,
     audio: UploadFile = File(..., description="Audio file to transcribe"),
     model: str = Query("nova-2", description="Deepgram model — nova-2 recommended"),
-    language: str = Query("en", description="BCP-47 language code, e.g. 'en', 'es', 'fr'"),
+    language: str = Query("", description="BCP-47 language hint (empty = auto-detect)"),
     diarize: bool = Query(False, description="Identify multiple speakers"),
     user_id: str = Depends(verify_token_or_guest),
 ):
     """
     Transcribe speech from an uploaded audio file.
+
+    Language selection priority:
+    1. If `language` query param is explicitly provided, use it.
+    2. For authenticated users: look up their preferred_language from profile.
+    3. Fall back to Deepgram auto language detection (nova-2 supports it natively).
+
     Requires authentication for paid users. Voice quota is deducted based on
     estimated audio duration (webm/opus ≈ 4 000 bytes/sec).
     """
@@ -45,20 +53,46 @@ async def speech_to_text(
         raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB)")
 
     is_guest = user_id.startswith("guest_")
+
+    # Quota check and language resolution run concurrently for authenticated users
+    resolved_language = language.strip()
+    detect_language_auto = False
+
     if not is_guest:
         tier, _ = await get_user_tier(user_id)
         session_id = req.headers.get("X-Session-Id") or None
         estimated_secs = max(1, len(audio_bytes) // 4000)
-        await check_voice_quota(user_id, tier, estimated_secs, session_id)
+
+        # Resolve language in parallel with quota check
+        if not resolved_language:
+            preferred, _ = await asyncio.gather(
+                lang_module.get_preferred_language(user_id),
+                check_voice_quota(user_id, tier, estimated_secs, session_id),
+            )
+            # Use preferred_language as hint; nova-2 auto-detects if it differs
+            resolved_language = preferred
+        else:
+            await check_voice_quota(user_id, tier, estimated_secs, session_id)
+    else:
+        # Guests: use explicit language or fall back to auto-detection
+        if not resolved_language:
+            detect_language_auto = True
 
     try:
         result = await deepgram_client.transcribe(
             audio_bytes=audio_bytes,
             model=model,
-            language=language,
+            language=resolved_language or "en",
             diarize=diarize,
+            detect_language=detect_language_auto,
         )
     except DeepgramTranscriptError as e:
         raise HTTPException(status_code=502, detail=f"Deepgram error: {e}")
+
+    # Auto-update preferred_language from detected language (authenticated, non-English detections)
+    if not is_guest and result.get("detected_language"):
+        detected = result["detected_language"]
+        if detected and detected != "en":
+            asyncio.create_task(lang_module.set_preferred_language(user_id, detected))
 
     return result

@@ -16,7 +16,7 @@ _client: Client | None = None
 _VOYAGE_URL = "https://api.voyageai.com/v1/embeddings"
 _VOYAGE_MODEL = "voyage-3"
 
-_SHOULD_REMEMBER_PROMPT = (
+_SHOULD_REMEMBER_PROMPT_BASE = (
     "Does this conversation exchange contain anything worth a companion remembering long-term? "
     "Look for: facts about the user (name, job, family, pets, location), "
     "preferences (likes/dislikes, hobbies), emotional moments (confessions, vulnerable shares, breakthroughs), "
@@ -62,16 +62,25 @@ async def embed(text: str) -> list[float]:
         return resp.json()["data"][0]["embedding"]
 
 
-async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
+async def should_remember(user_msg: str, companion_msg: str, language: str = "en") -> dict | None:
     """
     Use Claude Haiku to decide if this exchange contains something worth saving.
     Returns parsed dict with {content, type, importance} or None.
+
+    Pass `language` so the stored memory content matches the conversation language.
     """
     from app import claude  # late import — avoids circular at module level
+    from app.language import LANG_NAMES
+    lang_name = LANG_NAMES.get(language, language)
+    lang_note = (
+        f"\nIMPORTANT: Write the 'content' field in {lang_name} — the same language as the conversation."
+        if language != "en" else ""
+    )
+    prompt = _SHOULD_REMEMBER_PROMPT_BASE + lang_note
     try:
         turn = f"User: {user_msg}\nCompanion: {companion_msg}"
         raw = await claude.send_message(
-            system_prompt=_SHOULD_REMEMBER_PROMPT,
+            system_prompt=prompt,
             history=[],
             user_message=turn,
             model="claude-haiku-4-5-20251001",

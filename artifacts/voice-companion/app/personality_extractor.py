@@ -78,8 +78,14 @@ async def _save_map(user_id: str, personality_map: dict) -> None:
         logger.debug("Save personality_map failed: %s", e)
 
 
-async def extract_and_update(user_id: str, user_message: str, companion_reply: str) -> None:
+async def extract_and_update(
+    user_id: str,
+    user_message: str,
+    companion_reply: str,
+    language: str = "en",
+) -> None:
     """Fire-and-forget: extract signals from one exchange and merge into the profile."""
+    from app.language import LANG_NAMES
     try:
         current = await _fetch_current_map(user_id)
         count = int(current.get("conversation_count") or 0)
@@ -107,6 +113,12 @@ async def extract_and_update(user_id: str, user_message: str, companion_reply: s
             },
         }
 
+        lang_name = LANG_NAMES.get(language, language)
+        lang_note = (
+            f"\nWrite all labels and signal strings in {lang_name}."
+            if language != "en" else ""
+        )
+
         prompt = f"""Analyze this conversation exchange and update the personality profile.
 
 User message: "{user_message}"
@@ -126,7 +138,7 @@ Rules:
 - Max 6 signals per field. Max 5 each for positive/negative triggers.
 - Labels must reflect the overall pattern, not just this exchange.
 - If no signal is observable for a field, keep it unchanged.
-- Return ONLY valid JSON."""
+- Return ONLY valid JSON.{lang_note}"""
 
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
         msg = client.messages.create(

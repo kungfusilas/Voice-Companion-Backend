@@ -21,6 +21,7 @@ Supabase table required (run once in Supabase SQL editor):
 
 import os
 import json
+import asyncio
 import logging
 import httpx
 import anthropic
@@ -28,6 +29,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.routers.auth import verify_token
+from app import language as lang_module
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -105,7 +107,10 @@ async def _fetch_memory_excerpts(user_id: str, companion_id: str) -> str:
 
 
 async def _generate_report_data(user_id: str, companion_id: str) -> dict:
-    excerpts = await _fetch_memory_excerpts(user_id, companion_id)
+    excerpts, preferred_language = await asyncio.gather(
+        _fetch_memory_excerpts(user_id, companion_id),
+        lang_module.get_preferred_language(user_id),
+    )
 
     if not excerpts:
         return {
@@ -116,6 +121,9 @@ async def _generate_report_data(user_id: str, companion_id: str) -> dict:
             "closing_note": "No conversations were recorded this week. Come back and share what's on your mind — I'll be here.",
             "empty": True,
         }
+
+    lang_name = lang_module.LANG_NAMES.get(preferred_language, preferred_language)
+    lang_note = f"\nIMPORTANT: Write all text fields (emotional_themes, top_topics, mood_arc, pattern, closing_note) in {lang_name}." if preferred_language != "en" else ""
 
     prompt = f"""You are generating a private weekly insight report for a user from their AI companion app.
 
@@ -129,7 +137,7 @@ Generate a JSON object with exactly these fields:
 - pattern: one specific, concrete observation — something the companion genuinely noticed (e.g. "You mentioned your sister in 6 separate conversations this week", "Work came up every time you felt anxious")
 - closing_note: 2-3 warm, personal sentences from the companion closing out the week — reference something specific from the excerpts
 
-Return ONLY valid JSON. No markdown, no explanation."""
+Return ONLY valid JSON. No markdown, no explanation.{lang_note}"""
 
     try:
         client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
