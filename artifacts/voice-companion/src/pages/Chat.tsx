@@ -92,6 +92,7 @@ export function ChatPage({
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [ttsRetry, setTtsRetry] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selfieLoading, setSelfieLoading] = useState(false);
   const [activityLoading, setActivityLoading] = useState<ActivityType | null>(null);
@@ -181,7 +182,9 @@ export function ChatPage({
     setMessages([{ role: "assistant", content: ONBOARDING_OPENER }]);
     speakText(ONBOARDING_OPENER, persona.id)
       .then((url) => playAudio(url))
-      .catch(() => {});
+      .catch((err: unknown) => {
+        console.error("[TTS] opener failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
+      });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Load conversation history + proactive messages on mount (authenticated users only)
@@ -225,6 +228,7 @@ export function ChatPage({
     busyRef.current = true;
     setBusy(true);
     setError("");
+    setTtsRetry(null);
     setProactiveLabel(null);
     setScoreDelta(undefined);
     setMessages((prev) => [...prev, { role: "user", content: userText }]);
@@ -266,7 +270,10 @@ export function ChatPage({
                 .replace(/\s+/g, " ")
                 .trim();
               if (cleanFirst) {
-                firstSentenceAudioP = speakText(cleanFirst, persona.id).catch(() => null);
+                firstSentenceAudioP = speakText(cleanFirst, persona.id).catch((err: unknown) => {
+                  console.error("[TTS] prefetch failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
+                  return null;
+                });
                 // Play immediately when audio is ready — concurrent with ongoing stream
                 firstSentencePlayP = firstSentenceAudioP
                   .then(async (blob) => { if (blob) await playAudio(blob); })
@@ -345,7 +352,12 @@ export function ChatPage({
                   const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
                   const remainingP = remainingSpoken
                     ? speakTextStream(remainingSpoken, persona.id).catch((e: unknown) => {
-                        if (e instanceof ApiError && e.status === 402) setQuotaErrorDetail(e.detail as QuotaDetail);
+                        if (e instanceof ApiError && e.status === 402) {
+                          setQuotaErrorDetail(e.detail as QuotaDetail);
+                        } else {
+                          console.error("[TTS] stream failed:", e instanceof ApiError ? `HTTP ${(e as ApiError).status}` : e);
+                          setTtsRetry(fullSpoken);
+                        }
                         return null;
                       })
                     : Promise.resolve(null);
@@ -358,9 +370,11 @@ export function ChatPage({
                   await playStream(res);
                 }
               } catch (ttsErr) {
-                if (ttsErr instanceof ApiError) {
-                  if (ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
-                  // 401/403/429/5xx — swallow silently; audio is best-effort
+                if (ttsErr instanceof ApiError && ttsErr.status === 402) {
+                  setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+                } else {
+                  console.error("[TTS] voice failed:", ttsErr instanceof ApiError ? `HTTP ${(ttsErr as ApiError).status}` : ttsErr);
+                  setTtsRetry(fullSpoken);
                 }
               }
             }
@@ -406,7 +420,12 @@ export function ChatPage({
         try {
           await playAudio(await speakText(spoken, persona.id));
         } catch (ttsErr) {
-          if (ttsErr instanceof ApiError && ttsErr.status === 402) setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+          if (ttsErr instanceof ApiError && ttsErr.status === 402) {
+            setQuotaErrorDetail(ttsErr.detail as QuotaDetail);
+          } else {
+            console.error("[TTS] voice failed:", ttsErr instanceof ApiError ? `HTTP ${(ttsErr as ApiError).status}` : ttsErr);
+            setTtsRetry(spoken);
+          }
         }
       }
     };
@@ -437,6 +456,19 @@ export function ChatPage({
       }
     }
   }, [sessionId, persona.id, persona.name, userId, ttsEnabled, playAudio, playStream, romanticMode, isGuest, showUpgradeCard, isPremium]);
+
+  const handleTtsRetry = useCallback(async () => {
+    if (!ttsRetry) return;
+    const text = ttsRetry;
+    setTtsRetry(null);
+    try {
+      const res = await speakTextStream(text, persona.id);
+      await playStream(res);
+    } catch (err) {
+      console.error("[TTS] retry failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
+      setTtsRetry(text);
+    }
+  }, [ttsRetry, persona.id, playStream]);
 
   // Romantic mode toggle handler
   const handleRomanticToggle = useCallback(() => {
@@ -848,6 +880,28 @@ export function ChatPage({
       {error && (
         <p className="text-center text-xs text-red-400 px-4 pb-1 shrink-0">{error}</p>
       )}
+
+      {/* ── TTS retry notice ── */}
+      <AnimatePresence>
+        {ttsRetry && (
+          <motion.div
+            key="tts-retry"
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 4 }}
+            transition={{ duration: 0.2 }}
+            className="flex justify-center px-4 pb-1 shrink-0"
+          >
+            <button
+              onClick={() => { void handleTtsRetry(); }}
+              className="flex items-center gap-1.5 text-[11px] text-white/35 hover:text-white/55 active:text-white/70 transition-colors"
+            >
+              <Volume2 className="w-3 h-3" />
+              Voice unavailable · Tap to retry
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── Activity toolbar (authenticated only) ── */}
       {!isGuest && (
