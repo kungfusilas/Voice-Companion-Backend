@@ -1,3 +1,4 @@
+import re
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
@@ -9,6 +10,35 @@ from app.usage import check_voice_quota, get_user_tier
 from app.routers.tier_check import is_premium_or_higher
 
 router = APIRouter()
+
+# Matches emoji and non-speakable Unicode symbols.
+# Covers: supplementary-plane characters (U+10000+, where most emoji live),
+# BMP misc-symbol blocks (☀ ⭐ ♠ etc.), variation selectors, and zero-width joiners.
+_NON_SPEAKABLE_RE = re.compile(
+    "["
+    "\U00010000-\U0010FFFF"   # Supplementary planes — emoji, pictographs, etc.
+    "\u2600-\u27BF"            # Misc symbols (☀☁⚡), dingbats (✂✈)
+    "\u2B00-\u2BFF"            # Misc symbols and arrows (⭐⬛⬜)
+    "\u2300-\u23FF"            # Misc technical (⏰⌚)
+    "\u25A0-\u25FF"            # Geometric shapes (▪▫◆)
+    "\uFE00-\uFE0F"            # Variation selectors (emoji presentation hints)
+    "\u200B-\u200D"            # Zero-width space, non-joiner, joiner
+    "\uFEFF"                   # BOM / zero-width no-break space
+    "]+",
+    re.UNICODE,
+)
+
+
+def _strip_non_speakable(text: str) -> str:
+    """Remove emoji and non-speakable Unicode so ElevenLabs receives clean text.
+
+    Keeps all Latin, Cyrillic, CJK, Arabic, and other script characters that
+    TTS models can handle. Replaces removed runs with a single space so
+    sentence rhythm is preserved, then collapses duplicate whitespace.
+    """
+    cleaned = _NON_SPEAKABLE_RE.sub(" ", text)
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    return cleaned.strip()
 
 
 def _elevenlabs_http_error(e: ElevenLabsError) -> HTTPException:
@@ -47,7 +77,8 @@ async def persona_speak_stream(
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
 
-    if not request.text.strip():
+    clean_text = _strip_non_speakable(request.text)
+    if not clean_text:
         raise HTTPException(status_code=422, detail="text must not be empty")
 
     is_guest = user_id.startswith("guest_")
@@ -71,7 +102,7 @@ async def persona_speak_stream(
             },
         )
     session_id = req.headers.get("X-Session-Id") or None
-    estimated_secs = max(1, len(request.text) // 13)
+    estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
@@ -79,7 +110,7 @@ async def persona_speak_stream(
     async def audio_stream():
         try:
             async for chunk in elevenlabs_client.synthesize_stream(
-                text=request.text,
+                text=clean_text,
                 voice_id=persona.voice_id,
                 model_id=request.model_id,
                 voice_settings=voice_settings,
@@ -116,7 +147,8 @@ async def persona_speak(
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
 
-    if not request.text.strip():
+    clean_text = _strip_non_speakable(request.text)
+    if not clean_text:
         raise HTTPException(status_code=422, detail="text must not be empty")
 
     is_guest = user_id.startswith("guest_")
@@ -140,14 +172,14 @@ async def persona_speak(
             },
         )
     session_id = req.headers.get("X-Session-Id") or None
-    estimated_secs = max(1, len(request.text) // 13)
+    estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
 
     try:
         audio = await elevenlabs_client.synthesize(
-            text=request.text,
+            text=clean_text,
             voice_id=persona.voice_id,
             model_id=request.model_id,
             voice_settings=voice_settings,

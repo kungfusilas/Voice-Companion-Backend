@@ -267,6 +267,8 @@ export function ChatPage({
                 .replace(/\*[^*]*\*/g, "")
                 .replace(/\[[^\]]*\]/g, "")
                 .replace(/\([^)]*\)/g, "")
+                .replace(/\p{Extended_Pictographic}/gu, "")
+                .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
                 .replace(/\s+/g, " ")
                 .trim();
               if (cleanFirst) {
@@ -341,6 +343,8 @@ export function ChatPage({
               s.replace(/\*[^*]*\*/g, "")
                .replace(/\[[^\]]*\]/g, "")
                .replace(/\([^)]*\)/g, "")
+               .replace(/\p{Extended_Pictographic}/gu, "")
+               .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
                .replace(/\s+/g, " ")
                .trim();
             const fullSpoken = cleanTTS(fullReply);
@@ -414,6 +418,8 @@ export function ChatPage({
         .replace(/\*[^*]*\*/g, "")
         .replace(/\[[^\]]*\]/g, "")
         .replace(/\([^)]*\)/g, "")
+        .replace(/\p{Extended_Pictographic}/gu, "")
+        .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
         .replace(/\s+/g, " ")
         .trim();
       if (spoken) {

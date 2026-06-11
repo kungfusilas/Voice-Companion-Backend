@@ -160,6 +160,8 @@ export function useAudioPlayer() {
         }
       });
 
+    // Capture any body-read error so we can reset state before re-throwing.
+    let readError: unknown = null;
     try {
       while (!abort.signal.aborted) {
         const { done, value } = await reader.read();
@@ -170,11 +172,23 @@ export function useAudioPlayer() {
           if (!abort.signal.aborted) await appendChunk(new Uint8Array(value));
         }
       }
+    } catch (err) {
+      readError = err;
     } finally {
       reader.cancel().catch(() => {});
       if (!abort.signal.aborted && ms.readyState === "open") {
         try { ms.endOfStream(); } catch {}
       }
+    }
+
+    // If the body read failed, reset the speaking indicator immediately and
+    // re-throw so the caller's catch block can handle the error (e.g. show retry).
+    if (readError) {
+      setPlaying(false);
+      URL.revokeObjectURL(url);
+      msUrlRef.current   = null;
+      audioElRef.current = null;
+      throw readError;
     }
 
     if (abort.signal.aborted) return; // stop() already cleaned up
