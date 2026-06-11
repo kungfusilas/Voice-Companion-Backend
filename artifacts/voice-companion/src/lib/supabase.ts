@@ -25,8 +25,14 @@ function buildClient(): { client: SupabaseClient; configured: boolean } {
           storage: window.localStorage,
           persistSession: true,
           autoRefreshToken: true,
-          detectSessionInUrl: true,
-          flowType: "implicit",
+          // Disable auto-detection: AuthCallback handles the ?code= exchange
+          // explicitly. Keeping this true alongside manual exchangeCodeForSession
+          // would cause a double-exchange race (second call fails "code already used").
+          detectSessionInUrl: false,
+          // PKCE is the current standard for browser OAuth. The SDK stores the
+          // code verifier in localStorage during signInWithOAuth so it is
+          // available when AuthCallback calls exchangeCodeForSession on return.
+          flowType: "pkce",
         },
       }
     );

@@ -3,6 +3,7 @@ import { AnimatePresence } from "framer-motion";
 import { CompanionSelect } from "@/pages/CompanionSelect";
 import { ChatPage } from "@/pages/Chat";
 import { AuthPage } from "@/pages/Auth";
+import { AuthCallback } from "@/pages/AuthCallback";
 import { PricingPage } from "@/pages/Pricing";
 import { Hub } from "@/pages/Hub";
 import { getSubscriptionStatus, registerSession } from "@/lib/api";
@@ -10,7 +11,7 @@ import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "companion-select" | "chat" | "auth" | "pricing" | "hub";
+type Screen = "loading" | "companion-select" | "chat" | "auth" | "pricing" | "hub" | "callback";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -37,7 +38,9 @@ function formatPlanLabel(planKey: string): string {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("loading");
+  const [screen, setScreen] = useState<Screen>(() =>
+    new URLSearchParams(window.location.search).get("code") ? "callback" : "loading"
+  );
   const [session, setSession] = useState<Session | null>(null);
   const [persona, setPersona] = useState<Persona | null>(null);
   const [guestId, setGuestId] = useState<string | null>(null);
@@ -70,36 +73,42 @@ export default function App() {
     const existingGuestId = localStorage.getItem("bondai_guest_id");
     if (existingGuestId) setGuestId(existingGuestId);
 
-    // On load: resolve session then check subscription before deciding screen
-    supabase.auth.getSession()
-      .then(async ({ data: { session } }) => {
-        setSession(session);
-        if (session) {
-          let sid = sessionStorage.getItem("bondai_session_id");
-          if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem("bondai_session_id", sid); }
-          registerSession(sid).catch(() => {});
-          try {
-            const { tier, status, subscribedAt, billingPeriod, accessExpiresAt } = await getSubscriptionStatus();
-            setSubscriptionTier(tier);
-            setSubscriptionStatus(status);
-            setSubscribedAt(subscribedAt);
-            setBillingPeriod(billingPeriod);
-            setAccessExpiresAt(accessExpiresAt);
-          } catch {
-            // Subscription check failed — fail open (treat as unpaid, show pricing)
-          } finally {
-            setSubCheckDone(true);
+    // If this is an OAuth callback (?code= present), skip getSession — there is
+    // no session yet (the code needs to be exchanged first). AuthCallback handles
+    // the exchange; onAuthStateChange below picks up the result.
+    const oauthCode = params.get("code");
+    if (!oauthCode) {
+      // On load: resolve session then check subscription before deciding screen
+      supabase.auth.getSession()
+        .then(async ({ data: { session } }) => {
+          setSession(session);
+          if (session) {
+            let sid = sessionStorage.getItem("bondai_session_id");
+            if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem("bondai_session_id", sid); }
+            registerSession(sid).catch(() => {});
+            try {
+              const { tier, status, subscribedAt, billingPeriod, accessExpiresAt } = await getSubscriptionStatus();
+              setSubscriptionTier(tier);
+              setSubscriptionStatus(status);
+              setSubscribedAt(subscribedAt);
+              setBillingPeriod(billingPeriod);
+              setAccessExpiresAt(accessExpiresAt);
+            } catch {
+              // Subscription check failed — fail open (treat as unpaid, show pricing)
+            } finally {
+              setSubCheckDone(true);
+            }
+            setScreen("companion-select");
+          } else {
+            // Guest — go to auth if ?signin=1 was in the URL, else companion-select
+            setScreen(shouldSignIn ? "auth" : "companion-select");
           }
-          setScreen("companion-select");
-        } else {
-          // Guest — go to auth if ?signin=1 was in the URL, else companion-select
+        })
+        .catch(() => {
+          // Supabase unavailable on load — still show the app, just as guest
           setScreen(shouldSignIn ? "auth" : "companion-select");
-        }
-      })
-      .catch(() => {
-        // Supabase unavailable on load — still show the app, just as guest
-        setScreen(shouldSignIn ? "auth" : "companion-select");
-      });
+        });
+    }
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
@@ -121,8 +130,8 @@ export default function App() {
         }).catch(() => {
           setSubCheckDone(true); // fail open — effectiveScreen will show pricing
         });
-        // If on auth screen, navigate to companion-select (effectiveScreen enforces paywall)
-        setScreen((prev) => prev === "auth" || prev === "loading" ? "companion-select" : prev);
+        // Navigate to companion-select from auth, loading, or callback screens
+        setScreen((prev) => prev === "auth" || prev === "loading" || prev === "callback" ? "companion-select" : prev);
       } else {
         // Signed out — clear subscription state and session ID
         sessionStorage.removeItem("bondai_session_id");
@@ -152,6 +161,7 @@ export default function App() {
   // check covers them without any special-casing here.
   const effectiveScreen: Screen = (() => {
     if (screen === "loading") return "loading";
+    if (screen === "callback") return "callback";  // OAuth callback — always bypass paywall
     if (screen === "auth") return "auth";          // always reachable
     if (screen === "pricing") return "pricing";    // always reachable
     if (session) {
@@ -225,6 +235,20 @@ export default function App() {
           </p>
         </div>
       </div>
+    );
+  }
+
+  // ── OAuth callback — exchanges the ?code= for a session ─────────────────
+  if (effectiveScreen === "callback") {
+    return (
+      <AuthCallback
+        onSuccess={() => {
+          // onAuthStateChange fires first and transitions screen to
+          // companion-select; this is a safety fallback.
+          setScreen("companion-select");
+        }}
+        onError={() => setScreen("auth")}
+      />
     );
   }
 
