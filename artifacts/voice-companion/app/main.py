@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -167,8 +167,26 @@ async def health():
 _companion_dist = Path(os.path.dirname(__file__)).parent / "dist" / "public"
 _index_html = _companion_dist / "index.html"
 
+# Cache headers for index.html — must NEVER be cached by the browser or any
+# intermediate proxy (CDN, Safari, etc.).  Each deployment renames the
+# content-hashed JS/CSS bundles; a stale index.html from a previous build will
+# reference old hashes that no longer exist → blank white screen.
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
+def _html_response() -> FileResponse:
+    """Return index.html with headers that prevent browser/CDN caching."""
+    return FileResponse(str(_index_html), headers=_NO_CACHE_HEADERS)
+
+
 if _companion_dist.is_dir():
     # Mount /assets/ for the Vite-built JS/CSS bundles.
+    # These files are content-hashed by Vite so they can be cached indefinitely;
+    # StaticFiles serves them with its default headers (no explicit override needed).
     # Must be registered before the catch-all routes below.
     _assets_dir = _companion_dist / "assets"
     if _assets_dir.is_dir():
@@ -177,7 +195,7 @@ if _companion_dist.is_dir():
     # Serve root explicitly so the Replit liveness probe at /companion/ → / always gets 200.
     @app.get("/")
     async def _serve_root() -> FileResponse:
-        return FileResponse(str(_index_html))
+        return _html_response()
 
     # Catch-all: serve index.html for any client-side SPA route (404-fallback).
     # Resolve the candidate to an absolute path and verify it stays inside
@@ -190,9 +208,9 @@ if _companion_dist.is_dir():
         try:
             candidate = (_companion_dist / full_path).resolve()
         except Exception:
-            return FileResponse(str(_index_html))
+            return _html_response()
         if not str(candidate).startswith(str(_dist_root)):
-            return FileResponse(str(_index_html))
+            return _html_response()
         if candidate.is_file():
             return FileResponse(str(candidate))
-        return FileResponse(str(_index_html))
+        return _html_response()
