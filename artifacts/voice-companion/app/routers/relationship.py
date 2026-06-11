@@ -13,19 +13,19 @@ router = APIRouter()
 
 
 class SetTypeRequest(BaseModel):
-    user_id: str
     companion_id: str
     relationship_type: str  # romance | mentor | friendship | professional
+    # user_id intentionally omitted — derived from the verified JWT below
 
 
 @router.post("/type")
 async def set_relationship_type(
     req: SetTypeRequest,
-    _: str = Depends(verify_token),
+    user_id: str = Depends(verify_token),
 ):
-    """Save the chosen relationship type for a user+companion pair."""
+    """Save the chosen relationship type for the authenticated user+companion pair."""
     await relationship.upsert_relationship_type(
-        req.user_id, req.companion_id, req.relationship_type
+        user_id, req.companion_id, req.relationship_type
     )
     return {"ok": True}
 
@@ -34,8 +34,12 @@ async def set_relationship_type(
 async def get_relationship(
     user_id: str,
     companion_id: str,
-    _: str = Depends(verify_token),
+    auth_user_id: str = Depends(verify_token),
 ):
-    """Return the current relationship stats for a user+companion pair."""
-    stats = await relationship.get_stats(user_id, companion_id)
+    """Return the current relationship stats for the authenticated user+companion pair.
+
+    The path {user_id} is accepted for URL compatibility but the response always
+    reflects the authenticated user's data — a user can never read another user's stats.
+    """
+    stats = await relationship.get_stats(auth_user_id, companion_id)
     return stats

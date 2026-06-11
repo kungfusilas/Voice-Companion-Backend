@@ -401,16 +401,14 @@ async def stripe_webhook(request: Request):
     sig = request.headers.get("stripe-signature", "")
     secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
+    if not secret:
+        logger.error("STRIPE_WEBHOOK_SECRET is not configured — refusing to process webhook")
+        raise HTTPException(500, "Webhook secret not configured")
+
     try:
-        if secret:
-            event = await asyncio.to_thread(
-                stripe.Webhook.construct_event, payload, sig, secret
-            )
-        else:
-            logger.warning("STRIPE_WEBHOOK_SECRET not set — skipping signature verification")
-            event = stripe.Event.construct_from(
-                json.loads(payload), stripe.api_key
-            )
+        event = await asyncio.to_thread(
+            stripe.Webhook.construct_event, payload, sig, secret
+        )
     except (stripe.SignatureVerificationError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -484,6 +482,39 @@ async def stripe_webhook(request: Request):
                         billing_period="monthly",
                     )
                     logger.info("Subscription cancelled user=%s", user_id)
+
+        elif event["type"] == "customer.subscription.updated":
+            # Fires when a subscription's status changes (e.g. active → past_due,
+            # past_due → active on successful retry, or plan upgrade/downgrade).
+            customer_id = obj.get("customer")
+            stripe_status = obj.get("status", "")
+            if customer_id and stripe_status:
+                user_id = await _user_id_by_customer(customer_id)
+                if user_id:
+                    # Map Stripe status to our internal subscription_status.
+                    # "active" and "trialing" → active; anything else → past_due/inactive.
+                    if stripe_status in ("active", "trialing"):
+                        internal_status = "active"
+                    elif stripe_status == "past_due":
+                        internal_status = "past_due"
+                    else:
+                        internal_status = "inactive"
+                    await _upsert_profile(user_id, subscription_status=internal_status)
+                    logger.info(
+                        "Subscription updated user=%s stripe_status=%s internal=%s",
+                        user_id, stripe_status, internal_status,
+                    )
+
+        elif event["type"] == "invoice.payment_failed":
+            # Fires when a renewal invoice cannot be collected.  Mark the user
+            # past_due immediately so the paywall activates — Stripe will retry
+            # and fire subscription.updated → active if payment eventually succeeds.
+            customer_id = obj.get("customer")
+            if customer_id:
+                user_id = await _user_id_by_customer(customer_id)
+                if user_id:
+                    await _upsert_profile(user_id, subscription_status="past_due")
+                    logger.warning("Invoice payment failed — user=%s marked past_due", user_id)
 
     except Exception as exc:
         # Log but always return 200 — Stripe retries on any non-2xx, which would

@@ -180,9 +180,19 @@ if _companion_dist.is_dir():
         return FileResponse(str(_index_html))
 
     # Catch-all: serve index.html for any client-side SPA route (404-fallback).
+    # Resolve the candidate to an absolute path and verify it stays inside
+    # _companion_dist to prevent path-traversal (e.g. //etc/passwd tricks
+    # where pathlib's / operator would replace the base with an absolute path).
+    _dist_root = _companion_dist.resolve()
+
     @app.get("/{full_path:path}")
     async def _serve_spa(full_path: str) -> FileResponse:
-        candidate = _companion_dist / full_path
+        try:
+            candidate = (_companion_dist / full_path).resolve()
+        except Exception:
+            return FileResponse(str(_index_html))
+        if not str(candidate).startswith(str(_dist_root)):
+            return FileResponse(str(_index_html))
         if candidate.is_file():
             return FileResponse(str(candidate))
         return FileResponse(str(_index_html))

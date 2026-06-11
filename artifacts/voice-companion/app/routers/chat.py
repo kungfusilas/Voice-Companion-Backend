@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import httpx
+import urllib.parse
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -631,6 +632,8 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
     history = store.get_or_create_session(request.session_id, request.persona_id)
+    if not is_guest:
+        store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
         tier=tier,
@@ -761,6 +764,8 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
             )
 
     history = store.get_or_create_session(request.session_id, request.persona_id)
+    if not is_guest:
+        store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
         tier=tier,
@@ -788,10 +793,21 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         # Consume an extra quota unit (photos cost 2 messages)
         if not is_guest:
             await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
-        # Download image for Claude vision (signed URL is publicly accessible)
+        # Download image for Claude vision.
+        # SSRF guard: only allow HTTPS requests to our own Supabase Storage host.
+        _supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        _allowed_host = urllib.parse.urlparse(_supabase_url).netloc if _supabase_url else ""
+        _parsed_img = urllib.parse.urlparse(request.image_url)
+        _img_host = _parsed_img.netloc
+        _img_scheme = _parsed_img.scheme
+        if not _allowed_host or _img_scheme != "https" or _img_host != _allowed_host:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid image URL: must be an HTTPS Supabase Storage URL.",
+            )
         try:
             async with httpx.AsyncClient(timeout=30.0) as _http:
-                _img = await _http.get(request.image_url, follow_redirects=True)
+                _img = await _http.get(request.image_url, follow_redirects=False)
             if _img.status_code == 200:
                 photo_bytes = _img.content
                 _ct = _img.headers.get("content-type", "image/jpeg").split(";")[0].strip()
