@@ -720,28 +720,6 @@ export function ChatPage({
         />
       </div>
 
-      {/* ── Backend badge ── */}
-      <div className="flex justify-center mb-2 shrink-0">
-        <span
-          className={`text-xs px-2.5 py-0.5 rounded-full border transition ${
-            isGuest ? "cursor-default" : "cursor-pointer"
-          } ${
-            persona.nsfw_mode
-              ? "bg-red-950/40 border-red-800/40 text-red-400"
-              : romanticMode
-              ? "bg-rose-950/40 border-rose-800/40 text-rose-400"
-              : "bg-violet-950/40 border-violet-800/40 text-violet-400"
-          }`}
-          onClick={isGuest ? undefined : onChangeRelType}
-        >
-          {persona.nsfw_mode
-            ? "Venice.ai · uncensored"
-            : romanticMode
-            ? "Claude · romantic mode 🌙"
-            : "Claude · standard"}
-        </span>
-      </div>
-
       {/* ── Proactive label ── */}
       {proactiveLabel && (
         <div className="flex justify-center px-4 mb-1 shrink-0">
