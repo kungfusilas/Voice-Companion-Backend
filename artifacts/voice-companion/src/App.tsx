@@ -226,16 +226,16 @@ export default function App() {
       <div className="min-h-screen flex items-center justify-center p-6" style={BG_STYLE}>
         <div className="max-w-sm text-center space-y-4">
           <div className="text-3xl">⚙️</div>
-          <h2 className="text-white text-lg font-semibold">Supabase not configured</h2>
+          <h2 className="text-white text-lg font-semibold">Auth not configured</h2>
           <p className="text-white/50 text-sm leading-relaxed">
-            Add these two Replit secrets to finish auth setup:
+            Add these two environment secrets to finish auth setup:
           </p>
           <div className="text-left rounded-xl bg-white/05 border border-white/10 p-4 space-y-1 font-mono text-xs text-white/70">
             <div>VITE_SUPABASE_URL</div>
             <div>VITE_SUPABASE_ANON_KEY</div>
           </div>
           <p className="text-white/30 text-xs">
-            Find these in your Supabase project under Settings → API
+            Find these in your auth project settings under API keys
           </p>
         </div>
       </div>

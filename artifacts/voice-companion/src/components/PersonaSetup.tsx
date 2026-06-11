@@ -195,7 +195,7 @@ export function PersonaSetup({ onCreated }: PersonaSetupProps) {
           <p className={`text-sm font-medium ${nsfw ? "text-red-300" : "text-white/70"}`}>
             Adult mode (18+)
           </p>
-          <p className="text-xs text-white/35">Uses Venice.ai for uncensored conversations</p>
+          <p className="text-xs text-white/35">Uses advanced AI for uncensored conversations</p>
         </div>
       </div>
 
