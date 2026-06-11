@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "QqsMERIYgeLssXe1CBBV5"
+uri = "file://artifacts/voice-companion/public/app-icon-master.png"
+type = "image"
+title = "app-icon-master.png — 1024×1024 composited master"
