@@ -133,7 +133,11 @@ export default function App() {
         // Navigate to companion-select from auth, loading, or callback screens
         setScreen((prev) => prev === "auth" || prev === "loading" || prev === "callback" ? "companion-select" : prev);
       } else {
-        // Signed out — clear subscription state and session ID
+        // Signed out (or INITIAL_SESSION with no prior session).
+        // Do NOT override "callback" — the INITIAL_SESSION fires with null
+        // immediately on listener registration, before the ?code= exchange
+        // completes. Overriding "callback" here would unmount AuthCallback
+        // before exchangeCodeForSession runs, leaving the user as a guest.
         sessionStorage.removeItem("bondai_session_id");
         setPersona(null);
         setSubscriptionTier("free");
@@ -141,7 +145,7 @@ export default function App() {
         setBillingPeriod("monthly");
         setAccessExpiresAt(null);
         setSubCheckDone(false);
-        setScreen("companion-select");
+        setScreen((prev) => prev === "callback" ? prev : "companion-select");
       }
     });
 
