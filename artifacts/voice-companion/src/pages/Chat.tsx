@@ -696,7 +696,7 @@ export function ChatPage({
           )}
 
           <button
-            onClick={() => setTtsEnabled((v) => !v)}
+            onClick={() => { unlockAudio(); setTtsEnabled((v) => !v); }}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
               ttsEnabled
                 ? "border-white/20 text-white/70 bg-white/5 hover:bg-white/10"
@@ -916,7 +916,7 @@ export function ChatPage({
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
           <TextInput
-            onSend={(text) => { sendMessage(text); onMessageConsumed?.(); }}
+            onSend={(text) => { unlockAudio(); sendMessage(text); onMessageConsumed?.(); }}
             disabled={isBusy || showUpgradeCard}
             nsfw={persona.nsfw_mode}
             placeholder={inputPlaceholder}
