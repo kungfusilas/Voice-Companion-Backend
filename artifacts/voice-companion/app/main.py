@@ -89,7 +89,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="AI Voice Companion API",
     version="1.0.0",
-    root_path="/companion/",
     lifespan=lifespan,
 )
 

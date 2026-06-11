@@ -2,6 +2,11 @@
 
 # compiled output
 dist
+# Un-ignore the pre-built voice companion frontend so deployed snapshots
+# always have correct, in-sync index.html + hashed JS/CSS bundles.
+# Every Vite build is deterministic (content-hashed), so this is safe.
+!artifacts/voice-companion/dist
+!artifacts/voice-companion/dist/**
 tmp
 out-tsc
 *.tsbuildinfo
