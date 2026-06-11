@@ -182,6 +182,21 @@ def _html_response() -> FileResponse:
     return FileResponse(str(_index_html), headers=_NO_CACHE_HEADERS)
 
 
+# Inline kill-switch used as a last-resort fallback if the SW file is missing from dist.
+_SW_INLINE = """
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(keys.map(k => caches.delete(k)));
+    await clients.claim();
+    await self.registration.unregister();
+    const all = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const c of all) c.navigate(c.url);
+  })());
+});
+""".strip()
+
 if _companion_dist.is_dir():
     # Mount /assets/ for the Vite-built JS/CSS bundles.
     # These files are content-hashed by Vite so they can be cached indefinitely;
@@ -190,6 +205,32 @@ if _companion_dist.is_dir():
     _assets_dir = _companion_dist / "assets"
     if _assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="companion-assets")
+
+    # Kill-switch service workers — served with no-cache so browsers ALWAYS fetch
+    # the latest version on their SW update check, bypassing any HTTP cache layer.
+    # Both paths are covered because different builds may have registered either name.
+    _SW_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "Content-Type": "application/javascript",
+        "Service-Worker-Allowed": "/",
+    }
+
+    @app.get("/service-worker.js")
+    async def _serve_sw() -> Response:
+        sw_path = _companion_dist / "service-worker.js"
+        if sw_path.is_file():
+            return FileResponse(str(sw_path), headers=_SW_HEADERS)
+        # Fallback inline kill-switch if file is somehow missing
+        return Response(content=_SW_INLINE, media_type="application/javascript", headers=_SW_HEADERS)
+
+    @app.get("/sw.js")
+    async def _serve_sw_alt() -> Response:
+        sw_path = _companion_dist / "sw.js"
+        if sw_path.is_file():
+            return FileResponse(str(sw_path), headers=_SW_HEADERS)
+        return Response(content=_SW_INLINE, media_type="application/javascript", headers=_SW_HEADERS)
 
     # Serve root explicitly so the Replit liveness probe at /companion/ → / always gets 200.
     @app.get("/")
