@@ -146,17 +146,18 @@ export function useAudioPlayer() {
       new Promise<void>((r) => sb.addEventListener("updateend", () => r(), { once: true }));
 
     const appendChunk = (chunk: Uint8Array<ArrayBuffer>) =>
-      new Promise<void>((resolve, reject) => {
-        const onEnd = () => resolve();
-        const onErr = () => reject(new Error("SourceBuffer error"));
-        sb.addEventListener("updateend", onEnd, { once: true });
-        sb.addEventListener("error",     onErr, { once: true });
+      new Promise<void>((resolve) => {
+        // Always resolve — a bad chunk is skipped, not fatal to the whole stream.
+        const onUpdateEnd = () => { sb.removeEventListener("error",     onSbError);  resolve(); };
+        const onSbError   = () => { sb.removeEventListener("updateend", onUpdateEnd); resolve(); };
+        sb.addEventListener("updateend", onUpdateEnd, { once: true });
+        sb.addEventListener("error",     onSbError,   { once: true });
         try {
           sb.appendBuffer(chunk);
-        } catch (e) {
-          sb.removeEventListener("updateend", onEnd);
-          sb.removeEventListener("error",     onErr);
-          reject(e);
+        } catch {
+          sb.removeEventListener("updateend", onUpdateEnd);
+          sb.removeEventListener("error",     onSbError);
+          resolve(); // QuotaExceededError etc — skip chunk, keep going
         }
       });
 

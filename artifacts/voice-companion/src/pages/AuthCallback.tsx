@@ -15,6 +15,13 @@ export function AuthCallback({ onSuccess, onError }: Props) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
+    // Guard against calling onError/onSuccess after the component unmounts.
+    // Race condition: if onAuthStateChange fires an existing INITIAL_SESSION
+    // before the code exchange completes, App.tsx navigates away from "callback"
+    // and unmounts this component.  Without the flag, a delayed setTimeout(onError)
+    // would still fire 2.5 s later and bounce the already-logged-in user to auth.
+    let isMounted = true;
+
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
     const errorParam = params.get("error");
@@ -29,8 +36,8 @@ export function AuthCallback({ onSuccess, onError }: Props) {
       console.error("[AuthCallback] OAuth error from provider:", msg);
       setStatus("error");
       setErrorMsg(msg);
-      setTimeout(onError, 2500);
-      return;
+      setTimeout(() => { if (isMounted) onError(); }, 2500);
+      return () => { isMounted = false; };
     }
 
     if (!code) {
@@ -38,8 +45,8 @@ export function AuthCallback({ onSuccess, onError }: Props) {
       console.error("[AuthCallback]", msg);
       setStatus("error");
       setErrorMsg(msg);
-      setTimeout(onError, 2000);
-      return;
+      setTimeout(() => { if (isMounted) onError(); }, 2000);
+      return () => { isMounted = false; };
     }
 
     // Must pass just the raw code string — NOT window.location.search or full URL
@@ -47,6 +54,7 @@ export function AuthCallback({ onSuccess, onError }: Props) {
     supabase.auth
       .exchangeCodeForSession(code)
       .then(({ data, error }) => {
+        if (!isMounted) return; // App already navigated away — don't interfere
         if (error) {
           console.error("[AuthCallback] exchangeCodeForSession error:", {
             message: error.message,
@@ -55,7 +63,7 @@ export function AuthCallback({ onSuccess, onError }: Props) {
           });
           setStatus("error");
           setErrorMsg(error.message);
-          setTimeout(onError, 2500);
+          setTimeout(() => { if (isMounted) onError(); }, 2500);
         } else {
           console.log("[AuthCallback] exchange succeeded, user:", data.session?.user?.email);
           window.history.replaceState({}, "", "/companion/");
@@ -63,12 +71,15 @@ export function AuthCallback({ onSuccess, onError }: Props) {
         }
       })
       .catch((err: unknown) => {
+        if (!isMounted) return;
         const msg = err instanceof Error ? err.message : String(err);
         console.error("[AuthCallback] unexpected error:", msg);
         setStatus("error");
         setErrorMsg(msg);
-        setTimeout(onError, 2500);
+        setTimeout(() => { if (isMounted) onError(); }, 2500);
       });
+
+    return () => { isMounted = false; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
