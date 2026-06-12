@@ -6,7 +6,7 @@ import { AuthPage } from "@/pages/Auth";
 import { AuthCallback } from "@/pages/AuthCallback";
 import { PricingPage } from "@/pages/Pricing";
 import { Hub } from "@/pages/Hub";
-import { getSubscriptionStatus, registerSession } from "@/lib/api";
+import { getSubscriptionStatus } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
@@ -83,9 +83,9 @@ export default function App() {
         .then(async ({ data: { session } }) => {
           setSession(session);
           if (session) {
-            let sid = sessionStorage.getItem("bondai_session_id");
-            if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem("bondai_session_id", sid); }
-            registerSession(sid).catch(() => {});
+            if (!sessionStorage.getItem("bondai_session_id")) {
+              sessionStorage.setItem("bondai_session_id", crypto.randomUUID());
+            }
             try {
               const { tier, status, subscribedAt, billingPeriod, accessExpiresAt } = await getSubscriptionStatus();
               setSubscriptionTier(tier);
@@ -113,12 +113,12 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
       setSession(newSession);
       if (newSession) {
-        // Signed in — clear guest state, register session ID, fetch tier
+        // Signed in — clear guest state, ensure session ID exists, fetch tier
         setGuestId(null);
         localStorage.removeItem("bondai_guest_id");
-        let sid = sessionStorage.getItem("bondai_session_id");
-        if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem("bondai_session_id", sid); }
-        registerSession(sid).catch(() => {});
+        if (!sessionStorage.getItem("bondai_session_id")) {
+          sessionStorage.setItem("bondai_session_id", crypto.randomUUID());
+        }
         setSubCheckDone(false);
         getSubscriptionStatus().then(({ tier, status, subscribedAt, billingPeriod, accessExpiresAt }) => {
           setSubscriptionTier(tier);

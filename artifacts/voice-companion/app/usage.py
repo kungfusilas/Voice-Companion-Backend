@@ -120,14 +120,6 @@ async def _call_consume_quota(
 
 def _raise_for_quota_result(result: dict, kind_label: str) -> None:
     error = result.get("error", "")
-    if error == "session_superseded":
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "session_superseded",
-                "message": "Your account was opened on another device.",
-            },
-        )
     if error == "hourly_cap":
         raise HTTPException(
             status_code=429,
@@ -189,20 +181,8 @@ async def check_voice_quota(
 # ── Session registration ──────────────────────────────────────────────────────
 
 async def register_session(user_id: str, session_id: str) -> None:
-    """Overwrite active_session_id in profiles (call once per login)."""
-    url = _supa_url()
-    if not url:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            await client.patch(
-                f"{url}/rest/v1/profiles",
-                headers={**_supa_headers(), "Prefer": "return=minimal"},
-                params={"id": f"eq.{user_id}"},
-                json={"active_session_id": session_id},
-            )
-    except Exception:
-        pass
+    """No-op — multi-device sessions are allowed; no session enforcement."""
+    pass
 
 
 # ── Usage status ──────────────────────────────────────────────────────────────

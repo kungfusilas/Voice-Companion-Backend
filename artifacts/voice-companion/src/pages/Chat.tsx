@@ -397,8 +397,6 @@ export function ChatPage({
           setQuotaErrorDetail(e.detail as QuotaDetail);
         } else if (e.status === 429) {
           setError((e.detail as Record<string, string> | null)?.message ?? "Hourly limit reached — try again soon.");
-        } else if (e.status === 401) {
-          setError("Your account was opened on another device. Please sign in again.");
         } else {
           setError(e.message);
         }
