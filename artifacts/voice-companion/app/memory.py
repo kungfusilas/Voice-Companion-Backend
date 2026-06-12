@@ -62,21 +62,13 @@ async def embed(text: str) -> list[float]:
         return resp.json()["data"][0]["embedding"]
 
 
-async def should_remember(user_msg: str, companion_msg: str, language: str = "en") -> dict | None:
+async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
     """
     Use Claude Haiku to decide if this exchange contains something worth saving.
     Returns parsed dict with {content, type, importance} or None.
-
-    Pass `language` so the stored memory content matches the conversation language.
     """
     from app import claude  # late import — avoids circular at module level
-    from app.language import LANG_NAMES
-    lang_name = LANG_NAMES.get(language, language)
-    lang_note = (
-        f"\nIMPORTANT: Write the 'content' field in {lang_name} — the same language as the conversation."
-        if language != "en" else ""
-    )
-    prompt = _SHOULD_REMEMBER_PROMPT_BASE + lang_note
+    prompt = _SHOULD_REMEMBER_PROMPT_BASE
     try:
         turn = f"User: {user_msg}\nCompanion: {companion_msg}"
         raw = await claude.send_message(

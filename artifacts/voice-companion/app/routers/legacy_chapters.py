@@ -41,7 +41,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from app.routers.auth import verify_token
-from app import language as lang_module
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -170,10 +169,7 @@ async def _store_chapter(user_id: str, period_month: str, title: str, content: s
 
 async def _generate_chapter(user_id: str, companion_id: str) -> dict:
     """Generate an ~800-1500 word narrative chapter via claude-opus."""
-    memories, preferred_language = await asyncio.gather(
-        _fetch_month_memories(user_id, companion_id),
-        lang_module.get_preferred_language(user_id),
-    )
+    memories = await _fetch_month_memories(user_id, companion_id)
     period = _current_period()
     month_label = datetime.strptime(period, "%Y-%m").strftime("%B %Y")
 
@@ -181,12 +177,9 @@ async def _generate_chapter(user_id: str, companion_id: str) -> dict:
         # Still generate a brief reflective chapter with no source material
         memories = "(No memory excerpts recorded this month — write a brief, warm reflection on the passage of time and the value of showing up.)"
 
-    lang_name = lang_module.LANG_NAMES.get(preferred_language, preferred_language)
-    lang_note = f"\nWrite the entire chapter in {lang_name}." if preferred_language != "en" else ""
-
     prompt = f"""You are writing a monthly Legacy Chapter for a user of an AI companion app.
 This chapter is a polished first-person narrative of the user's life during {month_label},
-written entirely from the companion's perspective — warm, observant, literary.{lang_note}
+written entirely from the companion's perspective — warm, observant, literary.
 
 You have access to memory excerpts extracted from the user's conversations this month:
 

@@ -16,7 +16,7 @@ from app import future_memory_extractor
 from app import conversation_store
 from app import relationship
 from app import scoring
-from app import language as lang_module
+
 from app.companions import ROMANTIC_MODE_PROMPTS, build_system_prompt as companions_build_system_prompt
 from app.auth_middleware import verify_token_or_guest, verify_token
 from app.usage import check_message_quota
@@ -276,12 +276,12 @@ def _offer_cooldown_ok(last_offer_ts: str | None) -> bool:
 
 # ── Profile / tier fetch ──────────────────────────────────────────────────────
 
-async def _get_user_profile(user_id: str) -> tuple[str, str, str]:
-    """Return (subscription_tier, subscription_status, preferred_language) for an authenticated user."""
+async def _get_user_profile(user_id: str) -> tuple[str, str]:
+    """Return (subscription_tier, subscription_status) for an authenticated user."""
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     if not url or not key:
-        return ("free", "inactive", "en")
+        return ("free", "inactive")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
@@ -289,7 +289,7 @@ async def _get_user_profile(user_id: str) -> tuple[str, str, str]:
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
                 params={
                     "id": f"eq.{user_id}",
-                    "select": "subscription_tier,subscription_status,preferred_language",
+                    "select": "subscription_tier,subscription_status",
                     "limit": "1",
                 },
             )
@@ -298,33 +298,10 @@ async def _get_user_profile(user_id: str) -> tuple[str, str, str]:
             return (
                 row.get("subscription_tier", "free") or "free",
                 row.get("subscription_status", "inactive") or "inactive",
-                row.get("preferred_language", "en") or "en",
             )
     except Exception:
         pass
-    return ("free", "inactive", "en")
-
-
-# ── Language auto-update ──────────────────────────────────────────────────────
-
-async def _maybe_update_language(user_id: str, user_message: str, current_lang: str) -> None:
-    """
-    Fire-and-forget: update preferred_language when a language switch is detected.
-
-    Priority:
-    1. Explicit request ("speak Spanish", "habla español") → always update.
-    2. Auto-detect from script/stopwords → only update for non-English detections
-       to avoid false positives from English loanwords in other languages.
-    """
-    # Explicit switch takes highest priority (including switching back to English)
-    explicit = lang_module.detect_explicit_switch(user_message)
-    if explicit and explicit != current_lang:
-        await lang_module.set_preferred_language(user_id, explicit)
-        return
-    # Auto-detect: commit only for non-English to prevent false positives
-    detected = lang_module.detect_language(user_message)
-    if detected and detected != current_lang and detected != "en":
-        await lang_module.set_preferred_language(user_id, detected)
+    return ("free", "inactive")
 
 
 # ── Bond-stage tone tables ────────────────────────────────────────────────────
@@ -489,12 +466,14 @@ def _inject_date(prompt: str) -> str:
     return f"Today's date is {today}.\n\n{prompt}"
 
 
+_ENGLISH_INSTRUCTION = "\n\n## Language\nAlways reply in English regardless of what language the user writes in."
+
+
 async def _build_system_prompt(
     persona,
     user_id: str,
     user_message: str,
     tier: str = "free",
-    preferred_language: str = "en",
     romantic_mode: bool = False,
     onboarding_context: str | None = None,
     is_guest: bool = False,
@@ -503,7 +482,7 @@ async def _build_system_prompt(
     Build the full system prompt.
     For guests, skip Supabase calls and just use the base persona prompt.
     For authenticated users, include memories, relationship context, and drift.
-    Language-awareness block is injected for ALL tiers.
+    English-only instruction is injected for ALL tiers.
     Power users get the inline roleplay capability block.
     Paid users may receive a companion-initiated offer when an upcoming event
     is detected and the weekly cooldown has elapsed.
@@ -514,7 +493,7 @@ async def _build_system_prompt(
         prompt = _inject_date(base_prompt)
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
-        prompt += lang_module.build_language_instruction("en")
+        prompt += _ENGLISH_INSTRUCTION
         return prompt
 
     try:
@@ -553,8 +532,7 @@ async def _build_system_prompt(
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
 
-        # ── Language awareness — all tiers ────────────────────────────────────
-        prompt += lang_module.build_language_instruction(preferred_language)
+        prompt += _ENGLISH_INSTRUCTION
 
         # ── Selfie / photo capability ─────────────────────────────────────────
         tier_rank = _TIER_RANK.get(tier, 0)
@@ -614,9 +592,9 @@ async def _build_system_prompt(
 async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify_token_or_guest)):
     is_guest = user_id.startswith("guest_")
     if is_guest:
-        tier, sub_status, preferred_language = "free", "guest", "en"
+        tier, sub_status = "free", "guest"
     else:
-        tier, sub_status, preferred_language = await _get_user_profile(user_id)
+        tier, sub_status = await _get_user_profile(user_id)
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
 
@@ -637,7 +615,6 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
         tier=tier,
-        preferred_language=preferred_language,
         romantic_mode=request.romantic_mode,
         onboarding_context=request.onboarding_context,
         is_guest=is_guest,
@@ -670,9 +647,6 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
             model_backend="venice" if use_venice else "claude",
         )
 
-    # Fire-and-forget: update preferred_language if user switched languages
-    asyncio.create_task(_maybe_update_language(user_id, request.message, preferred_language))
-
     stats = await relationship.get_stats(user_id, persona.id)
     rel_type = stats.get("relationship_type") or "romance"
     old_score = stats.get("connection_score") or 50
@@ -689,7 +663,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     if is_premium:
         asyncio.create_task(
             memory_extractor.extract_and_save(
-                user_id, persona.id, request.message, reply, language=preferred_language
+                user_id, persona.id, request.message, reply
             )
         )
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
@@ -735,9 +709,9 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     """
     is_guest = user_id.startswith("guest_")
     if is_guest:
-        tier, sub_status, preferred_language = "free", "guest", "en"
+        tier, sub_status = "free", "guest"
     else:
-        tier, sub_status, preferred_language = await _get_user_profile(user_id)
+        tier, sub_status = await _get_user_profile(user_id)
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
 
@@ -769,7 +743,6 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
         tier=tier,
-        preferred_language=preferred_language,
         romantic_mode=request.romantic_mode,
         onboarding_context=request.onboarding_context,
         is_guest=is_guest,
@@ -901,17 +874,11 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     if _should_prompt_waitlist(full_text):
                         yield f"data: {json.dumps({'type': 'waitlist_prompt', 'companion_id': persona.id})}\n\n"
 
-                    # ── Language auto-update (fire-and-forget) ───────────────
-                    asyncio.create_task(
-                        _maybe_update_language(user_id, user_message, preferred_language)
-                    )
-
                     # ── Memory persistence (premium only) ───────────────────
                     if is_premium:
                         asyncio.create_task(
                             memory_extractor.extract_and_save(
                                 user_id, persona.id, user_message, full_text,
-                                language=preferred_language,
                             )
                         )
                         asyncio.create_task(
@@ -927,7 +894,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     if tier in ("power", "elite"):
                         asyncio.create_task(
                             personality_extractor.extract_and_update(
-                                user_id, user_message, full_text, language=preferred_language
+                                user_id, user_message, full_text
                             )
                         )
 

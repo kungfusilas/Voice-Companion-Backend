@@ -27,7 +27,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app.routers.auth import verify_token
 from app import store
-from app import language as lang_module
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -92,10 +91,6 @@ async def _run_analysis(
         transcript_lines.append(f"{role}: {m.content[:300]}")
     transcript = "\n".join(transcript_lines)
 
-    preferred_language = await lang_module.get_preferred_language(user_id)
-    lang_name = lang_module.LANG_NAMES.get(preferred_language, preferred_language)
-    lang_note = f"\nIMPORTANT: Write all text fields (patterns, companion_note, highlight) in {lang_name}." if preferred_language != "en" else ""
-
     prompt = f"""Analyze the behavioral patterns in this conversation transcript. 
 Focus on what the USER reveals about their communication style.
 
@@ -120,7 +115,7 @@ Rules:
 - Base counts ONLY on what is clearly present in the transcript. Use 0 if not present.
 - Patterns should be specific and behavioral, not generic.
 - Companion note should be warm and encouraging, not clinical.
-- Return ONLY valid JSON.{lang_note}"""
+- Return ONLY valid JSON."""
 
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
     msg = client.messages.create(
