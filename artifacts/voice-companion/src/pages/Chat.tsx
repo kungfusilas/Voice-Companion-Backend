@@ -57,6 +57,14 @@ function getOnboardingContext(step: number): string {
   return `[ONBOARDING Q${step + 1}/10 — KEEP IT SHORT]: Acknowledge what they just said in ONE sentence only (e.g. "Nice to meet you, [name]." / "Got it." / "That makes sense." / "I love that.") then immediately ask: "${q}" Max 2 sentences total. Save all depth and reflection for after onboarding is complete.`;
 }
 
+// Computed once at module load — Safari (macOS + iOS) returns false for audio/mpeg,
+// meaning it cannot use MediaSource Extensions for streaming MP3 playback.
+// When false, the app routes to the non-streaming /tts/speak endpoint whose
+// response is a clean, complete MP3 that Safari's strict decoder handles correctly.
+const MSE_AUDIO_MPEG =
+  typeof MediaSource !== "undefined" &&
+  MediaSource.isTypeSupported("audio/mpeg");
+
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ChatPageProps {
@@ -352,26 +360,39 @@ export function ChatPage({
               try {
                 if (firstSentenceEndIdx > 0 && firstSentencePlayP) {
                   // First sentence was already kicked off during streaming.
-                  // Fetch remaining text TTS now, concurrently while waiting for it to finish.
+                  // Fetch remaining text TTS concurrently while waiting for it to finish.
                   const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
+                  // Safari (MSE_AUDIO_MPEG=false): use the blob endpoint — produces a clean
+                  // complete MP3 that decodeAudioData accepts. Chrome: stream endpoint via MSE.
                   const remainingP = remainingSpoken
-                    ? speakTextStream(remainingSpoken, persona.id).catch((e: unknown) => {
-                        if (e instanceof ApiError && e.status === 402) {
-                          setQuotaErrorDetail(e.detail as QuotaDetail);
-                        } else {
-                          console.error("[TTS] stream failed:", e instanceof ApiError ? `HTTP ${(e as ApiError).status}` : e);
-                          setTtsRetry(fullSpoken);
-                        }
-                        return null;
-                      })
+                    ? (MSE_AUDIO_MPEG
+                        ? speakTextStream(remainingSpoken, persona.id)
+                        : speakText(remainingSpoken, persona.id)
+                      ).catch((e: unknown) => {
+                          if (e instanceof ApiError && e.status === 402) {
+                            setQuotaErrorDetail(e.detail as QuotaDetail);
+                          } else {
+                            console.error("[TTS] remainder fetch failed:", e instanceof ApiError ? `HTTP ${(e as ApiError).status}` : e);
+                            setTtsRetry(fullSpoken);
+                          }
+                          return null;
+                        })
                     : Promise.resolve(null);
                   await firstSentencePlayP;          // wait for first sentence to finish
-                  const remRes = await remainingP;
-                  if (remRes) await playStream(remRes);
+                  const remResult = await remainingP;
+                  if (remResult) {
+                    if (remResult instanceof Response) await playStream(remResult);
+                    else await playAudio(remResult as Blob);
+                  }
                 } else {
-                  // No sentence was prefetched — stream the whole reply directly
-                  const res = await speakTextStream(fullSpoken, persona.id);
-                  await playStream(res);
+                  // No sentence was prefetched — fetch the whole reply
+                  if (MSE_AUDIO_MPEG) {
+                    const res = await speakTextStream(fullSpoken, persona.id);
+                    await playStream(res);
+                  } else {
+                    const blob = await speakText(fullSpoken, persona.id);
+                    await playAudio(blob);
+                  }
                 }
               } catch (ttsErr) {
                 if (ttsErr instanceof ApiError && ttsErr.status === 402) {
@@ -466,13 +487,18 @@ export function ChatPage({
     const text = ttsRetry;
     setTtsRetry(null);
     try {
-      const res = await speakTextStream(text, persona.id);
-      await playStream(res);
+      if (MSE_AUDIO_MPEG) {
+        const res = await speakTextStream(text, persona.id);
+        await playStream(res);
+      } else {
+        const blob = await speakText(text, persona.id);
+        await playAudio(blob);
+      }
     } catch (err) {
       console.error("[TTS] retry failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
       setTtsRetry(text);
     }
-  }, [ttsRetry, persona.id, playStream]);
+  }, [ttsRetry, persona.id, playAudio, playStream]);
 
   // Romantic mode toggle handler
   const handleRomanticToggle = useCallback(() => {

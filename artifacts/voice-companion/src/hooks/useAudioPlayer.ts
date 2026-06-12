@@ -79,18 +79,24 @@ export function useAudioPlayer() {
       });
     } catch {
       if (abort.signal.aborted) return;
-      // Fallback: HTML Audio element (when AudioContext is unavailable)
+      // Fallback: HTML Audio element (when AudioContext or decodeAudioData fails)
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioElRef.current = audio;
       setPlaying(true);
       await new Promise<void>((resolve) => {
+        let safetyTimer: ReturnType<typeof setTimeout>;
         const cleanup = () => {
+          clearTimeout(safetyTimer);
           setPlaying(false);
           URL.revokeObjectURL(url);
           audioElRef.current = null;
           resolve();
         };
+        // Safety timeout: if the element neither fires ended/error nor rejects
+        // play() (can happen on iOS when autoplay is silently suppressed),
+        // clear the speaking state so the UI never gets permanently stuck.
+        safetyTimer = setTimeout(cleanup, 30_000);
         audio.onended = cleanup;
         audio.onerror = cleanup;
         audio.play().catch(cleanup);
@@ -133,12 +139,25 @@ export function useAudioPlayer() {
       }, { once: true });
     });
 
-    // Start the audio element immediately — it buffers while chunks arrive
-    audio.play().catch(() => {});
+    // Start the audio element — buffers while chunks arrive.
+    // Track rejection so we can detect autoplay blocks before reading the body.
+    let playRejected = false;
+    audio.play().catch(() => { playRejected = true; });
     setPlaying(true);
 
+    // sbReady is async (waits for sourceopen event); by then play() rejection
+    // has already propagated on the microtask queue.
     const sb = await sbReady;
     if (!sb || abort.signal.aborted) { stop(); return; }
+
+    // Autoplay was blocked — fall back to collecting the full body as a blob
+    // and decoding via AudioContext (same proven path as the first sentence).
+    if (playRejected) {
+      stop();
+      const blob = await response.blob();
+      if (!abort.signal.aborted) await play(blob);
+      return;
+    }
 
     const reader = response.body.getReader();
 
