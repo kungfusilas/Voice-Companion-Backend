@@ -51,6 +51,7 @@ export default defineConfig({
         target: "http://localhost:8001",
         rewrite: (p) => p.replace(/^\/companion/, ""),
         changeOrigin: true,
+        ws: true,
       },
     },
   },

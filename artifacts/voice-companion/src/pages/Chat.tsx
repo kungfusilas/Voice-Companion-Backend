@@ -5,6 +5,8 @@ import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon } from "lucide-react
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
+import { ConversationModeButton } from "@/components/ConversationModeButton";
+import { useConversationMode, CONV_MODE_SUPPORTED } from "@/hooks/useConversationMode";
 import { TextInput } from "@/components/TextInput";
 import { MemoriesPanel } from "@/components/MemoriesPanel";
 import { useVoiceRecorder } from "@/hooks/useVoiceRecorder";
@@ -95,6 +97,7 @@ export function ChatPage({
   const isPremium = !isGuest && ["premium", "power", "elite"].includes(subscriptionTier);
   const isPower   = !isGuest && ["power", "elite"].includes(subscriptionTier);
   const isElite   = !isGuest && subscriptionTier === "elite";
+  const isPaid    = !isGuest && subscriptionTier !== "free";
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
 
@@ -159,7 +162,34 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const busyRef = useRef(false);
-  const { playing: speaking, play: playAudio, prepare: prepareAudio, playStream, unlock: unlockAudio } = useAudioPlayer();
+  const { playing: speaking, play: playAudio, prepare: prepareAudio, playStream, stop: stopAudio, unlock: unlockAudio } = useAudioPlayer();
+
+  // ── Conversation-mode supporting refs ────────────────────────────────────────
+  // currentTtsTextRef: the text currently being spoken by TTS (for echo detection)
+  const currentTtsTextRef = useRef<string>("");
+  // convBusyRef: mirrors `busy` for the conversation hook (avoids hook-level state dep)
+  const convBusyRef = useRef(false);
+  useEffect(() => { convBusyRef.current = busy; }, [busy]);
+
+  const getToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      return session?.access_token ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const handleSilenceCheckin = useCallback(async () => {
+    try {
+      const blob = await speakText("Still there?", persona.id);
+      await playAudio(blob, "checkin");
+    } catch { /* non-fatal */ }
+  }, [persona.id, playAudio]);
+
+  const handleSilencePause = useCallback(() => {
+    setError("Conversation paused — tap the mic button to resume.");
+  }, []);
 
   // Init meter + romantic mode from DB (skip for guests)
   useEffect(() => {
@@ -365,6 +395,7 @@ export function ChatPage({
                .trim();
             const fullSpoken = cleanTTS(fullReply);
             if (fullSpoken) {
+              currentTtsTextRef.current = fullSpoken;
               try {
                 if (firstSentenceEndIdx > 0 && firstSentencePlayP) {
                   // First sentence was already kicked off during streaming.
@@ -422,6 +453,8 @@ export function ChatPage({
                   console.error("[TTS] voice failed:", ttsErr instanceof ApiError ? `HTTP ${(ttsErr as ApiError).status}` : ttsErr);
                   setTtsRetry(fullSpoken);
                 }
+              } finally {
+                currentTtsTextRef.current = "";
               }
             }
           }
@@ -649,6 +682,35 @@ export function ChatPage({
     (msg) => setError(msg),
   );
   const isBusy = busy || recorderState === "processing";
+
+  // ── Always-on conversation mode (paid tiers) ─────────────────────────────────
+  const handleConvTranscript = useCallback((text: string) => {
+    unlockAudio();
+    sendMessage(text);
+  }, [unlockAudio, sendMessage]);
+
+  const handleConvBargeIn = useCallback((companionText: string, userWords: string) => {
+    stopAudio();
+    clientLog("conv_bargein_act", {
+      companion_text: companionText.slice(0, 120),
+      user_words: userWords,
+    });
+  }, [stopAudio]);
+
+  const convMode = useConversationMode({
+    enabled: isPaid && ttsEnabled && CONV_MODE_SUPPORTED,
+    sessionId,
+    personaId: persona.id,
+    getToken,
+    isPlaying: speaking,
+    isBusyRef: convBusyRef,
+    currentTtsTextRef,
+    onTranscriptFinalized: handleConvTranscript,
+    onBargeIn: handleConvBargeIn,
+    onSilenceCheckin: handleSilenceCheckin,
+    onSilencePause: handleSilencePause,
+    onError: (msg) => setError(msg),
+  });
 
   const handleBack = useCallback(() => {
     if (isPower) {
@@ -989,14 +1051,31 @@ export function ChatPage({
           </motion.button>
         )}
 
-        <PushToTalkButton
-          state={recorderState}
-          onStart={() => { unlockAudio(); start(); }}
-          onStop={stop}
-          disabled={busy || showUpgradeCard}
-          nsfw={persona.nsfw_mode}
-          isPremium={isPremium}
-        />
+        {isPaid && ttsEnabled && CONV_MODE_SUPPORTED ? (
+          <ConversationModeButton
+            state={convMode.state}
+            interimTranscript={convMode.interimTranscript}
+            onToggle={() => {
+              if (convMode.state === "off" || convMode.state === "paused") {
+                unlockAudio();
+                void convMode.start();
+              } else {
+                convMode.stop();
+              }
+            }}
+            disabled={busy || showUpgradeCard}
+            nsfw={persona.nsfw_mode}
+          />
+        ) : (
+          <PushToTalkButton
+            state={recorderState}
+            onStart={() => { unlockAudio(); start(); }}
+            onStop={stop}
+            disabled={busy || showUpgradeCard}
+            nsfw={persona.nsfw_mode}
+            isPremium={isPremium}
+          />
+        )}
       </div>
 
       {/* ── Age Gate Modal ── */}

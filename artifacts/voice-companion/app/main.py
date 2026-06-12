@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from app.routers import chat, personas, sessions, tts, stt, memories
+from app.routers import chat, personas, sessions, tts, stt, memories, stt_ws as stt_ws_router
 from app.routers import goals as goals_router
 from app.routers import bond_score as bond_score_router
 from app.routers import hearts as hearts_router
@@ -132,6 +132,7 @@ app.include_router(personas.router,           prefix="/api/personas",           
 app.include_router(sessions.router,           prefix="/api/sessions",           tags=["sessions"])
 app.include_router(tts.router,                prefix="/api/tts",                tags=["tts"])
 app.include_router(stt.router,                prefix="/api/stt",                tags=["stt"])
+app.include_router(stt_ws_router.router,      prefix="/api/stt",                tags=["stt-stream"])
 app.include_router(memories.router,           prefix="/api/memories",           tags=["memories"])
 app.include_router(proactive_router.router,   prefix="/api/proactive-messages", tags=["proactive"])
 app.include_router(selfie_router.router,      prefix="/api/selfie",             tags=["selfie"])

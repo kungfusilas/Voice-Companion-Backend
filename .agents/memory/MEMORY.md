@@ -1,0 +1,2 @@
+- [Always-on conversation mode](conv-mode.md) — AudioWorklet+WS proxy arch; barge-in, silence guard, billing decisions
+- [Safari audio fixes](safari-audio.md) — singleton + prepEl double-buffer; WebM→MP4 mimeType fallback chain
