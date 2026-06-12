@@ -315,9 +315,18 @@ export async function fetchMemories(_user_id: string, persona_id: string): Promi
 
 // ── STT ───────────────────────────────────────────────────────────────────────
 
+/** Derive an audio file extension from a blob's mimeType for correct upload naming. */
+function _audioExt(blob: Blob): string {
+  const base = blob.type.split(";")[0].trim().toLowerCase();
+  if (base === "audio/mp4" || base === "audio/m4a" || base === "audio/aac") return "m4a";
+  if (base === "audio/ogg") return "ogg";
+  if (base === "audio/wav" || base === "audio/x-wav") return "wav";
+  return "webm"; // default / audio/webm
+}
+
 export async function transcribeAudio(blob: Blob): Promise<string> {
   const form = new FormData();
-  form.append("audio", blob, "recording.webm");
+  form.append("audio", blob, `recording.${_audioExt(blob)}`);
   const res = await apiFetch(`${BASE}/stt`, { method: "POST", body: form });
   if (!res.ok) {
     const { code, detail } = await _parseErrorBody(res);

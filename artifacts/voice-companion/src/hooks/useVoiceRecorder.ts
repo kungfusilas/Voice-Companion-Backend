@@ -3,6 +3,24 @@ import { useRef, useState, useCallback, useEffect } from "react";
 export type RecorderState = "idle" | "recording" | "processing";
 
 /**
+ * Ordered mimeType candidates for cross-browser recording.
+ * Safari only supports audio/mp4 (AAC); Chrome/Firefox support WebM.
+ * Falls through to undefined so the browser can pick its own default.
+ */
+const MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/webm",
+  "audio/mp4",
+] as const;
+
+function pickMimeType(): string | undefined {
+  for (const type of MIME_CANDIDATES) {
+    if (MediaRecorder.isTypeSupported(type)) return type;
+  }
+  return undefined; // let the browser use its own default
+}
+
+/**
  * Push-to-talk voice recorder.
  *
  * `start` and `stop` are **permanently stable** (empty dep arrays) —
@@ -56,10 +74,24 @@ export function useVoiceRecorder(
       return;
     }
 
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "audio/webm";
-    const recorder = new MediaRecorder(stream, { mimeType });
+    // Pick the best supported mimeType — undefined lets the browser decide.
+    const mimeType = pickMimeType();
+
+    let recorder: MediaRecorder;
+    try {
+      recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+    } catch (err) {
+      stream.getTracks().forEach((t) => t.stop());
+      onErrorRef.current?.(
+        "Audio recording is not supported in this browser — please try Chrome or update Safari.",
+      );
+      return;
+    }
+
+    // Resolved type: prefer the explicit candidate, then what the browser chose.
+    const resolvedType = mimeType ?? recorder.mimeType ?? "audio/webm";
     chunksRef.current = [];
 
     recorder.ondataavailable = (e) => {
@@ -68,7 +100,7 @@ export function useVoiceRecorder(
 
     recorder.onstop = () => {
       stream.getTracks().forEach((t) => t.stop());
-      const blob = new Blob(chunksRef.current, { type: mimeType });
+      const blob = new Blob(chunksRef.current, { type: resolvedType });
       _setState("processing");
       onAudioRef.current(blob);
     };
