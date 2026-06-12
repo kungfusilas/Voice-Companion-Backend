@@ -8,8 +8,8 @@ const MSE_SUPPORTED =
 
 /**
  * Minimal 46-byte WAV: 1 channel, 16-bit PCM, 44100 Hz, 1 silent sample.
- * Used to "bless" the singleton <audio> element during a user gesture so that
- * later async play() calls succeed on iOS Safari without a live gesture.
+ * Used to "bless" audio elements during a user gesture so that later async
+ * play() calls succeed on iOS Safari without a live gesture.
  */
 function _silentBlob(): Blob {
   return new Blob(
@@ -35,11 +35,17 @@ export function useAudioPlayer() {
   const ctxRef    = useRef<AudioContext | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
 
-  // Persistent singleton <audio> element — created once, kept alive, unlocked
-  // during the first user gesture via unlock(). Used as the PRIMARY playback
-  // path on non-MSE browsers (Safari / all iOS) and as fallback everywhere else.
+  // PRIMARY singleton element — blessed during gesture, reused across plays.
+  // Exclusive path on Safari/iOS; fallback on Chrome/Firefox.
   const singletonElRef      = useRef<HTMLAudioElement | null>(null);
   const singletonBlobUrlRef = useRef<string | null>(null);
+
+  // PRE-BUFFER element — a second blessed element used exclusively for
+  // pre-loading leg 2 audio WHILE leg 1 is still playing on the singleton.
+  // Eliminates browser-side MP3 buffering from the inter-sentence gap.
+  const prepElRef      = useRef<HTMLAudioElement | null>(null);
+  const prepBlobUrlRef = useRef<string | null>(null);
+  const prepBlobRef    = useRef<Blob | null>(null);
 
   // MSE streaming path (Chrome / Firefox)
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -68,6 +74,16 @@ export function useAudioPlayer() {
     return singletonElRef.current;
   }, []);
 
+  /** Return the pre-buffer element, creating it on first call. */
+  const _prepEl = useCallback((): HTMLAudioElement => {
+    if (!prepElRef.current) {
+      const el = new Audio();
+      el.preload = "auto";
+      prepElRef.current = el;
+    }
+    return prepElRef.current;
+  }, []);
+
   // ── stop ──────────────────────────────────────────────────────────────────
 
   const stop = useCallback(() => {
@@ -88,6 +104,19 @@ export function useAudioPlayer() {
         singletonBlobUrlRef.current = null;
       }
       try { singleton.src = ""; } catch {}
+    }
+
+    // Clear pre-buffer state
+    if (prepBlobUrlRef.current) {
+      URL.revokeObjectURL(prepBlobUrlRef.current);
+      prepBlobUrlRef.current = null;
+    }
+    prepBlobRef.current = null;
+    const prepEl = prepElRef.current;
+    if (prepEl) {
+      prepEl.onended = null;
+      prepEl.onerror = null;
+      try { prepEl.pause(); prepEl.src = ""; } catch {}
     }
 
     // MSE path cleanup
@@ -181,15 +210,145 @@ export function useAudioPlayer() {
     [_singleton],
   );
 
+  // ── _playPrepEl ───────────────────────────────────────────────────────────
+
+  /**
+   * Internal: play using the pre-buffer element (already has src set + load()
+   * called). The browser has been buffering the MP3 while leg 1 played, so
+   * this starts with near-zero latency.
+   *
+   * Falls back to _playSingleton if the pre-buffer element is unavailable or
+   * its play() call is rejected.
+   */
+  const _playPrepEl = useCallback(
+    async (blob: Blob, abortSignal: AbortSignal, logLabel: string): Promise<void> => {
+      if (abortSignal.aborted) return;
+
+      const el  = prepElRef.current;
+      const url = prepBlobUrlRef.current;
+
+      // Guard: if prep state is gone, fall back to singleton
+      if (!el || !url) {
+        clientLog("tts_prepel_miss", { label: logLabel });
+        await _playSingleton(blob, abortSignal, logLabel);
+        return;
+      }
+
+      // Clear prep refs now — stop() won't double-revoke
+      prepBlobRef.current    = null;
+      prepBlobUrlRef.current = null;
+
+      setPlaying(true);
+
+      await new Promise<void>((resolve) => {
+        if (abortSignal.aborted) { URL.revokeObjectURL(url); resolve(); return; }
+
+        let safetyTimer: ReturnType<typeof setTimeout>;
+        let settled = false;
+
+        const cleanup = (reason: string) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(safetyTimer);
+          el.onended = null;
+          el.onerror = null;
+          abortSignal.removeEventListener("abort", onAbort);
+          setPlaying(false);
+          URL.revokeObjectURL(url);
+          try { el.src = ""; } catch {}
+          clientLog("tts_el_done", { label: logLabel, reason });
+          resolve();
+        };
+
+        const onAbort = () => cleanup("aborted");
+
+        safetyTimer = setTimeout(() => cleanup("timeout"), 120_000);
+        el.onended = () => cleanup("ended");
+        el.onerror = () => {
+          clientLog("tts_el_error", {
+            label: logLabel,
+            code: String(el.error?.code ?? -1),
+          });
+          // prepEl error → fall back to singleton
+          settled = true;
+          clearTimeout(safetyTimer);
+          el.onended = null;
+          el.onerror = null;
+          abortSignal.removeEventListener("abort", onAbort);
+          URL.revokeObjectURL(url);
+          try { el.src = ""; } catch {}
+          setPlaying(false);
+          _playSingleton(blob, abortSignal, `${logLabel}_fb`).then(resolve).catch(() => resolve());
+        };
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+
+        el.play()
+          .then(() => { clientLog("tts_el_play_ok", { label: logLabel }); })
+          .catch((err: unknown) => {
+            const name = err instanceof Error ? err.name : String(err);
+            clientLog("tts_el_play_rejected", { label: logLabel, errorName: name });
+            // play() rejected — fall back to singleton
+            settled = true;
+            clearTimeout(safetyTimer);
+            el.onended = null;
+            el.onerror = null;
+            abortSignal.removeEventListener("abort", onAbort);
+            URL.revokeObjectURL(url);
+            try { el.src = ""; } catch {}
+            setPlaying(false);
+            _playSingleton(blob, abortSignal, `${logLabel}_fb`).then(resolve).catch(() => resolve());
+          });
+      });
+    },
+    [_playSingleton],
+  );
+
+  // ── prepare ───────────────────────────────────────────────────────────────
+
+  /**
+   * Pre-buffer a blob on the second blessed element so that the subsequent
+   * play() call starts with near-zero latency.
+   *
+   * Call this as soon as the bytes land — even while another track is playing.
+   * The browser will buffer the MP3 in parallel. By the time the current track
+   * ends and play() is called, playback starts on the "ended" event with no
+   * fetch/decode work remaining.
+   *
+   * Only effective on non-MSE browsers (Safari / iOS). On MSE-capable browsers
+   * the stream path is used instead and buffering is already incremental.
+   */
+  const prepare = useCallback((blob: Blob, logLabel: string): void => {
+    if (MSE_SUPPORTED) return; // Chrome/Firefox use the stream path — no-op
+
+    // Revoke any stale pre-buffer URL
+    if (prepBlobUrlRef.current) {
+      URL.revokeObjectURL(prepBlobUrlRef.current);
+      prepBlobUrlRef.current = null;
+    }
+    prepBlobRef.current = null;
+
+    const url = URL.createObjectURL(blob);
+    prepBlobUrlRef.current = url;
+    prepBlobRef.current    = blob;
+
+    const prepEl = _prepEl();
+    prepEl.onended = null;
+    prepEl.onerror = null;
+    prepEl.src = url;
+    prepEl.load(); // browser starts buffering the MP3 now, in the background
+
+    clientLog("tts_prepare", { label: logLabel, bytes: blob.size });
+  }, [_prepEl]);
+
   // ── play ──────────────────────────────────────────────────────────────────
 
   /**
    * Play a pre-downloaded audio blob.
    *
    * Non-MSE browsers (Safari / all iOS):
-   *   Uses the persistent singleton element exclusively — the canonical iOS
-   *   Safari pattern. The element is "blessed" by unlock() during a user
-   *   gesture so that later async play() calls succeed.
+   *   If prepare() was called with this same blob earlier, uses the pre-buffer
+   *   element (already loaded → near-zero latency). Otherwise falls back to
+   *   the persistent singleton element with a fresh load().
    *
    * MSE-capable browsers (Chrome / Firefox):
    *   Tries WebAudio / AudioContext first (lower latency, gapless).
@@ -203,9 +362,15 @@ export function useAudioPlayer() {
       const abort = new AbortController();
       abortRef.current = abort;
 
-      // ── Non-MSE (Safari / iOS): singleton element is the exclusive path ──
+      // ── Non-MSE (Safari / iOS) ───────────────────────────────────────────
       if (!MSE_SUPPORTED) {
-        await _playSingleton(blob, abort.signal, logLabel);
+        // Use pre-buffer element if this exact blob was prepared
+        if (prepBlobRef.current === blob && prepElRef.current && prepBlobUrlRef.current) {
+          clientLog("tts_prepel_hit", { label: logLabel });
+          await _playPrepEl(blob, abort.signal, logLabel);
+        } else {
+          await _playSingleton(blob, abort.signal, logLabel);
+        }
         return;
       }
 
@@ -274,7 +439,7 @@ export function useAudioPlayer() {
         await _playSingleton(blob, abort.signal, `${logLabel}_fb`);
       }
     },
-    [_ctx, _playSingleton, stop],
+    [_ctx, _playPrepEl, _playSingleton, stop],
   );
 
   // ── playStream ────────────────────────────────────────────────────────────
@@ -407,33 +572,37 @@ export function useAudioPlayer() {
 
   /**
    * Call synchronously inside a user-gesture handler (onClick / onPointerDown)
-   * to prime both the AudioContext and the singleton element.
+   * to prime both the AudioContext and both audio elements.
    *
    * iOS Safari requires audio to originate within a user gesture. Playing a
-   * tiny silent WAV on the singleton element during the gesture "blesses" it
-   * so that future async play() calls succeed even without another gesture.
+   * tiny silent WAV on each element during the gesture "blesses" them so that
+   * all future async play() calls on those elements succeed.
    */
   const unlock = useCallback(() => {
     // 1. Resume AudioContext within the gesture window
     const ctx = _ctx();
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
 
-    // 2. Bless the singleton: play a tiny silent WAV, then immediately pause.
-    //    This marks the element as user-approved for all future src-swap + play() calls.
-    const singleton = _singleton();
-    const silentUrl = URL.createObjectURL(_silentBlob());
-    singleton.muted = true;
-    singleton.src   = silentUrl;
-    singleton
-      .play()
-      .then(() => { singleton.pause(); })
-      .catch(() => {})
-      .finally(() => {
-        singleton.muted = false;
-        try { singleton.src = ""; } catch {}
-        URL.revokeObjectURL(silentUrl);
-      });
-  }, [_ctx, _singleton]);
+    const blessEl = (el: HTMLAudioElement) => {
+      const silentUrl = URL.createObjectURL(_silentBlob());
+      el.muted = true;
+      el.src   = silentUrl;
+      el
+        .play()
+        .then(() => { el.pause(); })
+        .catch(() => {})
+        .finally(() => {
+          el.muted = false;
+          try { el.src = ""; } catch {}
+          URL.revokeObjectURL(silentUrl);
+        });
+    };
 
-  return { playing, play, playStream, stop, unlock };
+    // 2. Bless both elements — silent WAV play marks them as user-approved
+    //    for all future src-swap + play() calls, even from async contexts.
+    blessEl(_singleton());
+    blessEl(_prepEl());
+  }, [_ctx, _singleton, _prepEl]);
+
+  return { playing, play, prepare, playStream, stop, unlock };
 }

@@ -159,7 +159,7 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const busyRef = useRef(false);
-  const { playing: speaking, play: playAudio, playStream, unlock: unlockAudio } = useAudioPlayer();
+  const { playing: speaking, play: playAudio, prepare: prepareAudio, playStream, unlock: unlockAudio } = useAudioPlayer();
 
   // Init meter + romantic mode from DB (skip for guests)
   useEffect(() => {
@@ -380,6 +380,10 @@ export function ChatPage({
                         ? speakTextStream(remainingSpoken, persona.id)
                         : speakText(remainingSpoken, persona.id).then((b) => {
                             clientLog("tts_fetch_ok", { leg: 2, bytes: b.size });
+                            // Pre-buffer on the second blessed element immediately —
+                            // browser starts loading the MP3 while leg 1 is still
+                            // playing, so play() starts with near-zero latency.
+                            prepareAudio(b, "leg2_prep");
                             return b;
                           })
                       ).catch((e: unknown) => {
