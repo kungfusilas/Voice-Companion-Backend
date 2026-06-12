@@ -31,6 +31,7 @@ from app.routers import reports as reports_router
 from app.routers import usage as usage_router
 from app.routers import legacy_chapters as legacy_chapters_router
 from app.routers import photo as photo_router
+from app.routers import client_log as client_log_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -153,6 +154,7 @@ app.include_router(reports_router.router,      prefix="/api/reports/weekly",    
 app.include_router(usage_router.router,        prefix="/api",                     tags=["usage"])
 app.include_router(legacy_chapters_router.router, prefix="/api/legacy-chapters",   tags=["legacy-chapters"])
 app.include_router(photo_router.router,           prefix="/api/photo",               tags=["photo"])
+app.include_router(client_log_router.router,      prefix="/api",                     tags=["diagnostics"])
 
 
 @app.get("/api/healthz")

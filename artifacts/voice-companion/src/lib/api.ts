@@ -358,6 +358,21 @@ export async function speakTextStream(text: string, persona_id: string): Promise
   return res;
 }
 
+// ── Client diagnostics ────────────────────────────────────────────────────────
+
+/**
+ * Fire-and-forget: POST a structured log entry to the server so TTS pipeline
+ * failures (AudioContext state, decode errors, play() rejections) are visible
+ * in server logs with zero user effort. Silently dropped on auth/network failure.
+ */
+export function clientLog(event: string, data: Record<string, unknown> = {}): void {
+  apiFetch(`${BASE}/client-log`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event, data }),
+  }).catch(() => {});
+}
+
 // ── Usage ─────────────────────────────────────────────────────────────────────
 
 export async function getUsageStatus(): Promise<UsageStatus> {

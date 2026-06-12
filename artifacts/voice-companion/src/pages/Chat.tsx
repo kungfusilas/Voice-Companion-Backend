@@ -25,6 +25,7 @@ import {
   requestWowMoment,
   ApiError,
   getUsageStatus,
+  clientLog,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
@@ -280,13 +281,20 @@ export function ChatPage({
                 .replace(/\s+/g, " ")
                 .trim();
               if (cleanFirst) {
-                firstSentenceAudioP = speakText(cleanFirst, persona.id).catch((err: unknown) => {
-                  console.error("[TTS] prefetch failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
-                  return null;
-                });
+                clientLog("tts_fetch", { leg: 1, chars: cleanFirst.length });
+                firstSentenceAudioP = speakText(cleanFirst, persona.id)
+                  .then((blob) => {
+                    clientLog("tts_fetch_ok", { leg: 1, bytes: blob.size });
+                    return blob;
+                  })
+                  .catch((err: unknown) => {
+                    clientLog("tts_fetch_fail", { leg: 1, status: err instanceof ApiError ? (err as ApiError).status : -1 });
+                    console.error("[TTS] prefetch failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
+                    return null;
+                  });
                 // Play immediately when audio is ready — concurrent with ongoing stream
                 firstSentencePlayP = firstSentenceAudioP
-                  .then(async (blob) => { if (blob) await playAudio(blob); })
+                  .then(async (blob) => { if (blob) await playAudio(blob, "leg1"); })
                   .catch(() => {});
               }
             }
@@ -364,11 +372,18 @@ export function ChatPage({
                   const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
                   // Safari (MSE_AUDIO_MPEG=false): use the blob endpoint — produces a clean
                   // complete MP3 that decodeAudioData accepts. Chrome: stream endpoint via MSE.
+                  if (!MSE_AUDIO_MPEG && remainingSpoken) {
+                    clientLog("tts_fetch", { leg: 2, chars: remainingSpoken.length });
+                  }
                   const remainingP = remainingSpoken
                     ? (MSE_AUDIO_MPEG
                         ? speakTextStream(remainingSpoken, persona.id)
-                        : speakText(remainingSpoken, persona.id)
+                        : speakText(remainingSpoken, persona.id).then((b) => {
+                            clientLog("tts_fetch_ok", { leg: 2, bytes: b.size });
+                            return b;
+                          })
                       ).catch((e: unknown) => {
+                          clientLog("tts_fetch_fail", { leg: 2, status: e instanceof ApiError ? (e as ApiError).status : -1 });
                           if (e instanceof ApiError && e.status === 402) {
                             setQuotaErrorDetail(e.detail as QuotaDetail);
                           } else {
@@ -382,7 +397,7 @@ export function ChatPage({
                   const remResult = await remainingP;
                   if (remResult) {
                     if (remResult instanceof Response) await playStream(remResult);
-                    else await playAudio(remResult as Blob);
+                    else await playAudio(remResult as Blob, "leg2");
                   }
                 } else {
                   // No sentence was prefetched — fetch the whole reply
@@ -390,8 +405,10 @@ export function ChatPage({
                     const res = await speakTextStream(fullSpoken, persona.id);
                     await playStream(res);
                   } else {
+                    clientLog("tts_fetch", { leg: "full", chars: fullSpoken.length });
                     const blob = await speakText(fullSpoken, persona.id);
-                    await playAudio(blob);
+                    clientLog("tts_fetch_ok", { leg: "full", bytes: blob.size });
+                    await playAudio(blob, "full");
                   }
                 }
               } catch (ttsErr) {
@@ -491,8 +508,10 @@ export function ChatPage({
         const res = await speakTextStream(text, persona.id);
         await playStream(res);
       } else {
+        clientLog("tts_fetch", { leg: "retry", chars: text.length });
         const blob = await speakText(text, persona.id);
-        await playAudio(blob);
+        clientLog("tts_fetch_ok", { leg: "retry", bytes: blob.size });
+        await playAudio(blob, "retry");
       }
     } catch (err) {
       console.error("[TTS] retry failed:", err instanceof ApiError ? `HTTP ${(err as ApiError).status}` : err);
