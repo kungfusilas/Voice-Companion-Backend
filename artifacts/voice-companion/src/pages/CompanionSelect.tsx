@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { Sparkles, LogOut, LayoutGrid } from "lucide-react";
 import type { Persona } from "@/lib/api";
+import { PromoVideo } from "@/components/PromoVideo";
 
 interface CompanionConfig {
   id: string;
@@ -138,6 +139,9 @@ export function CompanionSelect({ onSelect, onSignOut, onSignIn, onUpgrade, onHu
           Who do you want to<br />talk to today?
         </h1>
       </div>
+
+      {/* Promo video */}
+      <PromoVideo />
 
       {/* Companion grid */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
