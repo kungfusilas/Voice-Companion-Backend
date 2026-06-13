@@ -502,6 +502,55 @@
       transition: opacity 0.6s ease, transform 0.6s ease;
     }
     .fade-in.visible { opacity: 1; transform: none; }
+
+    /* ── Promo video ── */
+    .promo-video-section {
+      padding: 60px 0 80px;
+    }
+    .promo-video-inner {
+      text-align: center;
+    }
+    .promo-video-inner .section-label {
+      justify-content: center;
+      margin-bottom: 20px;
+    }
+    .promo-video-wrap {
+      position: relative;
+      max-width: 720px;
+      margin: 0 auto;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #0d0a1a;
+      border: 1px solid rgba(124,92,191,0.25);
+      box-shadow: 0 8px 48px rgba(124,92,191,0.18);
+      aspect-ratio: 16 / 9;
+      cursor: pointer;
+    }
+    .promo-video-wrap video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+    .promo-play-btn {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.35);
+      border: none; cursor: pointer;
+      transition: background 0.2s;
+    }
+    .promo-play-btn:hover { background: rgba(0,0,0,0.25); }
+    .promo-play-icon {
+      display: flex; align-items: center; justify-content: center;
+      width: 68px; height: 68px; border-radius: 50%;
+      background: linear-gradient(135deg, #7c5cbf, #6b4cb0);
+      box-shadow: 0 4px 32px rgba(124,92,191,0.55);
+      transition: transform 0.15s;
+    }
+    .promo-play-icon svg { margin-left: 4px; }
+    .promo-play-btn:hover .promo-play-icon { transform: scale(1.08); }
+    .promo-play-btn:active .promo-play-icon { transform: scale(0.95); }
+    .promo-play-btn.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -543,6 +592,30 @@
     </div>
 
     <p class="hero-note">Free to start · Basic from $12.99/mo · Cancel anytime</p>
+  </section>
+
+  <!-- ── PROMO VIDEO ── -->
+  <section class="promo-video-section">
+    <div class="container">
+      <div class="promo-video-inner fade-in">
+        <div class="section-label">See LegacyBond in action</div>
+        <div class="promo-video-wrap" id="promoVideoWrap">
+          <video
+            id="promoVideo"
+            src="https://kyeqlkqbhwaiwwnvjrtt.supabase.co/storage/v1/object/public/marketing/Legacy%20Bond%20Commerical%20(1).mp4"
+            preload="metadata"
+            playsinline
+          ></video>
+          <button class="promo-play-btn" id="promoPlayBtn" aria-label="Play promo video">
+            <span class="promo-play-icon">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28">
+                <path d="M6 4.5L19.5 12L6 19.5V4.5Z" fill="white"/>
+              </svg>
+            </span>
+          </button>
+        </div>
+      </div>
+    </div>
   </section>
 
   <!-- ── HOW IT WORKS ── -->
@@ -805,6 +878,31 @@
       });
     }, { threshold: 0.12 });
     document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+
+    // Promo video — click to play with sound
+    const promoVideo = document.getElementById('promoVideo');
+    const promoPlayBtn = document.getElementById('promoPlayBtn');
+    if (promoVideo && promoPlayBtn) {
+      promoPlayBtn.addEventListener('click', () => {
+        promoVideo.muted = false;
+        promoVideo.controls = true;
+        promoVideo.play().then(() => {
+          promoPlayBtn.classList.add('hidden');
+        }).catch(() => {
+          // Fallback: try muted if browser blocks unmuted autoplay
+          promoVideo.muted = true;
+          promoVideo.play().then(() => {
+            promoPlayBtn.classList.add('hidden');
+          }).catch(() => {});
+        });
+      });
+      promoVideo.addEventListener('ended', () => {
+        promoPlayBtn.classList.remove('hidden');
+      });
+      promoVideo.addEventListener('pause', () => {
+        if (promoVideo.ended) promoPlayBtn.classList.remove('hidden');
+      });
+    }
   </script>
 </body>
 </html>
