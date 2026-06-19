@@ -15,15 +15,6 @@ interface CompanionConfig {
 
 const COMPANIONS: CompanionConfig[] = [
   {
-    id: "companion-aria",
-    name: "Aria",
-    tagline: "Bubbly & a little extra",
-    traits: ["bubbly", "energetic", "fun"],
-    glow: "rgba(244,114,182,0.25)",
-    border: "rgba(244,114,182,0.3)",
-    avatar: "/companion/avatars/aria.jpg",
-  },
-  {
     id: "companion-aeva",
     name: "Aeva",
     tagline: "Confident & a little possessive",
@@ -31,15 +22,6 @@ const COMPANIONS: CompanionConfig[] = [
     glow: "rgba(167,139,250,0.25)",
     border: "rgba(167,139,250,0.3)",
     avatar: "/companion/avatars/aeva.jpg",
-  },
-  {
-    id: "companion-ember",
-    name: "Ember",
-    tagline: "Warm & nurturing",
-    traits: ["caring", "empathetic", "genuine"],
-    glow: "rgba(251,191,36,0.2)",
-    border: "rgba(251,191,36,0.3)",
-    avatar: "/companion/avatars/ember.jpg",
   },
   {
     id: "companion-kai",
