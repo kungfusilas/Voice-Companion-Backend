@@ -8,6 +8,7 @@ Extraction: Claude Haiku decides what's worth saving
 import os
 import json
 import asyncio
+from datetime import datetime, timezone
 import httpx
 from supabase import create_client, Client
 
@@ -178,8 +179,17 @@ async def retrieve_memories(
     top_k: int = 5,
 ) -> list[dict]:
     """
-    Find the top_k most semantically similar memories via cosine similarity.
-    Updates access stats fire-and-forget. Returns [] on any error.
+    Find the top_k most semantically similar memories via cosine similarity,
+    then rerank using a composite salience formula:
+
+        final_score = (0.50 * cosine_similarity)
+                    + (0.25 * emotional_intensity)
+                    + (0.15 * recurrence_signal)
+                    + (0.10 * recency_weight)
+
+    Results are re-sorted by final_score descending before returning.
+    retrieval_count and last_retrieved are updated fire-and-forget.
+    Returns [] on any error.
     """
     try:
         query_embedding = await embed(query_text)
@@ -192,23 +202,119 @@ async def retrieve_memories(
         }).execute()
         memories: list[dict] = result.data or []
         print(f"[memory] retrieve_memories: user={user_id} companion={companion_id} found={len(memories)} memories")
-        if memories:
-            ids = [m["id"] for m in memories if m.get("id")]
-            if ids:
-                asyncio.create_task(_update_access_stats(ids))
+
+        if not memories:
+            return memories
+
+        # ── Fetch salience + retrieval fields for reranking ───────────────
+        ids = [m["id"] for m in memories if m.get("id")]
+        extra = await _fetch_salience_fields(ids)
+
+        # ── Reranking formula ─────────────────────────────────────────────
+        now_utc = datetime.now(timezone.utc)
+        for m in memories:
+            mid = m.get("id", "")
+            ex = extra.get(mid, {})
+
+            cosine_sim = float(m.get("similarity", 0.0))
+
+            sal = ex.get("salience") or {}
+            if isinstance(sal, str):
+                try:
+                    sal = json.loads(sal)
+                except Exception:
+                    sal = {}
+            emotional_intensity = max(0.0, min(1.0, float(sal.get("emotional_intensity", 0.5))))
+
+            retrieval_count = int(ex.get("retrieval_count") or 0)
+            recurrence_signal = min(retrieval_count / 10.0, 1.0)
+
+            last_retrieved_raw = ex.get("last_retrieved")
+            if last_retrieved_raw:
+                try:
+                    lr = datetime.fromisoformat(last_retrieved_raw.replace("Z", "+00:00"))
+                    delta_days = (now_utc - lr).days
+                    recency_weight = 1.0 if delta_days <= 7 else (0.5 if delta_days <= 30 else 0.0)
+                except Exception:
+                    recency_weight = 0.0
+            else:
+                recency_weight = 0.0
+
+            m["final_score"] = (
+                0.50 * cosine_sim
+                + 0.25 * emotional_intensity
+                + 0.15 * recurrence_signal
+                + 0.10 * recency_weight
+            )
+
+        memories.sort(key=lambda m: m.get("final_score", 0.0), reverse=True)
+
+        # ── Update retrieval stats fire-and-forget ────────────────────────
+        if ids:
+            asyncio.create_task(_update_retrieval_stats(ids, extra))
+
         return memories
+
     except Exception as exc:
         print(f"[memory] retrieve_memories EXCEPTION: {exc!r}")
         return []
 
 
-async def _update_access_stats(memory_ids: list[str]) -> None:
-    """Increment access_count and refresh last_accessed_at for retrieved memories."""
+async def _fetch_salience_fields(ids: list[str]) -> dict[str, dict]:
+    """
+    Batch-fetch salience, retrieval_count, last_retrieved for a list of memory IDs.
+    Returns a dict keyed by id. Returns {} on any error (reranking falls back to defaults).
+    """
+    if not ids:
+        return {}
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    ids_param = "(" + ",".join(ids) + ")"
     try:
-        client = _get_client()
-        client.rpc("increment_memory_access", {"memory_ids": memory_ids}).execute()
-    except Exception:
-        pass
+        async with httpx.AsyncClient(timeout=8.0) as http:
+            resp = await http.get(
+                f"{supabase_url}/rest/v1/memories",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                params={
+                    "id": f"in.{ids_param}",
+                    "select": "id,salience,retrieval_count,last_retrieved",
+                },
+            )
+        if resp.status_code == 200:
+            return {row["id"]: row for row in resp.json()}
+        print(f"[memory] _fetch_salience_fields HTTP {resp.status_code}: {resp.text[:200]}")
+    except Exception as exc:
+        print(f"[memory] _fetch_salience_fields EXCEPTION: {exc!r}")
+    return {}
+
+
+async def _update_retrieval_stats(ids: list[str], extra: dict[str, dict]) -> None:
+    """
+    Increment retrieval_count and set last_retrieved = now() for each memory.
+    Uses current counts from `extra` to compute the new value without a race-prone RPC.
+    Fire-and-forget — errors are logged and never propagate.
+    """
+    supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    headers = {
+        "Authorization": f"Bearer {service_key}",
+        "apikey": service_key,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        for mid in ids:
+            current_count = int((extra.get(mid) or {}).get("retrieval_count") or 0)
+            try:
+                await http.patch(
+                    f"{supabase_url}/rest/v1/memories",
+                    headers=headers,
+                    params={"id": f"eq.{mid}"},
+                    json={"retrieval_count": current_count + 1, "last_retrieved": now_iso},
+                )
+            except Exception as exc:
+                print(f"[memory] _update_retrieval_stats EXCEPTION id={mid}: {exc!r}")
 
 
 async def fetch_memories(user_id: str, persona_id: str, limit: int = 10) -> list[dict]:
