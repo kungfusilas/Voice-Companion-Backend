@@ -87,9 +87,13 @@ async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
             cleaned = cleaned.strip()
         result = json.loads(cleaned)
         if not result.get("should_save"):
+            print(f"[memory] should_remember: not worth saving for exchange: {turn[:80]!r}")
             return None
+        print(f"[memory] should_remember: SAVING — type={result.get('type')} importance={result.get('importance')} content={result.get('content','')[:80]!r}")
         return result
-    except Exception:
+    except Exception as exc:
+        raw_preview = repr(raw) if "raw" in dir() else "n/a"
+        print(f"[memory] should_remember ERROR: {exc!r} | raw response: {raw_preview}")
         return None
 
 
@@ -118,6 +122,7 @@ async def save_memory(
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS life_event        boolean DEFAULT false;
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS topic             text;
     """
+    print(f"[memory] save_memory: user={user_id} companion={companion_id} type={memory_type} importance={importance} content={content[:80]!r}")
     try:
         embedding = await embed(content)
         # PostgreSQL vector literal expected by pgvector: "[x,y,z,...]"
@@ -157,9 +162,12 @@ async def save_memory(
             )
             if resp.status_code in (200, 201):
                 rows = resp.json()
+                print(f"[memory] save_memory: OK — row saved, id={rows[0].get('id') if rows else 'n/a'}")
                 return rows[0] if rows else {}
+            print(f"[memory] save_memory ERROR: HTTP {resp.status_code} — {resp.text[:300]}")
             return {}
-    except Exception:
+    except Exception as exc:
+        print(f"[memory] save_memory EXCEPTION: {exc!r}")
         return {}
 
 
@@ -183,12 +191,14 @@ async def retrieve_memories(
             "match_count": top_k,
         }).execute()
         memories: list[dict] = result.data or []
+        print(f"[memory] retrieve_memories: user={user_id} companion={companion_id} found={len(memories)} memories")
         if memories:
             ids = [m["id"] for m in memories if m.get("id")]
             if ids:
                 asyncio.create_task(_update_access_stats(ids))
         return memories
-    except Exception:
+    except Exception as exc:
+        print(f"[memory] retrieve_memories EXCEPTION: {exc!r}")
         return []
 
 

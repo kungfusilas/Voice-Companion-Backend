@@ -660,12 +660,11 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
             persona.name, companions_build_system_prompt(persona), new_stage_name, rel_type
         )
 
-    if is_premium:
-        asyncio.create_task(
-            memory_extractor.extract_and_save(
-                user_id, persona.id, request.message, reply
-            )
+    asyncio.create_task(
+        memory_extractor.extract_and_save(
+            user_id, persona.id, request.message, reply
         )
+    )
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
 
     _hist = store.get_history(request.session_id)
@@ -874,16 +873,16 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     if _should_prompt_waitlist(full_text):
                         yield f"data: {json.dumps({'type': 'waitlist_prompt', 'companion_id': persona.id})}\n\n"
 
-                    # ── Memory persistence (premium only) ───────────────────
+                    # ── Memory persistence (all users) ──────────────────────
+                    asyncio.create_task(
+                        memory_extractor.extract_and_save(
+                            user_id, persona.id, user_message, full_text,
+                        )
+                    )
+                    asyncio.create_task(
+                        future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
+                    )
                     if is_premium:
-                        asyncio.create_task(
-                            memory_extractor.extract_and_save(
-                                user_id, persona.id, user_message, full_text,
-                            )
-                        )
-                        asyncio.create_task(
-                            future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
-                        )
                         asyncio.create_task(
                             conversation_store.save_exchange(
                                 user_id, persona.id, request.session_id, user_message, full_text

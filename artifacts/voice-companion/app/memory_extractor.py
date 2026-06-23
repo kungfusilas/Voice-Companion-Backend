@@ -19,8 +19,9 @@ async def extract_and_save(
     """
     Fire-and-forget: ask Haiku whether this exchange is worth remembering.
     If yes, embed the content with legacy tags and persist to pgvector.
-    Errors are silently swallowed — never blocks or slows chat.
+    Errors are logged and never block or slow chat.
     """
+    print(f"[memory_extractor] extract_and_save: user={user_id} persona={persona_id} user_msg={user_message[:60]!r}")
     try:
         result = await memory.should_remember(user_message, assistant_reply)
         if result:
@@ -36,8 +37,10 @@ async def extract_and_save(
                 life_event=bool(result.get("life_event", False)),
                 topic=result.get("topic") or None,
             )
-    except Exception:
-        pass
+        else:
+            print(f"[memory_extractor] extract_and_save: nothing to save for user={user_id}")
+    except Exception as exc:
+        print(f"[memory_extractor] extract_and_save EXCEPTION: user={user_id} persona={persona_id} error={exc!r}")
 
 
 def format_memories_for_prompt(memories: list[dict]) -> str:
