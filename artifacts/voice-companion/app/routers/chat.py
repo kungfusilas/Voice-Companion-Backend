@@ -12,6 +12,7 @@ from app import memory as mem_store
 from app import memory_extractor
 from app import bond_analyzer
 from app import personality_extractor
+from app import personality_tracker
 from app import future_memory_extractor
 from app import conversation_store
 from app import relationship
@@ -674,6 +675,10 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
             bond_analyzer.analyze_and_save(
                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
             )
+        )
+    if len(_user_msgs) >= 10:
+        asyncio.create_task(
+            personality_tracker.score_personality(user_id, persona.id, _user_msgs[-10:])
         )
 
     return ChatResponse(
