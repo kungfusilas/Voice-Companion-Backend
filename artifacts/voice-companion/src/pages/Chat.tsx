@@ -309,13 +309,13 @@ export function ChatPage({
 
           // Kick off TTS as soon as the first complete sentence arrives (≥20 chars)
           if (!firstSentenceEndIdx && ttsEnabled) {
-            const m = /^.{20,}?[.!?](?=\s)/s.exec(fullReply);
+            const m = /^.{8,}?[.!?]["']?(?=\s|$)/s.exec(fullReply);
             if (m) {
               firstSentenceEndIdx = m[0].length;
               const cleanFirst = fullReply.slice(0, firstSentenceEndIdx)
                 .replace(/\*[^*]*\*/g, "")
                 .replace(/\[[^\]]*\]/g, "")
-                .replace(/\([^)]*\)/g, "")
+                .replace(/\((?:laughs?|chuckles?|sighs?|gasps?|smiles?|grins?|pauses?|whispers?|softly|quietly|nervously|warmly|teasingly|playfully|gently|hesitates?|nods?)[^)]*\)/gi, "")
                 .replace(/\p{Extended_Pictographic}/gu, "")
                 .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
                 .replace(/\s+/g, " ")
@@ -398,7 +398,7 @@ export function ChatPage({
             const cleanTTS = (s: string) =>
               s.replace(/\*[^*]*\*/g, "")
                .replace(/\[[^\]]*\]/g, "")
-               .replace(/\([^)]*\)/g, "")
+               .replace(/\((?:laughs?|chuckles?|sighs?|gasps?|smiles?|grins?|pauses?|whispers?|softly|quietly|nervously|warmly|teasingly|playfully|gently|hesitates?|nods?)[^)]*\)/gi, "")
                .replace(/\p{Extended_Pictographic}/gu, "")
                .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
                .replace(/\s+/g, " ")
@@ -410,7 +410,12 @@ export function ChatPage({
                 if (firstSentenceEndIdx > 0 && firstSentencePlayP) {
                   // First sentence was already kicked off during streaming.
                   // Fetch remaining text TTS concurrently while waiting for it to finish.
-                  const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
+                  // Re-sync index to authoritative full_text so token-accumulation drift can't truncate leg 2
+              if (event.full_text) {
+                const _sm = event.full_text.match(/^.{8,}?[.!?]["']?(?=\s|$)/s);
+                if (_sm) firstSentenceEndIdx = _sm[0].length;
+              }
+              const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
                   // Safari (MSE_AUDIO_MPEG=false): use the blob endpoint — produces a clean
                   // complete MP3 that decodeAudioData accepts. Chrome: stream endpoint via MSE.
                   if (!MSE_AUDIO_MPEG && remainingSpoken) {
@@ -418,8 +423,8 @@ export function ChatPage({
                   }
                   const remainingP = remainingSpoken
                     ? (MSE_AUDIO_MPEG
-                        ? speakTextStream(remainingSpoken, persona.id)
-                        : speakText(remainingSpoken, persona.id).then((b) => {
+                        ? speakTextStream(remainingSpoken, persona.id, cleanTTS(fullReply.slice(0, firstSentenceEndIdx)) || undefined)
+                        : speakText(remainingSpoken, persona.id, cleanTTS(fullReply.slice(0, firstSentenceEndIdx)) || undefined).then((b) => {
                             clientLog("tts_fetch_ok", { leg: 2, bytes: b.size });
                             // Pre-buffer on the second blessed element immediately —
                             // browser starts loading the MP3 while leg 1 is still
@@ -500,7 +505,7 @@ export function ChatPage({
       const spoken = text
         .replace(/\*[^*]*\*/g, "")
         .replace(/\[[^\]]*\]/g, "")
-        .replace(/\([^)]*\)/g, "")
+        .replace(/\((?:laughs?|chuckles?|sighs?|gasps?|smiles?|grins?|pauses?|whispers?|softly|quietly|nervously|warmly|teasingly|playfully|gently|hesitates?|nods?)[^)]*\)/gi, "")
         .replace(/\p{Extended_Pictographic}/gu, "")
         .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
         .replace(/\s+/g, " ")

@@ -337,11 +337,11 @@ export async function transcribeAudio(blob: Blob): Promise<string> {
 
 // ── TTS ───────────────────────────────────────────────────────────────────────
 
-export async function speakText(text: string, persona_id: string): Promise<Blob> {
+export async function speakText(text: string, persona_id: string, previous_text?: string): Promise<Blob> {
   const res = await apiFetch(`${BASE}/tts/speak`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, persona_id }),
+    body: JSON.stringify({ text, persona_id, ...(previous_text ? { previous_text } : {}) }),
   });
   if (!res.ok) {
     const { code, detail } = await _parseErrorBody(res);
@@ -354,11 +354,11 @@ export async function speakText(text: string, persona_id: string): Promise<Blob>
  * Like speakText but returns the raw streaming Response so the caller can
  * pipe it into an MSE SourceBuffer for near-instant playback.
  */
-export async function speakTextStream(text: string, persona_id: string): Promise<Response> {
+export async function speakTextStream(text: string, persona_id: string, previous_text?: string): Promise<Response> {
   const res = await apiFetch(`${BASE}/tts/speak/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text, persona_id }),
+    body: JSON.stringify({ text, persona_id, ...(previous_text ? { previous_text } : {}) }),
   });
   if (!res.ok) {
     const { code, detail } = await _parseErrorBody(res);

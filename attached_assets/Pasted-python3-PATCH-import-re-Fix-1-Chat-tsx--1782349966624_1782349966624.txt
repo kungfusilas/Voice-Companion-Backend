@@ -1,0 +1,119 @@
+python3 - << 'PATCH'
+import re
+
+# ── Fix 1: Chat.tsx ──────────────────────────────────────────────────────────
+chat = "artifacts/voice-companion/src/pages/Chat.tsx"
+with open(chat) as f:
+    c = f.read()
+
+# 1a. Lower sentence threshold 20→8 chars, handle closing quotes after terminal
+c = c.replace(
+    '/^.{20,}?[.!?](?=\\s)/s',
+    '/^.{8,}?[.!?]["\\\']?(?=\\s|$)/s'
+)
+
+# 1b. Stop stripping ALL parentheticals — only drop known stage directions
+OLD_PAREN = '.replace(/\\([^)]*\\)/g, "")'
+NEW_PAREN = '.replace(/\\((?:laughs?|chuckles?|sighs?|gasps?|smiles?|grins?|pauses?|whispers?|softly|quietly|nervously|warmly|teasingly|playfully|gently|hesitates?|nods?)[^)]*\\)/gi, "")'
+assert OLD_PAREN in c, "parenthetical regex not found — check Chat.tsx"
+c = c.replace(OLD_PAREN, NEW_PAREN)   # replaces both occurrences (leg-1 inline + cleanTTS)
+
+# 1c. Re-detect sentence boundary in authoritative full_text before slicing
+SLICE_ANCHOR = 'remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx))'
+assert SLICE_ANCHOR in c, "remainingSpoken slice anchor not found"
+REDETECT = (
+    '// Re-sync index to authoritative full_text so accumulated-token drift '
+    'can\'t truncate leg 2\n'
+    '      if (event.full_text) {\n'
+    '        const _sm = event.full_text.match(/^.{8,}?[.!?]["\\\']?(?=\\s|$)/s);\n'
+    '        if (_sm) firstSentenceEndIdx = _sm[0].length;\n'
+    '      }\n'
+    '      '
+)
+c = c.replace(SLICE_ANCHOR, REDETECT + SLICE_ANCHOR)
+
+with open(chat, 'w') as f:
+    f.write(c)
+print("✓ Chat.tsx — threshold lowered, parenthetical strip narrowed, index re-synced")
+
+# ── Fix 2: api.ts — add optional previous_text to both TTS functions ─────────
+api = "artifacts/voice-companion/src/api.ts"
+with open(api) as f:
+    c = f.read()
+
+# speakText: add param + include in body
+c = c.replace(
+    'export async function speakText(text: string, persona_id: string)',
+    'export async function speakText(text: string, persona_id: string, previous_text?: string)'
+)
+c = c.replace(
+    'body: JSON.stringify({ text, persona_id }),\n  });\n  return res.blob();',
+    'body: JSON.stringify({ text, persona_id, ...(previous_text ? { previous_text } : {}) }),\n  });\n  return res.blob();'
+)
+
+# speakTextStream: add param + include in body
+c = c.replace(
+    'export async function speakTextStream(text: string, persona_id: string)',
+    'export async function speakTextStream(text: string, persona_id: string, previous_text?: string)'
+)
+c = c.replace(
+    'body: JSON.stringify({ text, persona_id }),\n  });\n  return res;',
+    'body: JSON.stringify({ text, persona_id, ...(previous_text ? { previous_text } : {}) }),\n  });\n  return res;'
+)
+
+with open(api, 'w') as f:
+    f.write(c)
+print("✓ api.ts — previous_text param added to speakText + speakTextStream")
+
+# ── Fix 3: tts.py — accept + forward previous_text ───────────────────────────
+tts = "artifacts/voice-companion/app/routers/tts.py"
+with open(tts) as f:
+    c = f.read()
+
+# Add field to request model (both endpoints share a model likely called TTSRequest)
+c = c.replace(
+    'class TTSRequest(BaseModel):',
+    'class TTSRequest(BaseModel):\n    previous_text: str | None = None'
+)
+# Forward to synthesize/synthesize_stream calls
+c = c.replace(
+    'synthesize(request.text,',
+    'synthesize(request.text,'
+)
+# Pass previous_text to ElevenLabs calls
+c = re.sub(
+    r'(synthesize(?:_stream)?\(\s*request\.text\s*,\s*voice_id\s*,\s*settings\s*)',
+    r'\1, previous_text=request.previous_text',
+    c
+)
+with open(tts, 'w') as f:
+    f.write(c)
+print("✓ tts.py — previous_text field added to request model + forwarded")
+
+# ── Fix 4: elevenlabs_client.py — pass previous_text to ElevenLabs API ───────
+el = "artifacts/voice-companion/app/elevenlabs_client.py"
+with open(el) as f:
+    c = f.read()
+
+# synthesize() — add param and pass to ElevenLabs
+c = c.replace(
+    'def synthesize(self, text: str, voice_id: str, settings: VoiceSettings',
+    'def synthesize(self, text: str, voice_id: str, settings: VoiceSettings, previous_text: str | None = None'
+)
+c = c.replace(
+    'async def synthesize_stream(self, text: str, voice_id: str, settings: VoiceSettings',
+    'async def synthesize_stream(self, text: str, voice_id: str, settings: VoiceSettings, previous_text: str | None = None'
+)
+# Inject into ElevenLabs convert() calls
+c = re.sub(
+    r'(voice_settings\s*=\s*VoiceSettings\([^)]+\),?\s*\n)',
+    r'\1            **({"previous_text": previous_text} if previous_text else {}),\n',
+    c
+)
+with open(el, 'w') as f:
+    f.write(c)
+print("✓ elevenlabs_client.py — previous_text wired into ElevenLabs convert() calls")
+
+print("\nAll 4 files patched. Run: cd artifacts/voice-companion && npm run build")
+print("Then Republish in Replit deployment panel.")
+PATCH

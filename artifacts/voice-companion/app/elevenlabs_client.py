@@ -90,6 +90,7 @@ async def synthesize(
     voice_id: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
     voice_settings: VoiceSettings | None = None,
+    previous_text: str | None = None,
 ) -> bytes:
     """Convert text to speech and return the full audio as bytes (mp3)."""
     voice_id = voice_id or get_default_voice_id()
@@ -105,6 +106,8 @@ async def synthesize(
             )
             if voice_settings is not None:
                 kwargs["voice_settings"] = voice_settings
+            if previous_text:
+                kwargs["previous_text"] = previous_text
             chunks = client.text_to_speech.convert(**kwargs)
             return b"".join(chunks)
         except ApiError as e:
@@ -118,6 +121,7 @@ async def synthesize_stream(
     voice_id: str | None = None,
     model_id: str = DEFAULT_MODEL_ID,
     voice_settings: VoiceSettings | None = None,
+    previous_text: str | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Stream audio chunks as they arrive from ElevenLabs."""
     voice_id = voice_id or get_default_voice_id()
@@ -131,6 +135,8 @@ async def synthesize_stream(
         )
         if voice_settings is not None:
             kwargs["voice_settings"] = voice_settings
+        if previous_text:
+            kwargs["previous_text"] = previous_text
         async for chunk in client.text_to_speech.convert(**kwargs):
             if chunk:
                 yield chunk

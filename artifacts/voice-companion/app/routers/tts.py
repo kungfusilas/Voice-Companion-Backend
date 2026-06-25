@@ -50,6 +50,7 @@ class PersonaSpeakRequest(BaseModel):
     text: str
     persona_id: str
     model_id: str = DEFAULT_MODEL_ID
+    previous_text: str | None = None
 
 
 @router.get("/voices")
@@ -114,6 +115,7 @@ async def persona_speak_stream(
                 voice_id=persona.voice_id,
                 model_id=request.model_id,
                 voice_settings=voice_settings,
+                previous_text=request.previous_text or None,
             ):
                 yield chunk
         except ElevenLabsError as e:
@@ -183,6 +185,7 @@ async def persona_speak(
             voice_id=persona.voice_id,
             model_id=request.model_id,
             voice_settings=voice_settings,
+            previous_text=request.previous_text or None,
         )
     except ElevenLabsError as e:
         raise _elevenlabs_http_error(e)
