@@ -30,7 +30,7 @@ const COMPANIONS: CompanionConfig[] = [
     traits: ["direct", "witty", "grounded"],
     glow: "rgba(56,189,248,0.2)",
     border: "rgba(56,189,248,0.3)",
-    avatar: "https://kyeqlkqbhwaiwwnvjrtt.supabase.co/storage/v1/object/public/marketing/Kai-New.jpg",
+    avatar: "/companion/avatars/kai.jpg",
   },
 ];
 
