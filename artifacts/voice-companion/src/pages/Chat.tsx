@@ -79,6 +79,7 @@ interface ChatPageProps {
   initialMessage?: string;
   onMessageConsumed?: () => void;
   isGuest?: boolean;
+  userName?: string;
   subscriptionTier?: string;
   onUpgradeChoice?: (tier: "free" | "premium") => void;
 }
@@ -92,7 +93,8 @@ const ACTIVITY_BUTTONS: { type: ActivityType; icon: string; label: string }[] = 
 export function ChatPage({
   persona, relType, userId, onBack, onChangeRelType,
   initialMessage, onMessageConsumed,
-  isGuest = false, subscriptionTier = "free", onUpgradeChoice,
+  isGuest = false,
+  userName, subscriptionTier = "free", onUpgradeChoice,
 }: ChatPageProps) {
   const isPremium = !isGuest && ["premium", "power", "elite"].includes(subscriptionTier);
   const isPower   = !isGuest && ["power", "elite"].includes(subscriptionTier);
@@ -100,6 +102,7 @@ export function ChatPage({
   const isPaid    = !isGuest && subscriptionTier !== "free";
   const rawId = useId();
   const sessionId = rawId.replace(/:/g, "s");
+  const nameContextSentRef = useRef(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streamingText, setStreamingText] = useState("");
@@ -289,6 +292,13 @@ export function ChatPage({
     let firstSentenceEndIdx = 0;
     let firstSentenceAudioP: Promise<Blob | null> | null = null;
     let firstSentencePlayP:  Promise<void>       | null = null;
+
+    // Inject user name once so companion never needs to ask
+    if (!nameContextSentRef.current && userName && !isGuest) {
+      const _nameHint = `The user's name is ${userName}. Use it naturally when it fits.`;
+      onboardingCtx = onboardingCtx ? `${_nameHint}\n${onboardingCtx}` : _nameHint;
+      nameContextSentRef.current = true;
+    }
 
     try {
       for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx)) {

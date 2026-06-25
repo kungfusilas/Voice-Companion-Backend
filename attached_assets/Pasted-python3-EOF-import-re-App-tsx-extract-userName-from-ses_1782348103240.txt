@@ -1,0 +1,69 @@
+python3 - << 'EOF'
+import re
+
+# ── App.tsx: extract userName from session and pass to Chat ──────────────────
+app = "artifacts/voice-companion/src/App.tsx"
+with open(app) as f:
+    c = f.read()
+
+# Add userName extraction after the userId line
+anchor = "session?.user.id ?? (guestId ? `guest_${guestId}` : null);"
+assert anchor in c, "userId anchor not found in App.tsx"
+insert = "\n  const userName = session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name || undefined;"
+if "const userName" not in c:
+    c = c.replace(anchor, anchor + insert)
+
+# Pass userName into every <Chat ... /> render call
+if "userName={userName}" not in c:
+    c = re.sub(r'(<Chat\b[^>]*?)(\s*/?>)', lambda m: m.group(1) + ' userName={userName}' + m.group(2), c)
+
+with open(app, "w") as f:
+    f.write(c)
+print("✓ App.tsx — userName extracted and passed to Chat")
+
+# ── Chat.tsx: receive prop, inject name on first message ────────────────────
+chat = "artifacts/voice-companion/src/pages/Chat.tsx"
+with open(chat) as f:
+    c = f.read()
+
+# 1. Add userName to ChatPageProps
+if "userName?: string;" not in c:
+    c = c.replace(
+        "isGuest?: boolean;",
+        "isGuest?: boolean;\n  userName?: string;"
+    )
+
+# 2. Add nameContextSentRef (safe: only if not already present)
+if "nameContextSentRef" not in c:
+    # Insert near other useRef declarations — anchor on isGuest prop destructure
+    c = c.replace(
+        "const { persona, relType, userId, onBack",
+        "const nameContextSentRef = useRef(false);\n\n  const { persona, relType, userId, onBack"
+    )
+
+# 3. Destructure userName from props
+if "userName," not in c and "userName }" not in c:
+    c = c.replace(
+        "isGuest = false,",
+        "isGuest = false,\n  userName,"
+    )
+
+# 4. Inject name into onboardingCtx before chatStream call
+inject = '''
+  // Inject user name once so companion never needs to ask
+  if (!nameContextSentRef.current && userName && !isGuest) {
+    const _nameHint = `The user's name is ${userName}. Use it naturally when it fits.`;
+    onboardingCtx = onboardingCtx ? `${_nameHint}\\n${onboardingCtx}` : _nameHint;
+    nameContextSentRef.current = true;
+  }
+'''
+# Anchor: the chatStream call line
+anchor2 = "chatStream(sessionId, persona.id,"
+if "_nameHint" not in c and anchor2 in c:
+    c = c.replace(anchor2, inject.strip() + "\n\n  " + anchor2)
+
+with open(chat, "w") as f:
+    f.write(c)
+print("✓ Chat.tsx — userName prop wired, name injected on first message")
+print("\nAll done. Rebuild and redeploy to apply.")
+EOF

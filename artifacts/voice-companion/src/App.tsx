@@ -154,6 +154,7 @@ export default function App() {
 
   // ── User ID (real or guest) ──────────────────────────────────────────────
   const userId = session?.user.id ?? (guestId ? `guest_${guestId}` : null);
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.user_metadata?.name || undefined;
   const isGuest = !session;
 
   // ── Paywall: resolve which screen to actually render ─────────────────────
@@ -348,6 +349,7 @@ export default function App() {
               initialMessage={pendingPrompt ?? undefined}
               onMessageConsumed={() => setPendingPrompt(null)}
               isGuest={isGuest}
+              userName={userName}
               subscriptionTier={subscriptionTier}
               onUpgradeChoice={handleUpgradeChoice}
             />
