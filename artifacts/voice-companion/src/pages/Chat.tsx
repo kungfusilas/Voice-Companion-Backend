@@ -290,6 +290,7 @@ export function ChatPage({
 
     // Sentence-level TTS prefetch — lets audio start before the full reply arrives
     let firstSentenceEndIdx = 0;
+    let firstSentenceLeg1Text = ""; // exact text sent to ElevenLabs for leg 1 — used as previous_text for leg 2
     let firstSentenceAudioP: Promise<Blob | null> | null = null;
     let firstSentencePlayP:  Promise<void>       | null = null;
 
@@ -321,6 +322,7 @@ export function ChatPage({
                 .replace(/\s+/g, " ")
                 .trim();
               if (cleanFirst) {
+                firstSentenceLeg1Text = cleanFirst; // lock in for leg-2 previous_text
                 clientLog("tts_fetch", { leg: 1, chars: cleanFirst.length });
                 firstSentenceAudioP = speakText(cleanFirst, persona.id)
                   .then((blob) => {
@@ -340,6 +342,9 @@ export function ChatPage({
             }
           }
         } else if (event.type === "done") {
+          // Preserve token-accumulated text as the authoritative TTS split source.
+          // event.full_text is used for display/saving only — not for re-deriving the split.
+          const ttsFullReply = fullReply;
           fullReply = event.full_text ?? fullReply;
           setStreamingText("");
 
@@ -410,12 +415,10 @@ export function ChatPage({
                 if (firstSentenceEndIdx > 0 && firstSentencePlayP) {
                   // First sentence was already kicked off during streaming.
                   // Fetch remaining text TTS concurrently while waiting for it to finish.
-                  // Re-sync index to authoritative full_text so token-accumulation drift can't truncate leg 2
-              if (event.full_text) {
-                const _sm = event.full_text.match(/^.{8,}?[.!?]["']?(?=\s|$)/s);
-                if (_sm) firstSentenceEndIdx = _sm[0].length;
-              }
-              const remainingSpoken = cleanTTS(fullReply.slice(firstSentenceEndIdx));
+              // Use ttsFullReply (token-accumulated, used for leg 1) as the split source.
+              // Deriving remainingSpoken from event.full_text with a second regex can shift
+              // the boundary, causing leg 2 to repeat content already spoken in leg 1.
+              const remainingSpoken = cleanTTS(ttsFullReply.slice(firstSentenceEndIdx));
                   // Safari (MSE_AUDIO_MPEG=false): use the blob endpoint — produces a clean
                   // complete MP3 that decodeAudioData accepts. Chrome: stream endpoint via MSE.
                   if (!MSE_AUDIO_MPEG && remainingSpoken) {
@@ -423,8 +426,8 @@ export function ChatPage({
                   }
                   const remainingP = remainingSpoken
                     ? (MSE_AUDIO_MPEG
-                        ? speakTextStream(remainingSpoken, persona.id, cleanTTS(fullReply.slice(0, firstSentenceEndIdx)) || undefined)
-                        : speakText(remainingSpoken, persona.id, cleanTTS(fullReply.slice(0, firstSentenceEndIdx)) || undefined).then((b) => {
+                        ? speakTextStream(remainingSpoken, persona.id, firstSentenceLeg1Text || undefined)
+                        : speakText(remainingSpoken, persona.id, firstSentenceLeg1Text || undefined).then((b) => {
                             clientLog("tts_fetch_ok", { leg: 2, bytes: b.size });
                             // Pre-buffer on the second blessed element immediately —
                             // browser starts loading the MP3 while leg 1 is still

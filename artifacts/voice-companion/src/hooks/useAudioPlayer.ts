@@ -358,14 +358,52 @@ export function useAudioPlayer() {
    */
   const play = useCallback(
     async (blob: Blob, logLabel = "play"): Promise<void> => {
-      stop();
-      const abort = new AbortController();
-      abortRef.current = abort;
-
       // ── Non-MSE (Safari / iOS) ───────────────────────────────────────────
+      // Check the pre-buffer hit BEFORE calling stop(), which would revoke the
+      // prepEl's blob URL and clear prepBlobRef — making the hit permanently
+      // unreachable. When a hit is detected we stop everything except the prepEl.
       if (!MSE_SUPPORTED) {
-        // Use pre-buffer element if this exact blob was prepared
-        if (prepBlobRef.current === blob && prepElRef.current && prepBlobUrlRef.current) {
+        const prepHit =
+          prepBlobRef.current === blob &&
+          prepElRef.current !== null &&
+          prepBlobUrlRef.current !== null;
+
+        // Abort any in-flight audio and stop the singleton.
+        abortRef.current?.abort();
+        abortRef.current = null;
+        try { sourceRef.current?.stop(); } catch {}
+        sourceRef.current = null;
+        const s = singletonElRef.current;
+        if (s) {
+          s.onended = null;
+          s.onerror = null;
+          try { s.pause(); } catch {}
+          if (singletonBlobUrlRef.current) {
+            URL.revokeObjectURL(singletonBlobUrlRef.current);
+            singletonBlobUrlRef.current = null;
+          }
+          try { s.src = ""; } catch {}
+        }
+        // Only tear down the pre-buffer element when we are NOT about to play it.
+        if (!prepHit) {
+          if (prepBlobUrlRef.current) {
+            URL.revokeObjectURL(prepBlobUrlRef.current);
+            prepBlobUrlRef.current = null;
+          }
+          prepBlobRef.current = null;
+          const pe = prepElRef.current;
+          if (pe) {
+            pe.onended = null;
+            pe.onerror = null;
+            try { pe.pause(); pe.src = ""; } catch {}
+          }
+        }
+        setPlaying(false);
+
+        const abort = new AbortController();
+        abortRef.current = abort;
+
+        if (prepHit) {
           clientLog("tts_prepel_hit", { label: logLabel });
           await _playPrepEl(blob, abort.signal, logLabel);
         } else {
@@ -375,6 +413,9 @@ export function useAudioPlayer() {
       }
 
       // ── MSE-capable browsers: prefer WebAudio ───────────────────────────
+      stop();
+      const abort = new AbortController();
+      abortRef.current = abort;
       try {
         const ctx = _ctx();
         clientLog("tts_actx", { label: logLabel, state: ctx.state });
@@ -507,18 +548,25 @@ export function useAudioPlayer() {
           sb.addEventListener("updateend", () => r(), { once: true }),
         );
 
+      // All received chunks kept for blob fallback when SourceBuffer fails mid-stream
+      const chunks: Uint8Array<ArrayBuffer>[] = [];
+
       const appendChunk = (chunk: Uint8Array<ArrayBuffer>) =>
-        new Promise<void>((resolve) => {
+        new Promise<void>((resolve, reject) => {
           const onUpdateEnd = () => { sb.removeEventListener("error",     onSbError);  resolve(); };
-          const onSbError   = () => { sb.removeEventListener("updateend", onUpdateEnd); resolve(); };
+          const onSbError   = () => {
+            sb.removeEventListener("updateend", onUpdateEnd);
+            reject(new Error("SourceBuffer error event"));
+          };
           sb.addEventListener("updateend", onUpdateEnd, { once: true });
           sb.addEventListener("error",     onSbError,   { once: true });
           try {
             sb.appendBuffer(chunk);
-          } catch {
+          } catch (err) {
             sb.removeEventListener("updateend", onUpdateEnd);
             sb.removeEventListener("error",     onSbError);
-            resolve();
+            clientLog("tts_sb_append_err", { error: String(err) });
+            reject(err);
           }
         });
 
@@ -528,8 +576,10 @@ export function useAudioPlayer() {
           const { done, value } = await reader.read();
           if (done || abort.signal.aborted) break;
           if (value?.length) {
+            const chunk = new Uint8Array(value) as Uint8Array<ArrayBuffer>;
+            chunks.push(chunk);
             while (sb.updating && !abort.signal.aborted) await waitUpdate();
-            if (!abort.signal.aborted) await appendChunk(new Uint8Array(value));
+            if (!abort.signal.aborted) await appendChunk(chunk);
           }
         }
       } catch (err) {
@@ -539,6 +589,17 @@ export function useAudioPlayer() {
         if (!abort.signal.aborted && ms.readyState === "open") {
           try { ms.endOfStream(); } catch {}
         }
+      }
+
+      // SourceBuffer failure: stop MSE, fall back to blob from collected chunks
+      if (readError && !abort.signal.aborted) {
+        clientLog("tts_stream_sb_fallback", { chunks: chunks.length });
+        stop();
+        if (chunks.length > 0) {
+          const fallbackBlob = new Blob(chunks, { type: "audio/mpeg" });
+          await play(fallbackBlob, "stream_sb_fb");
+        }
+        return;
       }
 
       if (readError) {
