@@ -4,15 +4,24 @@ Weekly Insight Report generator.
 Retrieves the last 7 days of memories for a user+companion pair and uses
 Claude Haiku to surface emotional themes, growth moments, recurring patterns,
 and a suggested question for the next session.
+
+After the report is returned, a fire-and-forget coroutine runs the full
+personality update pipeline:
+  1. Score the user's Big Five traits from recent messages.
+  2. Read the last 4 snapshots to compute drift.
+  3. If any trait drifted past threshold, call personality_extractor.apply_drift_revision
+     to revise the personality_map accordingly.
 """
-import os
+import asyncio
 import json
+import os
 from datetime import datetime, timedelta, timezone
 
 import httpx
 
 from app import claude
 from app import personality_tracker
+from app import personality_extractor
 
 
 async def _fetch_week_memories(user_id: str, companion_id: str) -> list[dict]:
@@ -100,6 +109,43 @@ async def _fetch_recent_user_messages(user_id: str, companion_id: str, limit: in
         return []
 
 
+async def _weekly_personality_update(
+    user_id: str,
+    companion_id: str,
+    recent_msgs: list[str],
+) -> None:
+    """
+    Fire-and-forget coroutine that runs the full personality update pipeline:
+
+    1. Score Big Five from recent messages and persist the snapshot.
+    2. Fetch the last 4 snapshots and compute drift.
+    3. If any trait drifted past the significance threshold, call
+       personality_extractor.apply_drift_revision to revise the personality_map.
+
+    All errors are swallowed — this must never affect the weekly report response.
+    """
+    try:
+        await personality_tracker.score_personality(user_id, companion_id, recent_msgs)
+
+        drift_result = await personality_tracker.get_personality_drift(user_id, companion_id)
+        drifted_traits: list[dict] = drift_result.get("drift") or []
+
+        if drifted_traits:
+            print(
+                f"[weekly_insight] drift detected for user={user_id} companion={companion_id}: "
+                f"{[d['trait'] for d in drifted_traits]}"
+            )
+            await personality_extractor.apply_drift_revision(user_id, drifted_traits)
+        else:
+            print(
+                f"[weekly_insight] no significant drift for user={user_id} companion={companion_id} "
+                f"(snapshots={drift_result.get('snapshot_count', 0)})"
+            )
+
+    except Exception as exc:
+        print(f"[weekly_insight] _weekly_personality_update ERROR: {exc!r}")
+
+
 async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
     """
     Generate a weekly insight report for the given user+companion pair.
@@ -157,15 +203,16 @@ async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
         result["period_days"] = 7
         print(f"[weekly_insight] report generated OK for user={user_id}")
 
-        # Weekly Big Five snapshot — fire-and-forget after report is done.
+        # Fire-and-forget: full personality update pipeline (score → drift → revise map).
+        # Fetch recent messages first (fast read); the heavy work happens in the background.
         recent_msgs = await _fetch_recent_user_messages(user_id, companion_id)
         if recent_msgs:
-            import asyncio
             asyncio.create_task(
-                personality_tracker.score_personality(user_id, companion_id, recent_msgs)
+                _weekly_personality_update(user_id, companion_id, recent_msgs)
             )
 
         return result
+
     except Exception as exc:
         print(f"[weekly_insight] generate_weekly_report ERROR: {exc!r}")
         return {
