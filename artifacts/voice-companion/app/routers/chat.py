@@ -610,6 +610,15 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
+
+    # Warm-boot: restore this session's history from Supabase after a server restart.
+    # Try the exact session first; fall back to recent cross-session messages if it's new.
+    if not store.get_history(request.session_id) and not is_guest:
+        _info = await conversation_store.get_session_info(request.session_id)
+        _recent = _info["messages"] if _info else await conversation_store.get_recent_messages(user_id, persona.id, limit=10)
+        for _m in _recent:
+            store.append_message(request.session_id, ChatMessage(role=_m["role"], content=_m["content"]))
+
     history = store.get_or_create_session(request.session_id, request.persona_id)
     if not is_guest:
         store.set_session_owner(request.session_id, user_id)
@@ -731,10 +740,11 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
 
-    # Preload recent conversation history into the in-memory store if this is a fresh
-    # session (survives server restarts — history lives in Supabase via conversation_store).
+    # Warm-boot: restore this session's history from Supabase after a server restart.
+    # Try the exact session first; fall back to recent cross-session messages if it's new.
     if not store.get_history(request.session_id) and not is_guest:
-        _recent = await conversation_store.get_recent_messages(user_id, persona.id, limit=10)
+        _info = await conversation_store.get_session_info(request.session_id)
+        _recent = _info["messages"] if _info else await conversation_store.get_recent_messages(user_id, persona.id, limit=10)
         for _m in _recent:
             store.append_message(
                 request.session_id,

@@ -109,6 +109,41 @@ async def save_exchange(
         logger.debug("Conversation store error (non-fatal): %s", exc)
 
 
+async def get_session_info(session_id: str) -> dict | None:
+    """
+    Fetch a single session row from Supabase by session_id.
+    Returns {user_id, companion_id, messages: [{role, content}]} or None if not found.
+    Used for warm-boot recovery after a server restart and by the sessions API.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(
+                f"{_sb_url()}/rest/v1/conversations",
+                headers=_sb_headers(prefer=""),
+                params={
+                    "session_id": f"eq.{session_id}",
+                    "select": "user_id,companion_id,messages",
+                    "limit": "1",
+                },
+            )
+        if resp.status_code not in (200, 206):
+            return None
+        rows = resp.json()
+        if not rows:
+            return None
+        row = rows[0]
+        msgs = row.get("messages") or []
+        msgs.sort(key=lambda m: m.get("ts", ""))
+        return {
+            "user_id": row.get("user_id", ""),
+            "companion_id": row.get("companion_id", ""),
+            "messages": [{"role": m["role"], "content": m["content"]} for m in msgs],
+        }
+    except Exception as exc:
+        logger.debug("get_session_info error (non-fatal): %s", exc)
+        return None
+
+
 async def get_recent_messages(
     user_id: str,
     companion_id: str,
