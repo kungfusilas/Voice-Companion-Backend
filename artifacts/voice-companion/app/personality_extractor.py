@@ -13,8 +13,9 @@ import os
 import json
 import logging
 import httpx
-import anthropic
 from datetime import datetime, timezone
+
+from app import claude
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,56 @@ async def _save_map(user_id: str, personality_map: dict) -> None:
         logger.debug("Save personality_map failed: %s", e)
 
 
+def format_personality_for_prompt(pmap: dict) -> str:
+    """
+    Convert a personality_map dict into a compact plain-language block for
+    injection into a Claude system prompt.  Only dimensions that have a label
+    set are included; empty/unbuilt dimensions are silently skipped.
+    Returns "" when the map has no useful data yet.
+    """
+    if not pmap or not pmap.get("conversation_count"):
+        return ""
+
+    lines: list[str] = []
+
+    cs = pmap.get("communication_style") or {}
+    if cs.get("label"):
+        sigs = cs.get("signals") or []
+        detail = f" ({'; '.join(sigs[:3])})" if sigs else ""
+        lines.append(f"- Communication style: {cs['label']}{detail}")
+
+    att = pmap.get("attachment_style") or {}
+    if att.get("label"):
+        sigs = att.get("signals") or []
+        detail = f" ({'; '.join(sigs[:3])})" if sigs else ""
+        lines.append(f"- Attachment style: {att['label']}{detail}")
+
+    lead = pmap.get("leadership_style") or {}
+    if lead.get("label"):
+        sigs = lead.get("signals") or []
+        detail = f" ({'; '.join(sigs[:3])})" if sigs else ""
+        lines.append(f"- Decisiveness/leadership: {lead['label']}{detail}")
+
+    trig = pmap.get("emotional_triggers") or {}
+    pos = trig.get("positive") or []
+    neg = trig.get("negative") or []
+    if pos:
+        lines.append(f"- Energised by: {', '.join(pos[:4])}")
+    if neg:
+        lines.append(f"- Handle gently (tends to drain them): {', '.join(neg[:4])}")
+
+    if not lines:
+        return ""
+
+    return (
+        "\n\n## User Personality Profile\n"
+        "Observed patterns built from your conversations so far — use these to adapt your tone:\n"
+        + "\n".join(lines)
+        + "\n"
+        "Match your style to theirs and be especially gentle when emotionally draining topics arise."
+    )
+
+
 async def extract_and_update(
     user_id: str,
     user_message: str,
@@ -132,13 +183,14 @@ Rules:
 - If no signal is observable for a field, keep it unchanged.
 - Return ONLY valid JSON."""
 
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        msg = client.messages.create(
+        raw = await claude.send_message(
+            system_prompt="You are a personality analyst. Return ONLY valid JSON — no markdown, no explanation.",
+            history=[],
+            user_message=prompt,
             model=_HAIKU,
             max_tokens=500,
-            messages=[{"role": "user", "content": prompt}],
         )
-        updated = json.loads(msg.content[0].text)
+        updated = json.loads(raw.strip())
 
         updated["conversation_count"] = count + 1
         updated["last_updated"] = datetime.now(timezone.utc).isoformat()

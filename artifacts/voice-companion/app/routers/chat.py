@@ -498,11 +498,14 @@ async def _build_system_prompt(
         return prompt
 
     try:
-        memories, stats, needs_drift = await asyncio.gather(
+        gather_results = await asyncio.gather(
             mem_store.retrieve_memories(user_id, persona.id, user_message, top_k=5),
             relationship.get_stats(user_id, persona.id),
             relationship.needs_drift_inject(user_id, persona.id),
+            personality_extractor._fetch_current_map(user_id) if _is_power_or_above(tier) else asyncio.sleep(0),
         )
+        memories, stats, needs_drift = gather_results[0], gather_results[1], gather_results[2]
+        raw_pmap = gather_results[3] if _is_power_or_above(tier) else {}
 
         message_count = stats.get("message_count", 0)
         connection_score: int = stats.get("connection_score") or 50
@@ -511,6 +514,7 @@ async def _build_system_prompt(
         memory_block = memory_extractor.format_memories_for_prompt(memories)
         rel_context = relationship.build_relationship_context(persona.id, message_count)
         bond_context = _build_bond_context(connection_score, rel_type, message_count)
+        personality_block = personality_extractor.format_personality_for_prompt(raw_pmap or {})
 
         romantic_block = ""
         if romantic_mode:
@@ -528,7 +532,7 @@ async def _build_system_prompt(
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
         prompt = _inject_date(
-            base_prompt + romantic_block + memory_block + rel_context + bond_context + drift_block
+            base_prompt + romantic_block + personality_block + memory_block + rel_context + bond_context + drift_block
         )
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
@@ -685,11 +689,6 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
             )
         )
-    if len(_user_msgs) >= 10:
-        asyncio.create_task(
-            personality_tracker.score_personality(user_id, persona.id, _user_msgs[-10:])
-        )
-
     return ChatResponse(
         session_id=request.session_id,
         persona_id=request.persona_id,

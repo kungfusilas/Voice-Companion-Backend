@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app import claude
+from app import personality_tracker
 
 
 async def _fetch_week_memories(user_id: str, companion_id: str) -> list[dict]:
@@ -58,6 +59,45 @@ _REPORT_SYSTEM = (
     "If there are fewer than 3 distinct emotional themes, return what you can (pad with null).\n"
     "Return ONLY the JSON object — no markdown, no explanation."
 )
+
+
+async def _fetch_recent_user_messages(user_id: str, companion_id: str, limit: int = 10) -> list[str]:
+    """
+    Pull the most recent user-role messages from the conversations archive
+    for this user+companion pair — used to feed the Big Five personality scorer.
+    """
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not supabase_url or not service_key:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.get(
+                f"{supabase_url}/rest/v1/conversations",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                params={
+                    "select": "messages",
+                    "user_id": f"eq.{user_id}",
+                    "companion_id": f"eq.{companion_id}",
+                    "order": "created_at.desc",
+                    "limit": "5",
+                },
+            )
+        if resp.status_code != 200:
+            return []
+        rows = resp.json() or []
+        msgs: list[str] = []
+        for row in rows:
+            for m in row.get("messages") or []:
+                if m.get("role") == "user" and m.get("content"):
+                    msgs.append(m["content"])
+                if len(msgs) >= limit:
+                    break
+            if len(msgs) >= limit:
+                break
+        return msgs[:limit]
+    except Exception:
+        return []
 
 
 async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
@@ -116,6 +156,15 @@ async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
         result["memory_count"] = len(memories)
         result["period_days"] = 7
         print(f"[weekly_insight] report generated OK for user={user_id}")
+
+        # Weekly Big Five snapshot — fire-and-forget after report is done.
+        recent_msgs = await _fetch_recent_user_messages(user_id, companion_id)
+        if recent_msgs:
+            import asyncio
+            asyncio.create_task(
+                personality_tracker.score_personality(user_id, companion_id, recent_msgs)
+            )
+
         return result
     except Exception as exc:
         print(f"[weekly_insight] generate_weekly_report ERROR: {exc!r}")
