@@ -30,6 +30,7 @@ from app.routers import onboarding as onboarding_router
 from app.routers import reports as reports_router
 from app.routers import usage as usage_router
 from app.routers import legacy_chapters as legacy_chapters_router
+from app.routers import export as export_router
 from app.routers import photo as photo_router
 from app.routers import client_log as client_log_router
 from app.routers import weekly_report as weekly_report_router
@@ -155,6 +156,7 @@ app.include_router(onboarding_router.router,   prefix="/api/onboarding",        
 app.include_router(reports_router.router,      prefix="/api/reports/weekly",      tags=["reports"])
 app.include_router(usage_router.router,        prefix="/api",                     tags=["usage"])
 app.include_router(legacy_chapters_router.router, prefix="/api/legacy-chapters",   tags=["legacy-chapters"])
+app.include_router(export_router.router,          prefix="/api/export",              tags=["export"])
 app.include_router(photo_router.router,           prefix="/api/photo",               tags=["photo"])
 app.include_router(client_log_router.router,      prefix="/api",                     tags=["diagnostics"])
 app.include_router(weekly_report_router.router,   prefix="/api/weekly-report",        tags=["weekly-report"])
