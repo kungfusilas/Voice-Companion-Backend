@@ -95,9 +95,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Explicit origin allowlist — wildcard + credentials is invalid per Fetch spec
+# and exposes the service to cross-origin abuse.
+_ALLOWED_ORIGINS: list[str] = [
+    "https://legacybond.ai",
+    "https://www.legacybond.ai",
+    "https://voice-companion-backend.replit.app",
+]
+# Include the per-workspace dev preview domain so local dev still works.
+_dev_domain = os.environ.get("REPLIT_DEV_DOMAIN", "")
+if _dev_domain:
+    _ALLOWED_ORIGINS.append(f"https://{_dev_domain}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

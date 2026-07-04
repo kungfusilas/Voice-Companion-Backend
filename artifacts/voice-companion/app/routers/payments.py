@@ -210,6 +210,59 @@ async def _user_id_by_customer(customer_id: str) -> str | None:
     return None
 
 
+async def _tier_from_price_id(price_id: str | None) -> str | None:
+    """
+    Map a Stripe price_id to our internal tier string (e.g. 'basic', 'power').
+
+    Fast path: check the in-memory _price_ids cache populated during checkout.
+    Slow path: fetch the price from Stripe, resolve its product name, match to
+    our PLANS table.  Runs Stripe SDK calls in a thread (sync SDK).
+
+    Returns None if unresolvable — callers must fail open and leave the existing
+    tier unchanged.
+    """
+    if not price_id:
+        return None
+
+    # Fast path — cache populated when checkout sessions are created
+    reverse = {v: k for k, v in _price_ids.items()}
+    plan_key = reverse.get(price_id)
+    if plan_key and plan_key in PLANS:
+        tier = PLANS[plan_key]["base"]
+        logger.debug("_tier_from_price_id cache hit price=%s → tier=%s", price_id, tier)
+        return tier
+
+    # Slow path — ask Stripe (sync SDK wrapped in thread)
+    try:
+        price = await asyncio.to_thread(stripe.Price.retrieve, price_id)
+        product_id = price.get("product") if isinstance(price, dict) else getattr(price, "product", None)
+        if not product_id or not isinstance(product_id, str):
+            logger.warning("_tier_from_price_id: no product on price=%s — failing open", price_id)
+            return None
+        product = await asyncio.to_thread(stripe.Product.retrieve, product_id)
+        product_name = (
+            product.get("name") if isinstance(product, dict) else getattr(product, "name", "")
+        ) or ""
+        for pk, plan in PLANS.items():
+            if plan["name"] == product_name:
+                _price_ids[pk] = price_id  # warm cache for future lookups
+                logger.info(
+                    "_tier_from_price_id resolved price=%s product='%s' → tier=%s",
+                    price_id, product_name, plan["base"],
+                )
+                return plan["base"]
+        logger.warning(
+            "_tier_from_price_id: no PLANS match for product='%s' price=%s — failing open",
+            product_name, price_id,
+        )
+    except Exception as exc:
+        logger.warning(
+            "_tier_from_price_id: error resolving price=%s err=%s — failing open",
+            price_id, exc,
+        )
+    return None
+
+
 async def _get_profile(user_id: str) -> dict | None:
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:
@@ -499,11 +552,36 @@ async def stripe_webhook(request: Request):
                         internal_status = "past_due"
                     else:
                         internal_status = "inactive"
-                    await _upsert_profile(user_id, subscription_status=internal_status)
-                    logger.info(
-                        "Subscription updated user=%s stripe_status=%s internal=%s",
-                        user_id, stripe_status, internal_status,
-                    )
+
+                    # Attempt to resolve the new tier from the subscription's
+                    # price item. This handles mid-cycle plan switches made via
+                    # the Stripe Customer Portal.  Fails open: if we can't
+                    # resolve the price to a known tier we only update status
+                    # and leave subscription_tier unchanged.
+                    items_data = (obj.get("items") or {}).get("data") or []
+                    price_id: str | None = None
+                    if items_data:
+                        price_id = ((items_data[0].get("price") or {})).get("id")
+                    new_tier = await _tier_from_price_id(price_id)
+
+                    update_fields: dict[str, object] = {
+                        "subscription_status": internal_status
+                    }
+                    if new_tier:
+                        update_fields["subscription_tier"] = new_tier
+                        logger.info(
+                            "Subscription updated user=%s stripe_status=%s internal=%s new_tier=%s",
+                            user_id, stripe_status, internal_status, new_tier,
+                        )
+                    else:
+                        # Could not resolve tier — keep existing tier, only update status.
+                        # Billing guardrail: never silently downgrade on an ambiguous signal.
+                        logger.info(
+                            "Subscription updated user=%s stripe_status=%s internal=%s "
+                            "tier_unchanged (price_id=%s not resolvable — keeping existing tier)",
+                            user_id, stripe_status, internal_status, price_id,
+                        )
+                    await _upsert_profile(user_id, **update_fields)
 
         elif event["type"] == "invoice.payment_failed":
             # Fires when a renewal invoice cannot be collected.  Mark the user

@@ -200,8 +200,9 @@ The chapter should be 800 to 1,500 words. It must:
 Do NOT add disclaimers, preamble, or any text outside the title line and chapter body."""
 
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        message = client.messages.create(
+        # AsyncAnthropic so we don't block the event loop during long Opus generation
+        async_client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        message = await async_client.messages.create(
             model=_OPUS,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],

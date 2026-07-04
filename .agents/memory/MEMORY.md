@@ -1,2 +1,4 @@
 - [Always-on conversation mode](conv-mode.md) — AudioWorklet+WS proxy arch; barge-in, silence guard, billing decisions
 - [Safari audio fixes](safari-audio.md) — singleton + prepEl double-buffer; WebM→MP4 mimeType fallback chain
+- [Async event-loop fixes](async-fixes.md) — scoring/relationship/chapters were sync; now AsyncAnthropic + asyncio.to_thread
+- [Billing guardrails](billing-guardrails.md) — 5yr expiry in _get_user_profile; tier update in subscription.updated; fail-open rules

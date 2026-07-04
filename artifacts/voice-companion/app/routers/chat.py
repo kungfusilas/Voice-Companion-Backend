@@ -277,11 +277,24 @@ def _offer_cooldown_ok(last_offer_ts: str | None) -> bool:
 
 # ── Profile / tier fetch ──────────────────────────────────────────────────────
 
+import logging as _logging
+_chat_logger = _logging.getLogger(__name__)
+
+
 async def _get_user_profile(user_id: str) -> tuple[str, str]:
-    """Return (subscription_tier, subscription_status) for an authenticated user."""
+    """Return (subscription_tier, subscription_status) for an authenticated user.
+
+    Also enforces 5-year plan expiry in-band so every API call re-validates
+    access, since Stripe never fires a cancellation webhook for one-time payments.
+
+    Billing guardrail: only downgrade on an explicit expired/canceled signal.
+    On any DB error we fall through to ('free', 'inactive') — the same
+    pre-existing safe default — rather than leaving state ambiguous.
+    """
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     if not url or not key:
+        _chat_logger.warning("_get_user_profile: SUPABASE env vars missing user=%s", user_id)
         return ("free", "inactive")
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -290,18 +303,50 @@ async def _get_user_profile(user_id: str) -> tuple[str, str]:
                 headers={"apikey": key, "Authorization": f"Bearer {key}"},
                 params={
                     "id": f"eq.{user_id}",
-                    "select": "subscription_tier,subscription_status",
+                    "select": "subscription_tier,subscription_status,billing_period,access_expires_at",
                     "limit": "1",
                 },
             )
         if resp.status_code == 200 and resp.json():
             row = resp.json()[0]
-            return (
-                row.get("subscription_tier", "free") or "free",
-                row.get("subscription_status", "inactive") or "inactive",
+            tier = row.get("subscription_tier", "free") or "free"
+            status = row.get("subscription_status", "inactive") or "inactive"
+            billing_period = row.get("billing_period") or "monthly"
+            access_expires_at = row.get("access_expires_at")
+
+            # 5-year plans: Stripe never fires subscription.deleted for one-time
+            # payments, so we enforce expiry here on every request.
+            if billing_period == "5year" and status == "active" and access_expires_at:
+                try:
+                    expires = datetime.fromisoformat(access_expires_at.replace("Z", "+00:00"))
+                    if expires.tzinfo is None:
+                        expires = expires.replace(tzinfo=timezone.utc)
+                    if expires < datetime.now(timezone.utc):
+                        _chat_logger.info(
+                            "_get_user_profile: 5-year plan expired user=%s tier=%s "
+                            "expires=%s — downgrading to free",
+                            user_id, tier, access_expires_at,
+                        )
+                        tier = "free"
+                        status = "inactive"
+                except (ValueError, AttributeError) as exc:
+                    # Cannot parse date — fail open, keep stored tier
+                    _chat_logger.warning(
+                        "_get_user_profile: cannot parse access_expires_at=%r user=%s "
+                        "err=%s — keeping tier=%s (fail open)",
+                        access_expires_at, user_id, exc, tier,
+                    )
+
+            _chat_logger.debug(
+                "_get_user_profile user=%s tier=%s status=%s period=%s",
+                user_id, tier, status, billing_period,
             )
-    except Exception:
-        pass
+            return (tier, status)
+    except Exception as exc:
+        _chat_logger.warning(
+            "_get_user_profile: DB error user=%s err=%s — returning safe default",
+            user_id, exc,
+        )
     return ("free", "inactive")
 
 

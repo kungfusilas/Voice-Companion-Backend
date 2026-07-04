@@ -3,10 +3,13 @@ Per-message relationship scoring and stage name resolution.
 Uses Claude Haiku for fast/cheap scoring and stage-up reactions.
 """
 import json
+import logging
 import os
 import anthropic
 
-_sync_client: anthropic.Anthropic | None = None
+logger = logging.getLogger(__name__)
+
+_async_client: anthropic.AsyncAnthropic | None = None
 
 # (lo, hi, stage_name) inclusive ranges
 STAGE_THRESHOLDS: dict[str, list[tuple[int, int, str]]] = {
@@ -51,14 +54,14 @@ _SCORING_CRITERIA: dict[str, str] = {
 _SCORING_MODEL = "claude-haiku-4-5-20251001"
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _sync_client
-    if _sync_client is None:
+def _get_async_client() -> anthropic.AsyncAnthropic:
+    global _async_client
+    if _async_client is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY not set")
-        _sync_client = anthropic.Anthropic(api_key=api_key)
-    return _sync_client
+        _async_client = anthropic.AsyncAnthropic(api_key=api_key)
+    return _async_client
 
 
 def get_stage(score: int, rel_type: str) -> tuple[str, int, int]:
@@ -80,6 +83,7 @@ async def score_user_message(
     Score the user's message via Claude Haiku.
     Returns a score_delta between -5 and +5.
     Defaults to 0 on any error.
+    Uses AsyncAnthropic so this never blocks the event loop.
     """
     criteria = _SCORING_CRITERIA.get(relationship_type, _SCORING_CRITERIA["romance"])
     prompt = (
@@ -90,8 +94,8 @@ async def score_user_message(
         f"Positive = strengthens the relationship. Negative = weakens it."
     )
     try:
-        client = _get_client()
-        response = client.messages.create(
+        client = _get_async_client()
+        response = await client.messages.create(
             model=_SCORING_MODEL,
             max_tokens=24,
             system="You are a relationship quality scorer. Respond with only valid JSON.",
@@ -101,7 +105,8 @@ async def score_user_message(
         data = json.loads(text)
         delta = int(data.get("score_delta", 0))
         return max(-5, min(5, delta))
-    except Exception:
+    except Exception as exc:
+        logger.debug("score_user_message failed (defaulting to 0): %s", exc)
         return 0
 
 
@@ -114,10 +119,11 @@ async def generate_stage_up_reaction(
     """
     Generate a short in-character reaction for crossing a stage boundary.
     Returns 1-2 sentences, or empty string on failure.
+    Uses AsyncAnthropic so this never blocks the event loop.
     """
     try:
-        client = _get_client()
-        response = client.messages.create(
+        client = _get_async_client()
+        response = await client.messages.create(
             model=_SCORING_MODEL,
             max_tokens=100,
             system=companion_system_prompt,
@@ -131,5 +137,6 @@ async def generate_stage_up_reaction(
             }],
         )
         return response.content[0].text.strip()
-    except Exception:
+    except Exception as exc:
+        logger.debug("generate_stage_up_reaction failed (returning empty): %s", exc)
         return ""

@@ -1,5 +1,6 @@
 """
-Relationship progression system.
+Relationship progression system.  All Supabase calls are wrapped with
+asyncio.to_thread because supabase-py's execute() is synchronous.
 
 Tracks message counts, connection scores, and drift state per user+companion pair.
 
@@ -20,6 +21,7 @@ Full schema (already applied via migration):
         unique(user_id, companion_id)
     );
 """
+import asyncio
 import os
 import re
 from supabase import create_client, Client
@@ -64,8 +66,8 @@ def _defaults(user_id: str, companion_id: str) -> dict:
 async def get_stats(user_id: str, companion_id: str) -> dict:
     """Return the full row for this user+companion pair. Returns defaults if missing."""
     try:
-        result = (
-            _get_client()
+        result = await asyncio.to_thread(
+            lambda: _get_client()
             .table("relationship_stats")
             .select("*")
             .eq("user_id", user_id)
@@ -98,15 +100,18 @@ async def needs_drift_inject(user_id: str, companion_id: str) -> bool:
 async def upsert_relationship_type(user_id: str, companion_id: str, rel_type: str) -> None:
     """Set the relationship type. Preserves connection_score if row already exists."""
     try:
-        _get_client().table("relationship_stats").upsert(
-            {
-                "user_id": user_id,
-                "companion_id": companion_id,
-                "relationship_type": rel_type,
-                "updated_at": "now()",
-            },
-            on_conflict="user_id,companion_id",
-        ).execute()
+        payload = {
+            "user_id": user_id,
+            "companion_id": companion_id,
+            "relationship_type": rel_type,
+            "updated_at": "now()",
+        }
+        await asyncio.to_thread(
+            lambda: _get_client()
+            .table("relationship_stats")
+            .upsert(payload, on_conflict="user_id,companion_id")
+            .execute()
+        )
     except Exception:
         pass
 
@@ -117,16 +122,19 @@ async def apply_score_delta(user_id: str, companion_id: str, delta: int) -> int:
         stats = await get_stats(user_id, companion_id)
         current = stats.get("connection_score") or 50
         new_score = max(0, min(100, current + delta))
-        _get_client().table("relationship_stats").upsert(
-            {
-                "user_id": user_id,
-                "companion_id": companion_id,
-                "connection_score": new_score,
-                "last_scored_at": "now()",
-                "updated_at": "now()",
-            },
-            on_conflict="user_id,companion_id",
-        ).execute()
+        payload = {
+            "user_id": user_id,
+            "companion_id": companion_id,
+            "connection_score": new_score,
+            "last_scored_at": "now()",
+            "updated_at": "now()",
+        }
+        await asyncio.to_thread(
+            lambda: _get_client()
+            .table("relationship_stats")
+            .upsert(payload, on_conflict="user_id,companion_id")
+            .execute()
+        )
         return new_score
     except Exception:
         return 50
@@ -136,16 +144,19 @@ async def increment_message_count(user_id: str, companion_id: str) -> None:
     """Increment message_count by 1 and update last_active_at. Fire-and-forget safe."""
     try:
         current = await get_message_count(user_id, companion_id)
-        _get_client().table("relationship_stats").upsert(
-            {
-                "user_id": user_id,
-                "companion_id": companion_id,
-                "message_count": current + 1,
-                "updated_at": "now()",
-                "last_active_at": "now()",
-            },
-            on_conflict="user_id,companion_id",
-        ).execute()
+        payload = {
+            "user_id": user_id,
+            "companion_id": companion_id,
+            "message_count": current + 1,
+            "updated_at": "now()",
+            "last_active_at": "now()",
+        }
+        await asyncio.to_thread(
+            lambda: _get_client()
+            .table("relationship_stats")
+            .upsert(payload, on_conflict="user_id,companion_id")
+            .execute()
+        )
     except Exception:
         pass
 
@@ -153,15 +164,18 @@ async def increment_message_count(user_id: str, companion_id: str) -> None:
 async def mark_drift(user_id: str, companion_id: str) -> None:
     """Set drift_flag=True (does NOT set drift_acknowledged_at)."""
     try:
-        _get_client().table("relationship_stats").upsert(
-            {
-                "user_id": user_id,
-                "companion_id": companion_id,
-                "drift_flag": True,
-                "updated_at": "now()",
-            },
-            on_conflict="user_id,companion_id",
-        ).execute()
+        payload = {
+            "user_id": user_id,
+            "companion_id": companion_id,
+            "drift_flag": True,
+            "updated_at": "now()",
+        }
+        await asyncio.to_thread(
+            lambda: _get_client()
+            .table("relationship_stats")
+            .upsert(payload, on_conflict="user_id,companion_id")
+            .execute()
+        )
     except Exception:
         pass
 
@@ -169,15 +183,18 @@ async def mark_drift(user_id: str, companion_id: str) -> None:
 async def acknowledge_drift(user_id: str, companion_id: str) -> None:
     """Set drift_acknowledged_at=now() so the drift message never repeats."""
     try:
-        _get_client().table("relationship_stats").upsert(
-            {
-                "user_id": user_id,
-                "companion_id": companion_id,
-                "drift_acknowledged_at": "now()",
-                "updated_at": "now()",
-            },
-            on_conflict="user_id,companion_id",
-        ).execute()
+        payload = {
+            "user_id": user_id,
+            "companion_id": companion_id,
+            "drift_acknowledged_at": "now()",
+            "updated_at": "now()",
+        }
+        await asyncio.to_thread(
+            lambda: _get_client()
+            .table("relationship_stats")
+            .upsert(payload, on_conflict="user_id,companion_id")
+            .execute()
+        )
     except Exception:
         pass
 
