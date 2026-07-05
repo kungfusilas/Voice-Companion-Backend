@@ -37,6 +37,7 @@ from app.routers import weekly_report as weekly_report_router
 from app.routers import account as account_router
 from app.routers import milestones as milestones_router
 from app.routers import ritual as ritual_router
+from app.routers import memory_dashboard as memory_dashboard_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -176,8 +177,9 @@ app.include_router(photo_router.router,           prefix="/api/photo",          
 app.include_router(client_log_router.router,      prefix="/api",                     tags=["diagnostics"])
 app.include_router(weekly_report_router.router,   prefix="/api/weekly-report",        tags=["weekly-report"])
 app.include_router(account_router.router,         prefix="/api/account",              tags=["account"])
-app.include_router(milestones_router.router,      prefix="/api/milestones",            tags=["milestones"])
-app.include_router(ritual_router.router,          prefix="/api/ritual",                tags=["ritual"])
+app.include_router(milestones_router.router,        prefix="/api/milestones",            tags=["milestones"])
+app.include_router(ritual_router.router,            prefix="/api/ritual",                tags=["ritual"])
+app.include_router(memory_dashboard_router.router,  prefix="/api/memory-dashboard",      tags=["memory-dashboard"])
 
 
 @app.get("/api/healthz")

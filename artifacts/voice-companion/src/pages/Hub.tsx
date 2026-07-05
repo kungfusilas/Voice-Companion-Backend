@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -12,6 +12,7 @@ import { PersonalityMap } from "./PersonalityMap";
 import { ConversationDebrief } from "./ConversationDebrief";
 import { LegacyModal } from "@/components/LegacyModal";
 import { LegacyChapters } from "./LegacyChapters";
+import { MemoryDashboard } from "./MemoryDashboard";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -32,6 +33,10 @@ const BASE_TABS = [
   { id: "roleplay",        label: "Roleplay Simulator",  icon: Drama         },
 ] as const;
 
+const PREMIUM_TABS = [
+  { id: "memory-dashboard",  label: "Memory Dashboard",    icon: LayoutDashboard },
+] as const;
+
 const POWER_TABS = [
   { id: "your-profile",      label: "Your Profile",        icon: Brain         },
   { id: "session-debrief",   label: "Session Debrief",     icon: MessageSquare },
@@ -39,9 +44,10 @@ const POWER_TABS = [
   { id: "legacy-chapters",   label: "Legacy Chapters",     icon: ScrollText    },
 ] as const;
 
-type BaseTab  = typeof BASE_TABS[number]["id"];
-type PowerTab = typeof POWER_TABS[number]["id"];
-type Tab = BaseTab | PowerTab;
+type BaseTab    = typeof BASE_TABS[number]["id"];
+type PremiumTab = typeof PREMIUM_TABS[number]["id"];
+type PowerTab   = typeof POWER_TABS[number]["id"];
+type Tab = BaseTab | PremiumTab | PowerTab;
 
 const BG: React.CSSProperties = {
   background: "linear-gradient(145deg, #0d0d1a 0%, #0f0720 50%, #0d0d1a 100%)",
@@ -125,6 +131,22 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
         {/* Tab bar */}
         <div className="flex gap-1 mt-5 overflow-x-auto pb-1 scrollbar-none">
           {BASE_TABS.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium whitespace-nowrap transition-all shrink-0 ${
+                tab === id
+                  ? "bg-violet-600/40 text-white border border-violet-500/40"
+                  : "text-white/40 hover:text-white/60 border border-transparent"
+              }`}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+            </button>
+          ))}
+
+          {/* Premium-only tabs */}
+          {isPremiumHub && PREMIUM_TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setTab(id)}
@@ -273,6 +295,14 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
           {tab === "legacy-chapters" && (
             <motion.div key="legacy-chapters" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
               <LegacyChapters userId="" currentPersona={currentPersona} isPower={isPowerHub} />
+            </motion.div>
+          )}
+          {tab === "memory-dashboard" && (
+            <motion.div key="memory-dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <MemoryDashboard
+                currentPersona={currentPersona}
+                isPremium={isPremiumHub}
+              />
             </motion.div>
           )}
         </AnimatePresence>

@@ -166,8 +166,17 @@ async def save_memory(
             )
             if resp.status_code in (200, 201):
                 rows = resp.json()
-                logger.debug("[memory] save_memory: OK — id=%s", rows[0].get("id") if rows else "n/a")
-                return rows[0] if rows else {}
+                saved = rows[0] if rows else {}
+                logger.debug("[memory] save_memory: OK — id=%s", saved.get("id", "n/a"))
+                # Fire non-blocking AI categorization — never blocks or breaks the write
+                if saved.get("id"):
+                    try:
+                        asyncio.create_task(
+                            _categorize_saved_memory(saved["id"], content)
+                        )
+                    except Exception:
+                        pass  # create_task can fail outside an event loop in tests
+                return saved
             logger.warning("[memory] save_memory ERROR: HTTP %d", resp.status_code)
             return {}
     except Exception as exc:
@@ -210,6 +219,14 @@ async def retrieve_memories(
 
         ids = [m["id"] for m in memories if m.get("id")]
         extra = await _fetch_salience_fields(ids)
+
+        # Filter out sensitive memories — treat missing column (pre-DDL) as non-sensitive
+        memories = [
+            m for m in memories
+            if not extra.get(m.get("id", ""), {}).get("sensitive")
+        ]
+        if not memories:
+            return []
 
         now_utc = datetime.now(timezone.utc)
         for m in memories:
@@ -259,8 +276,18 @@ async def retrieve_memories(
         return []
 
 
+async def _categorize_saved_memory(memory_id: str, content: str) -> None:
+    """Classify and persist category for a newly saved memory. Fires as create_task()."""
+    # Import here to avoid circular; memory_dashboard owns the classify logic
+    try:
+        from app.routers.memory_dashboard import categorize_memory_async
+        await categorize_memory_async(memory_id, content)
+    except Exception as exc:
+        logger.debug("[memory] _categorize_saved_memory error (non-fatal): %r", exc)
+
+
 async def _fetch_salience_fields(ids: list[str]) -> dict[str, dict]:
-    """Batch-fetch salience, retrieval_count, last_retrieved for a list of memory IDs."""
+    """Batch-fetch salience, retrieval_count, last_retrieved, sensitive for a list of memory IDs."""
     if not ids:
         return {}
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -273,7 +300,7 @@ async def _fetch_salience_fields(ids: list[str]) -> dict[str, dict]:
                 headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
                 params={
                     "id": f"in.{ids_param}",
-                    "select": "id,salience,retrieval_count,last_retrieved",
+                    "select": "id,salience,retrieval_count,last_retrieved,sensitive",
                 },
             )
         if resp.status_code == 200:
