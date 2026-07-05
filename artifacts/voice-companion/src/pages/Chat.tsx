@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef, useId, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon, Trophy } from "lucide-react";
+import { JourneyPanel } from "@/components/JourneyPanel";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
 import { PushToTalkButton } from "@/components/PushToTalkButton";
@@ -28,6 +29,9 @@ import {
   ApiError,
   getUsageStatus,
   clientLog,
+  getMilestones,
+  markMilestonesSeen,
+  getRitualStatus,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
@@ -120,6 +124,13 @@ export function ChatPage({
   const [stageMax, setStageMax] = useState(100);
   const [scoreDelta, setScoreDelta] = useState<number | undefined>(undefined);
 
+  // Journey panel
+  const [showJourney, setShowJourney] = useState(false);
+
+  // Weekly ritual — inject context into first message if a ritual is due
+  const ritualContextRef = useRef<string | null>(null);
+  const ritualInjectedRef = useRef(false);
+
   // Romantic mode — persisted in localStorage, premium only
   const rmKey = `romantic_mode_${userId}_${persona.id}`;
   const ruKey = `romantic_unlocked_${userId}_${persona.id}`;
@@ -193,6 +204,25 @@ export function ChatPage({
   const handleSilencePause = useCallback(() => {
     setError("Conversation paused — tap the mic button to resume.");
   }, []);
+
+  // Ritual check on mount — authenticated users only
+  useEffect(() => {
+    if (isGuest) return;
+    getRitualStatus(persona.id).then((status) => {
+      if (!status.due || !status.questions?.length) return;
+      const qs = status.questions.map((q, i) => `${i + 1}. ${q}`).join("\n");
+      ritualContextRef.current = (
+        `[WEEKLY RITUAL — CONSENT FIRST]: ` +
+        `You want to ask some quick questions to get to know this person better. ` +
+        `Before asking anything, say something warm like: ` +
+        `"Hey — can I ask you a few quick questions to get to know you a little better?" ` +
+        `Only proceed if they clearly say yes or something positive. ` +
+        `If they decline or seem uncomfortable, say "No worries at all!" and move on naturally. ` +
+        `If they say yes, ask these questions one at a time (do not ask all at once):\n${qs}\n` +
+        `Their answers are worth remembering — treat them as important.`
+      );
+    }).catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Init meter + romantic mode from DB (skip for guests)
   useEffect(() => {
@@ -301,6 +331,14 @@ export function ChatPage({
       nameContextSentRef.current = true;
     }
 
+    // Inject weekly ritual context on the first message after a ritual check fires
+    if (!isGuest && ritualContextRef.current && !ritualInjectedRef.current) {
+      onboardingCtx = onboardingCtx
+        ? `${onboardingCtx}\n\n${ritualContextRef.current}`
+        : ritualContextRef.current;
+      ritualInjectedRef.current = true;
+    }
+
     try {
       for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx)) {
         if (event.type === "token") {
@@ -388,6 +426,23 @@ export function ChatPage({
             setStageName(event.stage_name ?? "");
             setStageMin(event.stage_min ?? 0);
             setStageMax(event.stage_max ?? 100);
+          }
+
+          // Milestone check — fire in background after each AI reply
+          if (!isGuest) {
+            getMilestones(persona.id).then((data) => {
+              if (!data.newly_unlocked.length) return;
+              const defs = data.milestones.filter((m) => data.newly_unlocked.includes(m.id));
+              const lines = defs.map((m) => `${m.icon} **${m.title}** — ${m.description}`).join("\n");
+              setMessages((prev) => [
+                ...prev,
+                {
+                  role: "assistant" as const,
+                  content: `✨ *Milestone unlocked!*\n${lines}`,
+                },
+              ]);
+              markMilestonesSeen(persona.id, data.newly_unlocked).catch(() => {});
+            }).catch(() => {});
           }
 
           // Track guest onboarding progress BEFORE TTS so we know if this is Q10
@@ -791,6 +846,16 @@ export function ChatPage({
             />
           )}
 
+          {!isGuest && (
+            <button
+              onClick={() => setShowJourney(true)}
+              title="Our Journey"
+              className="flex items-center justify-center w-8 h-8 rounded-full border border-white/12 bg-white/04 hover:bg-white/10 transition text-amber-400/70 hover:text-amber-400"
+            >
+              <Trophy className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {/* Romantic mode — premium only */}
           {isPremium && (
             <motion.button
@@ -1172,6 +1237,17 @@ export function ChatPage({
         onClose={() => setQuotaErrorDetail(null)}
         onUpgrade={() => { setQuotaErrorDetail(null); onBack(); }}
       />
+
+      {/* Journey panel overlay */}
+      <AnimatePresence>
+        {showJourney && (
+          <JourneyPanel
+            companionId={persona.id}
+            companionName={persona.name}
+            onClose={() => setShowJourney(false)}
+          />
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

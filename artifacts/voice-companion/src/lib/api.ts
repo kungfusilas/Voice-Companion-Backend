@@ -540,3 +540,57 @@ export async function submitWaitlist(
   });
   if (!resp.ok) throw new Error("Waitlist submission failed");
 }
+
+// ── Milestones ─────────────────────────────────────────────────────────────────
+
+export interface MilestoneState {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  category: string;
+  unlocked: boolean;
+  unlocked_at: string | null;
+  seen: boolean;
+  progress: number;
+  progress_max: number;
+}
+
+export interface MilestonesResponse {
+  connection_score: number;
+  bond_level: string;
+  milestones: MilestoneState[];
+  newly_unlocked: string[];
+}
+
+export async function getMilestones(companionId: string): Promise<MilestonesResponse> {
+  const resp = await apiFetch(`${BASE}/milestones?companion_id=${encodeURIComponent(companionId)}`);
+  if (!resp.ok) return { connection_score: 50, bond_level: "Warming", milestones: [], newly_unlocked: [] };
+  return resp.json();
+}
+
+export async function markMilestonesSeen(companionId: string, milestoneIds: string[]): Promise<void> {
+  if (!milestoneIds.length) return;
+  await apiFetch(`${BASE}/milestones/seen`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ companion_id: companionId, milestone_ids: milestoneIds }),
+  }).catch(() => {});
+}
+
+// ── Ritual ─────────────────────────────────────────────────────────────────────
+
+export interface RitualStatus {
+  due: boolean;
+  questions: string[] | null;
+}
+
+export async function getRitualStatus(companionId: string): Promise<RitualStatus> {
+  try {
+    const resp = await apiFetch(`${BASE}/ritual/status?companion_id=${encodeURIComponent(companionId)}`);
+    if (!resp.ok) return { due: false, questions: null };
+    return resp.json();
+  } catch {
+    return { due: false, questions: null };
+  }
+}
