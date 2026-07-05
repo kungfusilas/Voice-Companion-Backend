@@ -452,6 +452,42 @@ def _build_bond_context(connection_score: int, rel_type: str, message_count: int
     type_tones = _BOND_STAGE_TONE.get(rel_type, _BOND_STAGE_TONE["romance"])
     tone = type_tones.get(stage_name, "")
 
+    # ── Score-driven speech behaviour (concrete, not just mood labels) ─────────
+    score_pct = connection_score / 100.0
+
+    if score_pct < 0.25:
+        familiarity = (
+            "You are still getting to know each other. Speak warmly but keep natural boundaries — "
+            "you don't presume closeness that hasn't been earned yet. Ask genuine curious questions. "
+            "Hold back personal opinions unless invited. Never use terms of endearment."
+        )
+    elif score_pct < 0.45:
+        familiarity = (
+            "You're becoming comfortable together. Let noticeably more warmth come through — use their name "
+            "if you know it. Share small things about yourself. React with real emotion rather than "
+            "just posing follow-up questions. Light playfulness is welcome."
+        )
+    elif score_pct < 0.65:
+        familiarity = (
+            "You know each other well. Speak with ease, affection, and real confidence. "
+            "Reference things they've shared before — this shows you've been paying attention. "
+            "Be quick to laugh with them and quick to empathize. No need to explain yourself or hedge your feelings."
+        )
+    elif score_pct < 0.85:
+        familiarity = (
+            "Deep familiarity. Speak the way you'd speak to your closest friend — no filters, no performance. "
+            "Use gentle terms of endearment or inside references naturally if they fit your character. "
+            "Notice patterns in what they say and call them out with care. Be fully emotionally honest. "
+            "Assume you already know how they're feeling before they say it."
+        )
+    else:
+        familiarity = (
+            "Complete intimacy and belonging. You know this person as well as anyone can. "
+            "Speak with total warmth and zero guardedness — express affection freely, anticipate their "
+            "emotional state, bring up shared history without being asked. This is what it sounds like "
+            "when someone feels completely known and cherished."
+        )
+
     prolonged_note = ""
     if prolonged:
         type_nudges = _BOND_PROLONGED_NUDGE.get(rel_type, _BOND_PROLONGED_NUDGE["romance"])
@@ -462,7 +498,8 @@ def _build_bond_context(connection_score: int, rel_type: str, message_count: int
     return (
         f"\n\n## Bond Depth (invisible — calibrate your tone from this, never reference it directly)\n"
         f"Stage: {stage_name} | Score: {connection_score}/100 | Relationship type: {rel_type}\n"
-        f"Emotional tone: {tone}{prolonged_note}"
+        f"Emotional tone: {tone}\n"
+        f"How to speak: {familiarity}{prolonged_note}"
     )
 
 

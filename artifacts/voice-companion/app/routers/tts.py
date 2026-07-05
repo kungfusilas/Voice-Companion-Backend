@@ -4,7 +4,11 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from app import store
 from app import elevenlabs_client
-from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError, COMPANION_VOICE_SETTINGS
+from app.elevenlabs_client import (
+    DEFAULT_MODEL_ID,
+    ElevenLabsError,
+    build_voice_settings_for_register,
+)
 from app.auth_middleware import verify_token_or_guest
 from app.usage import check_voice_quota, get_user_tier
 from app.routers.tier_check import is_premium_or_higher
@@ -41,6 +45,86 @@ def _strip_non_speakable(text: str) -> str:
     return cleaned.strip()
 
 
+# ── Emotional register detection ───────────────────────────────────────────────
+
+_HEAVY_SIGNALS = [
+    "that's hard", "that must be", "i'm so sorry", "that hurts", "must be tough",
+    "sounds like a lot", "struggling", "grief", "loss", "afraid", "worried",
+    "scared", "exhausted", "drained", "can't stop", "breaking", "overwhelmed",
+    "rough day", "hard day", "hard time", "been hard", "really hard",
+    "miss you", "missed you", "missing you", "i hear you", "i see you",
+    "makes sense you'd feel", "that's a lot to carry", "not easy",
+]
+
+_PLAYFUL_SIGNALS = [
+    "haha", "lol", "lmao", "omg", "wait what", "no way", "seriously?",
+    "that's hilarious", "that's amazing", "genius", "finally", "love that",
+    "i love that", "oh wow", "oh my", "get out of here", "stop it",
+]
+
+_INTIMATE_SIGNALS = [
+    "just between", "i've been thinking", "honestly,", "can i tell you",
+    "between you and me", "i have to admit", "truth is,", "to be honest,",
+]
+
+
+def _detect_register(text: str) -> str:
+    """
+    Classify a TTS text snippet into one of four emotional registers for voice delivery.
+    Returns: "heavy" | "playful" | "intimate" | "warm" (default).
+
+    Detection is heuristic — lightweight, zero-latency, and deterministic.
+    Only the CLEAN spoken text arrives here (tags/markdown already stripped by frontend).
+    """
+    lower = text.lower()
+    char_len = len(text.strip())
+    exclamation_count = text.count("!")
+
+    heavy_hits = sum(1 for s in _HEAVY_SIGNALS if s in lower)
+    playful_hits = sum(1 for s in _PLAYFUL_SIGNALS if s in lower)
+    intimate_hit = (
+        char_len < 130
+        and any(p in lower for p in _INTIMATE_SIGNALS)
+    )
+
+    if heavy_hits >= 2 or (heavy_hits >= 1 and exclamation_count == 0 and char_len > 40):
+        return "heavy"
+    if playful_hits >= 1 or exclamation_count >= 3:
+        return "playful"
+    if intimate_hit:
+        return "intimate"
+    return "warm"
+
+
+def _inject_el_tags(text: str, register: str) -> str:
+    """
+    Insert at most one ElevenLabs audio tag at a natural break point.
+
+    Rules:
+      heavy   → prepend [sighs] — voice sighs before the empathetic reply
+      playful → append [laughs] after the first exclamatory moment
+      intimate/warm → no tag; VoiceSettings carry the register instead
+
+    Falls back to plain text for very short inputs or when no natural
+    insertion point exists. Tags are silent to the chat UI — they only reach
+    ElevenLabs because they're injected after the frontend's display-strip pass.
+    """
+    if not text or len(text.strip()) < 20:
+        return text
+
+    if register == "heavy":
+        return f"[sighs] {text}"
+
+    if register == "playful":
+        m = re.search(r"([^.!?]*!)", text)
+        if m:
+            end = m.end()
+            return text[:end] + " [laughs]" + text[end:]
+        return text
+
+    return text
+
+
 def _elevenlabs_http_error(e: ElevenLabsError) -> HTTPException:
     status = e.status_code if e.status_code in (400, 401, 402, 404, 422) else 502
     return HTTPException(status_code=status, detail=str(e))
@@ -72,7 +156,12 @@ async def persona_speak_stream(
     """
     Stream speech using the voice assigned to a persona.
     Returns chunked audio/mpeg — playback can begin as soon as the first chunks arrive.
-    Same auth/quota rules as /speak.
+
+    Emotional register is detected from the clean text and drives both:
+      - VoiceSettings (stability/style per register)
+      - ElevenLabs audio tags ([sighs], [laughs]) injected before synthesis
+    Tags never appear in the chat UI — they're injected here after the frontend's
+    display-strip pass.
     """
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -106,12 +195,14 @@ async def persona_speak_stream(
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
-    voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
+    register = _detect_register(clean_text)
+    tagged_text = _inject_el_tags(clean_text, register)
+    voice_settings = build_voice_settings_for_register(request.persona_id, register)
 
     async def audio_stream():
         try:
             async for chunk in elevenlabs_client.synthesize_stream(
-                text=clean_text,
+                text=tagged_text,
                 voice_id=persona.voice_id,
                 model_id=request.model_id,
                 voice_settings=voice_settings,
@@ -119,7 +210,21 @@ async def persona_speak_stream(
             ):
                 yield chunk
         except ElevenLabsError as e:
-            raise RuntimeError(str(e))
+            if tagged_text != clean_text:
+                # Tag may have caused the rejection — retry with plain text
+                try:
+                    async for chunk in elevenlabs_client.synthesize_stream(
+                        text=clean_text,
+                        voice_id=persona.voice_id,
+                        model_id=request.model_id,
+                        voice_settings=voice_settings,
+                        previous_text=request.previous_text or None,
+                    ):
+                        yield chunk
+                except ElevenLabsError as e2:
+                    raise RuntimeError(str(e2))
+            else:
+                raise RuntimeError(str(e))
 
     return StreamingResponse(
         audio_stream(),
@@ -140,7 +245,8 @@ async def persona_speak(
 ):
     """
     Speak text using the voice assigned to a persona, with per-companion
-    voice tuning. Returns full audio as audio/mpeg.
+    voice tuning and register-driven emotional delivery.
+    Returns full audio as audio/mpeg.
 
     Requires authentication for paid users. Voice quota is deducted based on
     estimated duration (~13 characters per second).
@@ -177,18 +283,33 @@ async def persona_speak(
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
-    voice_settings = COMPANION_VOICE_SETTINGS.get(request.persona_id)
+    register = _detect_register(clean_text)
+    tagged_text = _inject_el_tags(clean_text, register)
+    voice_settings = build_voice_settings_for_register(request.persona_id, register)
 
     try:
         audio = await elevenlabs_client.synthesize(
-            text=clean_text,
+            text=tagged_text,
             voice_id=persona.voice_id,
             model_id=request.model_id,
             voice_settings=voice_settings,
             previous_text=request.previous_text or None,
         )
     except ElevenLabsError as e:
-        raise _elevenlabs_http_error(e)
+        if tagged_text != clean_text:
+            # Tag may have caused the rejection — retry with plain text
+            try:
+                audio = await elevenlabs_client.synthesize(
+                    text=clean_text,
+                    voice_id=persona.voice_id,
+                    model_id=request.model_id,
+                    voice_settings=voice_settings,
+                    previous_text=request.previous_text or None,
+                )
+            except ElevenLabsError as e2:
+                raise _elevenlabs_http_error(e2)
+        else:
+            raise _elevenlabs_http_error(e)
 
     return Response(
         content=audio,

@@ -6,7 +6,7 @@ from elevenlabs.core.api_error import ApiError
 from elevenlabs.types import VoiceSettings
 
 _FALLBACK_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
-DEFAULT_MODEL_ID = "eleven_turbo_v2"  # English-only model — consistent voice, no multilingual auto-detection
+DEFAULT_MODEL_ID = "eleven_turbo_v2_5"  # English model with audio tag support and improved expressiveness
 
 _sync_client: ElevenLabs | None = None
 _async_client: AsyncElevenLabs | None = None
@@ -38,6 +38,39 @@ COMPANION_VOICE_SETTINGS: dict[str, VoiceSettings] = {
         use_speaker_boost=True,
     ),
 }
+
+# Register-driven stability/style overrides.
+# similarity_boost and use_speaker_boost are preserved from the companion base.
+_REGISTER_OVERRIDES: dict[str, tuple[float, float]] = {
+    "heavy":    (0.65, 0.30),  # measured and grounded — serious emotional weight
+    "playful":  (0.25, 0.85),  # lively, expressive — maximum personality energy
+    "intimate": (0.20, 0.40),  # soft, breathy — close and tender
+    "warm":     (0.30, 0.55),  # gently lifted — warmer than the heavy base default
+}
+
+_DEFAULT_VOICE_SETTINGS = VoiceSettings(
+    stability=0.50, similarity_boost=0.75, style=0.50, use_speaker_boost=True
+)
+
+
+def build_voice_settings_for_register(companion_id: str, register: str) -> VoiceSettings:
+    """
+    Build VoiceSettings for a companion + emotional register.
+
+    stability and style are driven by the register; similarity_boost and
+    use_speaker_boost are preserved from the companion's per-voice base.
+    Returns the companion's base settings when the register is unknown/empty.
+    """
+    base = COMPANION_VOICE_SETTINGS.get(companion_id, _DEFAULT_VOICE_SETTINGS)
+    override = _REGISTER_OVERRIDES.get(register)
+    if override is None:
+        return base
+    return VoiceSettings(
+        stability=override[0],
+        similarity_boost=base.similarity_boost,
+        style=override[1],
+        use_speaker_boost=base.use_speaker_boost,
+    )
 
 
 def get_default_voice_id() -> str:
