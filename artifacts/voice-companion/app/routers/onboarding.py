@@ -1,15 +1,16 @@
 """
-Onboarding utilities for the guest/new-user experience.
+Onboarding utilities for the new-user experience.
 
 POST /api/onboarding/wow
-  - No auth required (uses in-memory session store)
+  - Requires a valid JWT (B-C4 fix: previously unauthenticated)
   - Reads the session history to generate 3-4 personal observations
   - Returns the wow-moment message in the persona's voice
 """
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from app import store, claude
+from app.auth_middleware import verify_token
 
 router = APIRouter()
 
@@ -24,7 +25,14 @@ class WowResponse(BaseModel):
 
 
 @router.post("/wow", response_model=WowResponse)
-async def generate_wow_moment(req: WowRequest):
+async def generate_wow_moment(
+    req: WowRequest,
+    _user_id: str = Depends(verify_token),
+):
+    """
+    B-C4 fix: endpoint now requires a valid JWT.  Previously unauthenticated
+    callers with any session_id could trigger an unbounded Claude API call.
+    """
     persona = store.get_persona(req.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
@@ -34,7 +42,7 @@ async def generate_wow_moment(req: WowRequest):
 
     if len(user_msgs) < 3:
         return WowResponse(
-            message=f"I feel like I'm already starting to understand you. Thank you for sharing so openly with me."
+            message="I feel like I'm already starting to understand you. Thank you for sharing so openly with me."
         )
 
     recent = user_msgs[-12:]
@@ -64,5 +72,5 @@ Do NOT use bullet points or numbered lists. Keep it under 110 words."""
         return WowResponse(message=reply)
     except Exception:
         return WowResponse(
-            message=f"I want you to know — I was really listening. And I already feel like I understand something real about you. Thank you for trusting me with all of that."
+            message="I want you to know — I was really listening. And I already feel like I understand something real about you. Thank you for trusting me with all of that."
         )

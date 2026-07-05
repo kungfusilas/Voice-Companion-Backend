@@ -5,12 +5,16 @@ Embeddings: Voyage AI voyage-3 (1024 dimensions) via httpx
 Storage:    Supabase pgvector
 Extraction: Claude Haiku decides what's worth saving
 """
-import os
-import json
 import asyncio
+import json
+import logging
+import os
 from datetime import datetime, timezone
+
 import httpx
 from supabase import create_client, Client
+
+logger = logging.getLogger(__name__)
 
 _client: Client | None = None
 
@@ -70,6 +74,7 @@ async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
     """
     from app import claude  # late import — avoids circular at module level
     prompt = _SHOULD_REMEMBER_PROMPT_BASE
+    raw = ""
     try:
         turn = f"User: {user_msg}\nCompanion: {companion_msg}"
         raw = await claude.send_message(
@@ -79,7 +84,6 @@ async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
         )
-        # Strip markdown code fences if Claude wraps the JSON
         cleaned = raw.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("```")[1]
@@ -88,13 +92,15 @@ async def should_remember(user_msg: str, companion_msg: str) -> dict | None:
             cleaned = cleaned.strip()
         result = json.loads(cleaned)
         if not result.get("should_save"):
-            print(f"[memory] should_remember: not worth saving for exchange: {turn[:80]!r}")
+            logger.debug("[memory] should_remember: not saving this exchange")
             return None
-        print(f"[memory] should_remember: SAVING — type={result.get('type')} importance={result.get('importance')} content={result.get('content','')[:80]!r}")
+        logger.debug(
+            "[memory] should_remember: SAVING — type=%s importance=%s",
+            result.get("type"), result.get("importance"),
+        )
         return result
     except Exception as exc:
-        raw_preview = repr(raw) if "raw" in dir() else "n/a"
-        print(f"[memory] should_remember ERROR: {exc!r} | raw response: {raw_preview}")
+        logger.warning("[memory] should_remember ERROR: %r", exc)
         return None
 
 
@@ -104,7 +110,6 @@ async def save_memory(
     content: str,
     memory_type: str = "fact",
     importance: int = 5,
-    # Legacy Mode tagging fields — stored silently, power future features
     person_mentioned: str | None = None,
     emotional_theme: str | None = None,
     life_event: bool = False,
@@ -112,21 +117,20 @@ async def save_memory(
 ) -> dict:
     """
     Embed content and POST directly to /rest/v1/memories via httpx.
-    Using raw httpx (not supabase-py) gives full transparency and avoids
-    any client-side caching layers. Returns {} silently on any error.
+    Returns {} silently on any error.
 
-    Legacy tagging fields (person_mentioned, emotional_theme, life_event, topic)
-    are stored alongside the embedding to power Legacy Mode when it unlocks.
-    Run these SQL migrations to enable them:
+    Run these SQL migrations to enable legacy tagging fields:
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS person_mentioned text;
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS emotional_theme   text;
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS life_event        boolean DEFAULT false;
       ALTER TABLE memories ADD COLUMN IF NOT EXISTS topic             text;
     """
-    print(f"[memory] save_memory: user={user_id} companion={companion_id} type={memory_type} importance={importance} content={content[:80]!r}")
+    logger.debug(
+        "[memory] save_memory: user=%s companion=%s type=%s importance=%d",
+        user_id[:8], companion_id, memory_type, importance,
+    )
     try:
         embedding = await embed(content)
-        # PostgreSQL vector literal expected by pgvector: "[x,y,z,...]"
         vec_str = "[" + ",".join(f"{v:.8f}" for v in embedding) + "]"
 
         supabase_url = os.environ.get("SUPABASE_URL", "")
@@ -140,7 +144,6 @@ async def save_memory(
             "embedding": vec_str,
             "importance": max(1, min(10, int(importance))),
         }
-        # Add legacy tags only when present — columns may not exist yet in older schemas
         if person_mentioned:
             payload["person_mentioned"] = person_mentioned
         if emotional_theme:
@@ -163,12 +166,12 @@ async def save_memory(
             )
             if resp.status_code in (200, 201):
                 rows = resp.json()
-                print(f"[memory] save_memory: OK — row saved, id={rows[0].get('id') if rows else 'n/a'}")
+                logger.debug("[memory] save_memory: OK — id=%s", rows[0].get("id") if rows else "n/a")
                 return rows[0] if rows else {}
-            print(f"[memory] save_memory ERROR: HTTP {resp.status_code} — {resp.text[:300]}")
+            logger.warning("[memory] save_memory ERROR: HTTP %d", resp.status_code)
             return {}
     except Exception as exc:
-        print(f"[memory] save_memory EXCEPTION: {exc!r}")
+        logger.warning("[memory] save_memory EXCEPTION: %r", exc)
         return {}
 
 
@@ -180,37 +183,34 @@ async def retrieve_memories(
 ) -> list[dict]:
     """
     Find the top_k most semantically similar memories via cosine similarity,
-    then rerank using a composite salience formula:
-
-        final_score = (0.50 * cosine_similarity)
-                    + (0.25 * emotional_intensity)
-                    + (0.15 * recurrence_signal)
-                    + (0.10 * recency_weight)
-
-    Results are re-sorted by final_score descending before returning.
-    retrieval_count and last_retrieved are updated fire-and-forget.
+    then rerank using a composite salience formula.
     Returns [] on any error.
     """
     try:
         query_embedding = await embed(query_text)
         client = _get_client()
-        result = client.rpc("match_memories", {
-            "query_embedding": query_embedding,
-            "match_user_id": user_id,
-            "match_companion_id": companion_id,
-            "match_count": top_k,
-        }).execute()
+
+        # supabase-py is synchronous — run in a thread to avoid blocking the event loop
+        result = await asyncio.to_thread(
+            lambda: client.rpc("match_memories", {
+                "query_embedding": query_embedding,
+                "match_user_id": user_id,
+                "match_companion_id": companion_id,
+                "match_count": top_k,
+            }).execute()
+        )
         memories: list[dict] = result.data or []
-        print(f"[memory] retrieve_memories: user={user_id} companion={companion_id} found={len(memories)} memories")
+        logger.debug(
+            "[memory] retrieve_memories: user=%s found=%d memories",
+            user_id[:8], len(memories),
+        )
 
         if not memories:
             return memories
 
-        # ── Fetch salience + retrieval fields for reranking ───────────────
         ids = [m["id"] for m in memories if m.get("id")]
         extra = await _fetch_salience_fields(ids)
 
-        # ── Reranking formula ─────────────────────────────────────────────
         now_utc = datetime.now(timezone.utc)
         for m in memories:
             mid = m.get("id", "")
@@ -249,22 +249,18 @@ async def retrieve_memories(
 
         memories.sort(key=lambda m: m.get("final_score", 0.0), reverse=True)
 
-        # ── Update retrieval stats fire-and-forget ────────────────────────
         if ids:
             asyncio.create_task(_update_retrieval_stats(ids, extra))
 
         return memories
 
     except Exception as exc:
-        print(f"[memory] retrieve_memories EXCEPTION: {exc!r}")
+        logger.warning("[memory] retrieve_memories EXCEPTION: %r", exc)
         return []
 
 
 async def _fetch_salience_fields(ids: list[str]) -> dict[str, dict]:
-    """
-    Batch-fetch salience, retrieval_count, last_retrieved for a list of memory IDs.
-    Returns a dict keyed by id. Returns {} on any error (reranking falls back to defaults).
-    """
+    """Batch-fetch salience, retrieval_count, last_retrieved for a list of memory IDs."""
     if not ids:
         return {}
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -282,18 +278,14 @@ async def _fetch_salience_fields(ids: list[str]) -> dict[str, dict]:
             )
         if resp.status_code == 200:
             return {row["id"]: row for row in resp.json()}
-        print(f"[memory] _fetch_salience_fields HTTP {resp.status_code}: {resp.text[:200]}")
+        logger.warning("[memory] _fetch_salience_fields HTTP %d", resp.status_code)
     except Exception as exc:
-        print(f"[memory] _fetch_salience_fields EXCEPTION: {exc!r}")
+        logger.warning("[memory] _fetch_salience_fields EXCEPTION: %r", exc)
     return {}
 
 
 async def _update_retrieval_stats(ids: list[str], extra: dict[str, dict]) -> None:
-    """
-    Increment retrieval_count and set last_retrieved = now() for each memory.
-    Uses current counts from `extra` to compute the new value without a race-prone RPC.
-    Fire-and-forget — errors are logged and never propagate.
-    """
+    """Increment retrieval_count and set last_retrieved = now() for each memory."""
     supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -314,24 +306,25 @@ async def _update_retrieval_stats(ids: list[str], extra: dict[str, dict]) -> Non
                     json={"retrieval_count": current_count + 1, "last_retrieved": now_iso},
                 )
             except Exception as exc:
-                print(f"[memory] _update_retrieval_stats EXCEPTION id={mid}: {exc!r}")
+                logger.warning("[memory] _update_retrieval_stats EXCEPTION id=%s: %r", mid, exc)
 
 
 async def fetch_memories(user_id: str, persona_id: str, limit: int = 10) -> list[dict]:
     """
     Fetch recent memories by creation time (used by GET /api/memories and legacy paths).
-    Accepts persona_id as alias for companion_id — same values.
     """
     try:
         client = _get_client()
-        result = (
-            client.table("memories")
-            .select("id, content, memory_type, importance, created_at")
-            .eq("user_id", user_id)
-            .eq("companion_id", persona_id)
-            .order("created_at", desc=True)
-            .limit(limit)
-            .execute()
+        result = await asyncio.to_thread(
+            lambda: (
+                client.table("memories")
+                .select("id, content, memory_type, importance, created_at")
+                .eq("user_id", user_id)
+                .eq("companion_id", persona_id)
+                .order("created_at", desc=True)
+                .limit(limit)
+                .execute()
+            )
         )
         return result.data or []
     except Exception:
@@ -342,13 +335,15 @@ async def list_all_memories(user_id: str, persona_id: str) -> list[dict]:
     """Return all memories for the GET /api/memories endpoint."""
     try:
         client = _get_client()
-        result = (
-            client.table("memories")
-            .select("id, content, memory_type, importance, created_at")
-            .eq("user_id", user_id)
-            .eq("companion_id", persona_id)
-            .order("created_at", desc=True)
-            .execute()
+        result = await asyncio.to_thread(
+            lambda: (
+                client.table("memories")
+                .select("id, content, memory_type, importance, created_at")
+                .eq("user_id", user_id)
+                .eq("companion_id", persona_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
         )
         return result.data or []
     except Exception:

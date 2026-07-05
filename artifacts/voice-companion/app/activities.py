@@ -8,9 +8,10 @@ import anthropic
 from app.companions import COMPANION_MAP, build_system_prompt
 
 _MODEL = "claude-haiku-4-5-20251001"
-_client: anthropic.Anthropic | None = None
+_async_client: anthropic.AsyncAnthropic | None = None
 
-# Per-companion voice guidance injected into every activity prompt
+_MAX_TOOL_ITERATIONS = 5
+
 _INTRO_STYLE: dict[str, str] = {
     "companion-aria": (
         "Aria is warm and sweetly playful but a little nervous — she builds up to the game "
@@ -75,14 +76,14 @@ _PROMPT_TEMPLATES = {
 }
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
+def _get_async_client() -> anthropic.AsyncAnthropic:
+    global _async_client
+    if _async_client is None:
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY not set")
-        _client = anthropic.Anthropic(api_key=api_key)
-    return _client
+        _async_client = anthropic.AsyncAnthropic(api_key=api_key)
+    return _async_client
 
 
 def _strip_fences(text: str) -> str:
@@ -90,7 +91,6 @@ def _strip_fences(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
         lines = text.split("\n")
-        # Drop opening fence line and closing fence line
         lines = lines[1:]
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
@@ -120,8 +120,8 @@ async def generate_activity(companion_id: str, activity_type: str) -> dict:
         + "\n\nRespond ONLY with valid JSON, no markdown fences, no extra commentary."
     )
 
-    client = _get_client()
-    response = client.messages.create(
+    client = _get_async_client()
+    response = await client.messages.create(
         model=_MODEL,
         max_tokens=600,
         system=system_prompt,

@@ -16,23 +16,24 @@ Supabase: run once in SQL editor:
     create index if not exists debriefs_user_idx on conversation_debriefs (user_id, created_at desc);
 """
 
-import os
 import json
-import asyncio
 import logging
-import httpx
+import os
+
 import anthropic
+import httpx
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
 from app.routers.auth import verify_token
+from app.routers.tier_check import fetch_tier, is_power_or_higher
 from app import store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _HAIKU = "claude-haiku-4-5-20251001"
-_TIER_RANK: dict[str, int] = {"free": 0, "basic": 1, "premium": 2, "power": 3, "elite": 4}
 
 
 def _supa_headers() -> dict:
@@ -42,29 +43,6 @@ def _supa_headers() -> dict:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
-
-
-async def _get_tier(user_id: str) -> str:
-    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
-    if not url or not key:
-        return "free"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{url}/rest/v1/profiles",
-                headers=_supa_headers(),
-                params={"id": f"eq.{user_id}", "select": "subscription_tier", "limit": "1"},
-            )
-        if resp.status_code == 200 and resp.json():
-            return resp.json()[0].get("subscription_tier", "free") or "free"
-    except Exception:
-        pass
-    return "free"
-
-
-def _is_power(tier: str) -> bool:
-    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["power"]
 
 
 class DebriefRequest(BaseModel):
@@ -83,7 +61,6 @@ async def _run_analysis(
     if not history or len([m for m in history if m.role == "user"]) < 3:
         raise ValueError("Not enough conversation to analyze")
 
-    # Build transcript snippet (last 40 messages max to stay within token limits)
     recent = history[-40:]
     transcript_lines = []
     for m in recent:
@@ -117,8 +94,8 @@ Rules:
 - Companion note should be warm and encouraging, not clinical.
 - Return ONLY valid JSON."""
 
-    client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-    msg = client.messages.create(
+    client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    msg = await client.messages.create(
         model=_HAIKU,
         max_tokens=600,
         messages=[{"role": "user", "content": prompt}],
@@ -154,8 +131,8 @@ async def _save_debrief(user_id: str, session_id: str, companion_id: str | None,
 
 @router.post("/debrief")
 async def create_debrief(body: DebriefRequest, user_id: str = Depends(verify_token)):
-    tier = await _get_tier(user_id)
-    if not _is_power(tier):
+    tier = await fetch_tier(user_id)
+    if not is_power_or_higher(tier):
         raise HTTPException(status_code=403, detail="Power tier required")
     try:
         debrief = await _run_analysis(user_id, body.session_id, body.companion_id, body.companion_name)
@@ -167,8 +144,8 @@ async def create_debrief(body: DebriefRequest, user_id: str = Depends(verify_tok
 
 @router.get("/debriefs")
 async def list_debriefs(limit: int = 10, user_id: str = Depends(verify_token)):
-    tier = await _get_tier(user_id)
-    if not _is_power(tier):
+    tier = await fetch_tier(user_id)
+    if not is_power_or_higher(tier):
         raise HTTPException(status_code=403, detail="Power tier required")
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:

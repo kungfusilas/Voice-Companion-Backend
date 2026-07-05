@@ -6,7 +6,6 @@ from typing import AsyncGenerator
 from app.models import ChatMessage
 from app import search as web_search
 
-_client: anthropic.Anthropic | None = None
 _async_client: anthropic.AsyncAnthropic | None = None
 
 SEARCH_TOOL = {
@@ -25,15 +24,7 @@ SEARCH_TOOL = {
     },
 }
 
-
-def get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise RuntimeError("ANTHROPIC_API_KEY environment variable is not set")
-        _client = anthropic.Anthropic(api_key=api_key)
-    return _client
+_MAX_TOOL_ITERATIONS = 5
 
 
 def get_async_client() -> anthropic.AsyncAnthropic:
@@ -75,12 +66,12 @@ async def send_message(
     model: str = "claude-sonnet-4-6",
     max_tokens: int = 1024,
 ) -> str:
-    """Send a message with agentic tool-use loop (web search)."""
-    client = get_client()
+    """Send a message with agentic tool-use loop (web search). Fully async."""
+    client = get_async_client()
     messages = _build_messages(history, user_message)
 
-    while True:
-        response = client.messages.create(
+    for _ in range(_MAX_TOOL_ITERATIONS):
+        response = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
             system=system_prompt,
@@ -88,24 +79,26 @@ async def send_message(
             tools=[SEARCH_TOOL],
         )
 
-        if response.stop_reason == "tool_use":
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    query = block.input.get("query", "")
-                    result = await web_search.search(query)
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                    })
-            messages.append({"role": "assistant", "content": _serialize_content(response.content)})
-            messages.append({"role": "user", "content": tool_results})
-        else:
+        if response.stop_reason != "tool_use":
             for block in response.content:
                 if block.type == "text":
                     return block.text
             return ""
+
+        tool_results = []
+        for block in response.content:
+            if block.type == "tool_use":
+                query = block.input.get("query", "")
+                result = await web_search.search(query)
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                })
+        messages.append({"role": "assistant", "content": _serialize_content(response.content)})
+        messages.append({"role": "user", "content": tool_results})
+
+    return ""
 
 
 async def stream_message(
@@ -128,7 +121,7 @@ async def stream_message(
     messages = _build_messages(history, user_message)
     full_text = ""
 
-    while True:
+    for _ in range(_MAX_TOOL_ITERATIONS):
         final_message = None
 
         try:
@@ -152,7 +145,6 @@ async def stream_message(
         if final_message.stop_reason != "tool_use":
             break
 
-        # Process tool calls, emit "searching" events to the client
         tool_results = []
         for block in final_message.content:
             if block.type == "tool_use":
@@ -194,7 +186,6 @@ async def stream_message_with_image(
     client = get_async_client()
     b64_data = base64.standard_b64encode(image_bytes).decode("utf-8")
 
-    # Build history as plain-text exchanges; attach the image only to the current turn.
     messages: list[dict] = [{"role": msg.role, "content": msg.content} for msg in history]
     messages.append({
         "role": "user",

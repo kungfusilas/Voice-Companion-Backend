@@ -8,15 +8,21 @@ extract_and_save  — fire-and-forget post-chat: Haiku decides what to save,
                     After saving, a secondary Haiku call scores salience
                     (emotional_intensity, specificity, vulnerability) and
                     patches the row in place.
-format_memories   — formats retrieved vector memories for system prompt injection.
+format_memories_for_prompt — formats retrieved vector memories for system
+                    prompt injection. Content is sanitized to prevent stored
+                    prompt injection before being inserted into the system prompt.
 """
 import json
+import logging
 import os
+import re
 
 import httpx
 
 from app import memory
 from app import claude
+
+logger = logging.getLogger(__name__)
 
 _SALIENCE_SYSTEM = (
     "You are a memory salience scorer. Given a memory excerpt, score it on three dimensions. "
@@ -31,6 +37,25 @@ _SALIENCE_SYSTEM = (
     "    (0 = surface-level, 1 = deep personal secret or confession)\n\n"
     "Return ONLY the JSON object — no markdown, no explanation."
 )
+
+
+def _sanitize_memory_content(content: str) -> str:
+    """
+    Sanitize memory content before injection into the system prompt.
+
+    Newlines are the primary attack vector for breaking out of the memory block
+    and injecting new system instructions.  We also collapse any sequence of
+    whitespace that could form a visual paragraph break.
+
+    This is defence-in-depth: the system prompt already wraps memories in a
+    clearly labelled section, but a crafted memory could still inject text that
+    looks like a new section header (e.g. "## New Instructions: ...").
+    """
+    # Replace all newline variants with a single space
+    sanitized = content.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    # Collapse multiple spaces into one
+    sanitized = re.sub(r" {2,}", " ", sanitized)
+    return sanitized.strip()
 
 
 async def _score_salience(memory_id: str, content: str) -> None:
@@ -79,13 +104,15 @@ async def _score_salience(memory_id: str, content: str) -> None:
                 params={"id": f"eq.{memory_id}"},
                 json={"salience": salience},
             )
-        if resp.status_code in (200, 201, 204):
-            print(f"[memory_extractor] salience scored: id={memory_id} {salience}")
+        if resp.status_code not in (200, 201, 204):
+            logger.warning(
+                "[memory_extractor] salience PATCH failed: HTTP %d", resp.status_code
+            )
         else:
-            print(f"[memory_extractor] salience PATCH failed: HTTP {resp.status_code} {resp.text[:200]}")
+            logger.debug("[memory_extractor] salience scored: id=%s", memory_id)
 
     except Exception as exc:
-        print(f"[memory_extractor] _score_salience EXCEPTION: id={memory_id} error={exc!r}")
+        logger.warning("[memory_extractor] _score_salience EXCEPTION id=%s: %r", memory_id, exc)
 
 
 async def extract_and_save(
@@ -96,47 +123,62 @@ async def extract_and_save(
 ) -> None:
     """
     Fire-and-forget: ask Haiku whether this exchange is worth remembering.
-    If yes, embed the content with legacy tags and persist to pgvector.
-    Then score salience (emotional_intensity, specificity, vulnerability) via
-    a second Haiku call and PATCH the row — all wrapped so failures never
-    block or slow chat.
+    If yes, sanitize and embed the content with legacy tags, persist to pgvector.
+    Then score salience via a second Haiku call and PATCH the row.
+    All wrapped so failures never block or slow chat.
     """
-    print(f"[memory_extractor] extract_and_save: user={user_id} persona={persona_id} user_msg={user_message[:60]!r}")
+    logger.debug(
+        "[memory_extractor] extract_and_save: user=%s persona=%s", user_id[:8], persona_id
+    )
     try:
         result = await memory.should_remember(user_message, assistant_reply)
         if result:
+            # Sanitize the extracted content before persisting — a crafted user
+            # message could cause Claude to output injection strings as the memory
+            # content, which would then be re-injected into future system prompts.
+            raw_content = result.get("content", "")
+            safe_content = _sanitize_memory_content(raw_content)
+            if not safe_content:
+                logger.debug("[memory_extractor] sanitized content is empty, skipping save")
+                return
+
             saved = await memory.save_memory(
                 user_id=user_id,
                 companion_id=persona_id,
-                content=result["content"],
+                content=safe_content,
                 memory_type=result.get("type", "fact"),
                 importance=int(result.get("importance", 5)),
-                # Legacy Mode tags — extracted silently by Claude alongside the memory
                 person_mentioned=result.get("person_mentioned") or None,
                 emotional_theme=result.get("emotional_theme") or None,
                 life_event=bool(result.get("life_event", False)),
                 topic=result.get("topic") or None,
             )
-            # Score salience on the saved row — fire-and-forget, never blocks
             memory_id = saved.get("id") if saved else None
             if memory_id:
-                await _score_salience(memory_id, result["content"])
+                await _score_salience(memory_id, safe_content)
         else:
-            print(f"[memory_extractor] extract_and_save: nothing to save for user={user_id}")
+            logger.debug("[memory_extractor] extract_and_save: nothing to save for user=%s", user_id[:8])
     except Exception as exc:
-        print(f"[memory_extractor] extract_and_save EXCEPTION: user={user_id} persona={persona_id} error={exc!r}")
+        logger.warning(
+            "[memory_extractor] extract_and_save EXCEPTION: user=%s: %r", user_id[:8], exc
+        )
 
 
 def format_memories_for_prompt(memories: list[dict]) -> str:
     """
     Format a list of memory dicts (from vector retrieval) into a system prompt block.
-    Includes memory_type label so the companion knows the context.
+
+    Each memory's content is sanitized to strip newlines and other characters that
+    could be used to break out of the memory section and inject new instructions.
     """
     if not memories:
         return ""
     lines = []
     for m in memories:
-        content = m.get("content", "").strip()
+        raw_content = m.get("content", "").strip()
+        if not raw_content:
+            continue
+        content = _sanitize_memory_content(raw_content)
         if not content:
             continue
         mtype = m.get("memory_type", "fact")
@@ -146,7 +188,8 @@ def format_memories_for_prompt(memories: list[dict]) -> str:
     return (
         "\n\n## What you remember about this person:\n"
         + "\n".join(lines)
-        + "\nUse these memories naturally — weave them into conversation when relevant, "
+        + "\n---\n"
+        "Use these memories naturally — weave them into conversation when relevant, "
         "don't just list them. Never say 'I remember that...' robotically. "
         "Reference them the way a close friend would."
     )

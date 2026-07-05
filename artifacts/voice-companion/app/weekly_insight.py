@@ -14,6 +14,7 @@ personality update pipeline:
 """
 import asyncio
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +23,8 @@ import httpx
 from app import claude
 from app import personality_tracker
 from app import personality_extractor
+
+logger = logging.getLogger(__name__)
 
 
 async def _fetch_week_memories(user_id: str, companion_id: str) -> list[dict]:
@@ -52,7 +55,7 @@ async def _fetch_week_memories(user_id: str, companion_id: str) -> list[dict]:
         )
         if resp.status_code == 200:
             return resp.json() or []
-        print(f"[weekly_insight] fetch_week_memories HTTP {resp.status_code}: {resp.text[:200]}")
+        logger.warning("[weekly_insight] fetch_week_memories HTTP %d", resp.status_code)
         return []
 
 
@@ -115,13 +118,7 @@ async def _weekly_personality_update(
     recent_msgs: list[str],
 ) -> None:
     """
-    Fire-and-forget coroutine that runs the full personality update pipeline:
-
-    1. Score Big Five from recent messages and persist the snapshot.
-    2. Fetch the last 4 snapshots and compute drift.
-    3. If any trait drifted past the significance threshold, call
-       personality_extractor.apply_drift_revision to revise the personality_map.
-
+    Fire-and-forget coroutine that runs the full personality update pipeline.
     All errors are swallowed — this must never affect the weekly report response.
     """
     try:
@@ -131,35 +128,31 @@ async def _weekly_personality_update(
         drifted_traits: list[dict] = drift_result.get("drift") or []
 
         if drifted_traits:
-            print(
-                f"[weekly_insight] drift detected for user={user_id} companion={companion_id}: "
-                f"{[d['trait'] for d in drifted_traits]}"
+            logger.info(
+                "[weekly_insight] drift detected: user=%s companion=%s traits=%s",
+                user_id[:8], companion_id,
+                [d["trait"] for d in drifted_traits],
             )
             await personality_extractor.apply_drift_revision(user_id, drifted_traits)
         else:
-            print(
-                f"[weekly_insight] no significant drift for user={user_id} companion={companion_id} "
-                f"(snapshots={drift_result.get('snapshot_count', 0)})"
+            logger.debug(
+                "[weekly_insight] no significant drift: user=%s companion=%s snapshots=%d",
+                user_id[:8], companion_id, drift_result.get("snapshot_count", 0),
             )
 
     except Exception as exc:
-        print(f"[weekly_insight] _weekly_personality_update ERROR: {exc!r}")
+        logger.warning("[weekly_insight] _weekly_personality_update ERROR: %r", exc)
 
 
 async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
     """
     Generate a weekly insight report for the given user+companion pair.
-
-    Returns a dict with keys:
-      - emotional_themes: list[str]  (top 3)
-      - growth_moment:    str
-      - recurring_pattern: str
-      - next_session_question: str
-      - memory_count:     int  (how many memories were analysed)
-      - period_days:      int  (always 7)
     """
     memories = await _fetch_week_memories(user_id, companion_id)
-    print(f"[weekly_insight] generate_weekly_report: user={user_id} companion={companion_id} memories={len(memories)}")
+    logger.info(
+        "[weekly_insight] generating report: user=%s companion=%s memories=%d",
+        user_id[:8], companion_id, len(memories),
+    )
 
     if not memories:
         return {
@@ -201,10 +194,8 @@ async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
         result = json.loads(cleaned)
         result["memory_count"] = len(memories)
         result["period_days"] = 7
-        print(f"[weekly_insight] report generated OK for user={user_id}")
+        logger.info("[weekly_insight] report generated OK: user=%s", user_id[:8])
 
-        # Fire-and-forget: full personality update pipeline (score → drift → revise map).
-        # Fetch recent messages first (fast read); the heavy work happens in the background.
         recent_msgs = await _fetch_recent_user_messages(user_id, companion_id)
         if recent_msgs:
             asyncio.create_task(
@@ -214,7 +205,7 @@ async def generate_weekly_report(user_id: str, companion_id: str) -> dict:
         return result
 
     except Exception as exc:
-        print(f"[weekly_insight] generate_weekly_report ERROR: {exc!r}")
+        logger.warning("[weekly_insight] generate_weekly_report ERROR: %r", exc)
         return {
             "emotional_themes": [],
             "growth_moment": None,

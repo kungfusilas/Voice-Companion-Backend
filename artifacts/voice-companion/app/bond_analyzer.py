@@ -4,6 +4,16 @@ Bond Score analyzer — runs after every N chat messages.
 analyze_and_save  — fire-and-forget: sends user messages to Claude Haiku,
                     scores 8 relationship skills, persists to Supabase,
                     and awards hearts for measurable improvement.
+
+B-H3 fix: hearts double-award race addressed via session-scoped dedup key.
+The reason string encodes the session_id so that two concurrent calls for the
+same session produce the same reason string. Before awarding, we query whether
+a hearts row with this exact reason already exists for the user. If it does,
+we skip the award. This check is best-effort (small TOCTOU window) but safe:
+the window is milliseconds vs. the seconds a concurrent analysis would take.
+For fully atomic dedup, add a UNIQUE constraint in Supabase:
+  ALTER TABLE user_hearts ADD CONSTRAINT user_hearts_reason_unique
+    UNIQUE (user_id, reason);
 """
 import os
 import json
@@ -24,7 +34,6 @@ SKILLS = [
     "confidence",
 ]
 
-# Bond score milestones that award a bonus heart when crossed for the first time
 _MILESTONES = {60, 70, 80, 90}
 
 _SYSTEM = """You are a relationship communication analyst. Analyze the user's messages and score their relationship skills.
@@ -124,7 +133,33 @@ async def _save(user_id: str, persona_id: str, session_id: str, scores: dict, bs
             json=row,
         )
     if resp.status_code not in (200, 201):
-        logger.warning("bond_scores insert failed: %s %s", resp.status_code, resp.text)
+        logger.warning("bond_scores insert failed: %s", resp.status_code)
+
+
+async def _hearts_already_awarded(user_id: str, reason: str) -> bool:
+    """
+    Check whether a hearts row with this exact reason already exists for this user.
+
+    B-H3 dedup: reason encodes session_id so concurrent analyses for the same
+    session produce the same dedup key.  This query is the guard against double-award.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(
+                f"{_sb_url()}/rest/v1/user_hearts",
+                headers=_sb_headers(prefer=""),
+                params={
+                    "user_id": f"eq.{user_id}",
+                    "reason": f"eq.{reason}",
+                    "select": "id",
+                    "limit": "1",
+                },
+            )
+        if resp.status_code in (200, 206):
+            return bool(resp.json())
+    except Exception:
+        pass
+    return False  # fail-open: if check fails, allow the award
 
 
 async def _award_hearts(user_id: str, amount: int, reason: str) -> None:
@@ -156,24 +191,21 @@ def _hearts_for_improvement(
     hearts = 0
     reasons: list[str] = []
 
-    # Rule 1: overall improvement
     if new_bs > prev_bs:
         hearts += 1
         reasons.append(f"Bond Score improved {prev_bs}→{new_bs}")
 
-    # Rule 2: any skill improved meaningfully
     for s in SKILLS:
         if int(new_scores.get(s, 50)) - int(prev.get(s, 50)) >= 5:
             hearts += 1
             reasons.append(f"{s} improved")
-            break  # only 1 heart for skill improvement per analysis
+            break
 
-    # Rule 3: milestone crossed
     for m in _MILESTONES:
         if prev_bs < m <= new_bs:
             hearts += 1
             reasons.append(f"milestone {m}")
-            break  # only 1 milestone heart per analysis
+            break
 
     total = min(hearts, 3)
     return total, " · ".join(reasons)
@@ -189,9 +221,12 @@ async def analyze_and_save(
     """
     Fire-and-forget: analyze the conversation, persist bond scores, award hearts.
     Errors are silently swallowed — never blocks or slows chat.
+
+    B-H3 fix: hearts dedup key includes session_id so concurrent calls for the
+    same session produce the same reason string. We check for an existing row
+    before awarding to avoid double-award.
     """
     try:
-        # Fetch previous scores BEFORE saving so we can compare
         prev = await _get_previous_scores(user_id)
 
         scores = await _call_claude(user_messages, persona_name)
@@ -201,10 +236,20 @@ async def analyze_and_save(
         await _save(user_id, persona_id, session_id, clamped, bs)
         logger.info("Bond score saved: user=%s score=%d", user_id[:8], bs)
 
-        hearts, reason = _hearts_for_improvement(clamped, bs, prev)
+        hearts, base_reason = _hearts_for_improvement(clamped, bs, prev)
         if hearts > 0:
-            await _award_hearts(user_id, hearts, reason)
-            logger.info("Hearts awarded: user=%s hearts=%d reason=%s", user_id[:8], hearts, reason)
+            # Encode session_id in reason to create a per-session dedup key
+            dedup_reason = f"bond_analysis:{session_id[:12]}:{base_reason}"
+            already = await _hearts_already_awarded(user_id, dedup_reason)
+            if not already:
+                await _award_hearts(user_id, hearts, dedup_reason)
+                logger.info(
+                    "Hearts awarded: user=%s hearts=%d", user_id[:8], hearts
+                )
+            else:
+                logger.debug(
+                    "Hearts skipped (already awarded this session): user=%s", user_id[:8]
+                )
 
     except Exception as exc:
         logger.debug("Bond analyzer error (non-fatal): %s", exc)

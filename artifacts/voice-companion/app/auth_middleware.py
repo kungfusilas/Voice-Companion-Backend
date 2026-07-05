@@ -1,7 +1,7 @@
 """
 JWT auth middleware for Supabase-issued tokens.
 
-Supabase now signs JWTs with ECC (P-256 / ES256) keys.  We verify tokens by
+Supabase signs JWTs with ECC (P-256 / ES256) keys.  We verify tokens by
 fetching the project's public JWKS endpoint and caching the keys in memory.
 No shared secret is required.
 
@@ -12,7 +12,10 @@ Usage in a route:
     async def my_route(user_id: str = Depends(verify_token)):
         ...
 """
+import asyncio
+import os
 import time
+
 import httpx
 import jwt
 from fastapi import Depends, HTTPException, Request, status
@@ -20,58 +23,73 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 _security = HTTPBearer(auto_error=False)
 
-# Supabase JWKS endpoint for this project
-JWKS_URL = (
-    "https://kyeqlkqbhwaiwwnvjrtt.supabase.co/auth/v1/.well-known/jwks.json"
-)
-
 _JWKS_CACHE: dict = {"entries": [], "fetched_at": 0.0}
 _CACHE_TTL = 3600.0  # re-fetch keys at most once per hour
+_jwks_lock = asyncio.Lock()
 
 
-def _get_public_keys() -> list[tuple[str | None, object]]:
+def _jwks_url() -> str:
+    """Derive the JWKS URL from the SUPABASE_URL environment variable."""
+    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    if not base:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="SUPABASE_URL is not configured",
+        )
+    return f"{base}/auth/v1/.well-known/jwks.json"
+
+
+async def _get_public_keys() -> list[tuple[str | None, object]]:
     """
     Return cached list of (kid, public_key) tuples.
     Refreshes from the JWKS endpoint when the cache is stale or empty.
+    Uses an asyncio lock to prevent thundering-herd fetches at startup.
     """
     now = time.monotonic()
     if _JWKS_CACHE["entries"] and now - _JWKS_CACHE["fetched_at"] < _CACHE_TTL:
         return _JWKS_CACHE["entries"]
 
-    try:
-        resp = httpx.get(JWKS_URL, timeout=10.0)
-        resp.raise_for_status()
-    except Exception as exc:
-        if _JWKS_CACHE["entries"]:
+    async with _jwks_lock:
+        # Re-check inside the lock — another coroutine may have populated it.
+        now = time.monotonic()
+        if _JWKS_CACHE["entries"] and now - _JWKS_CACHE["fetched_at"] < _CACHE_TTL:
             return _JWKS_CACHE["entries"]
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Could not fetch auth public keys: {exc}",
-        )
 
-    entries: list[tuple[str | None, object]] = []
-    for jwk in resp.json().get("keys", []):
-        kty = jwk.get("kty", "")
-        kid = jwk.get("kid")
         try:
-            if kty == "EC":
-                key = jwt.algorithms.ECAlgorithm.from_jwk(jwk)
-            elif kty == "RSA":
-                key = jwt.algorithms.RSAAlgorithm.from_jwk(jwk)
-            else:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(_jwks_url())
+            resp.raise_for_status()
+        except Exception as exc:
+            if _JWKS_CACHE["entries"]:
+                return _JWKS_CACHE["entries"]
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Could not fetch auth public keys: {exc}",
+            )
+
+        entries: list[tuple[str | None, object]] = []
+        for jwk in resp.json().get("keys", []):
+            kty = jwk.get("kty", "")
+            kid = jwk.get("kid")
+            try:
+                if kty == "EC":
+                    key = jwt.algorithms.ECAlgorithm.from_jwk(jwk)
+                elif kty == "RSA":
+                    key = jwt.algorithms.RSAAlgorithm.from_jwk(jwk)
+                else:
+                    continue
+                entries.append((kid, key))
+            except Exception:
                 continue
-            entries.append((kid, key))
-        except Exception:
-            continue
 
-    if entries:
-        _JWKS_CACHE["entries"] = entries
-        _JWKS_CACHE["fetched_at"] = now
+        if entries:
+            _JWKS_CACHE["entries"] = entries
+            _JWKS_CACHE["fetched_at"] = time.monotonic()
 
-    return _JWKS_CACHE["entries"]
+        return _JWKS_CACHE["entries"]
 
 
-def verify_token(
+async def verify_token(
     credentials: HTTPAuthorizationCredentials = Depends(_security),
 ) -> str:
     """
@@ -102,17 +120,15 @@ def verify_token(
     kid = header.get("kid")
     alg = header.get("alg", "ES256")
 
-    keys = _get_public_keys()
+    keys = await _get_public_keys()
     if not keys:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="No public keys available for token verification",
         )
 
-    # Prefer the key matching the token's kid; fall back to trying all keys.
     candidates = [k for k_id, k in keys if k_id == kid] or [k for _, k in keys]
 
-    last_exc: Exception | None = None
     for public_key in candidates:
         try:
             payload = jwt.decode(
@@ -131,8 +147,7 @@ def verify_token(
                 detail="Token expired",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        except Exception as exc:
-            last_exc = exc
+        except Exception:
             continue
 
     raise HTTPException(
@@ -142,7 +157,7 @@ def verify_token(
     )
 
 
-def verify_token_or_guest(
+async def verify_token_or_guest(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(_security),
 ) -> str:
@@ -151,7 +166,7 @@ def verify_token_or_guest(
     guests.  Returns either a verified Supabase user UUID or 'guest_<id>'.
     """
     if credentials:
-        return verify_token(credentials)
+        return await verify_token(credentials)
 
     guest_id = request.headers.get("X-Guest-ID", "").strip()
     if guest_id:

@@ -15,8 +15,34 @@ SQL to run in Supabase SQL Editor:
   CREATE INDEX IF NOT EXISTS conversations_user_idx ON conversations(user_id, companion_id);
   CREATE UNIQUE INDEX IF NOT EXISTS conversations_session_idx ON conversations(session_id);
 
+B-H2 fix: DB-level atomicity via Postgres stored function.
+Run this ONCE in the Supabase SQL editor to enable truly atomic appends:
+
+  CREATE OR REPLACE FUNCTION append_conversation_exchange(
+    p_session_id   text,
+    p_user_id      text,
+    p_companion_id text,
+    p_messages     jsonb
+  ) RETURNS void
+  LANGUAGE plpgsql AS $$
+  BEGIN
+    INSERT INTO conversations (user_id, companion_id, session_id, messages)
+    VALUES (p_user_id, p_companion_id, p_session_id, p_messages)
+    ON CONFLICT (session_id) DO UPDATE
+      SET messages   = conversations.messages || EXCLUDED.messages,
+          updated_at = now();
+  END;
+  $$;
+
+When this function is present, save_exchange calls it via Supabase RPC and the
+append is atomic inside a single DB transaction — safe for autoscale deploys.
+
+If the function has not yet been created (RPC returns 404), save_exchange falls
+back to a fetch+patch approach. The fallback is correct for single-instance
+deploys but has a TOCTOU race window on concurrent writes to the same session.
+
 Design principles:
-  - One row per session_id (upserted — first exchange inserts, subsequent ones append).
+  - One row per session_id.
   - messages is a jsonb array: [{role, content, ts}]
   - Rows are NEVER deleted — this is the permanent archive.
   - All writes are fire-and-forget; errors are swallowed silently.
@@ -60,6 +86,45 @@ async def _fetch_session(client: httpx.AsyncClient, session_id: str) -> dict | N
     return None
 
 
+async def _save_via_rpc(
+    client: httpx.AsyncClient,
+    user_id: str,
+    companion_id: str,
+    session_id: str,
+    new_msgs: list[dict],
+) -> bool:
+    """
+    Call the append_conversation_exchange Postgres function via Supabase RPC.
+    Returns True if the call succeeded, False if the function doesn't exist (404)
+    or if any other error occurs.
+
+    The RPC is a single atomic DB transaction: it does INSERT ... ON CONFLICT DO
+    UPDATE atomically, eliminating the TOCTOU race of fetch+patch.
+    """
+    try:
+        resp = await client.post(
+            f"{_sb_url()}/rest/v1/rpc/append_conversation_exchange",
+            headers=_sb_headers(prefer="return=minimal"),
+            json={
+                "p_session_id": session_id,
+                "p_user_id": user_id,
+                "p_companion_id": companion_id,
+                "p_messages": new_msgs,
+            },
+        )
+        if resp.status_code == 404:
+            return False  # function not yet created — fall back
+        if resp.status_code in (200, 201, 204):
+            return True
+        logger.debug(
+            "conversation_store: RPC returned unexpected status %d", resp.status_code
+        )
+        return False
+    except Exception as exc:
+        logger.debug("conversation_store: RPC call failed: %s", exc)
+        return False
+
+
 async def save_exchange(
     user_id: str,
     companion_id: str,
@@ -69,7 +134,10 @@ async def save_exchange(
 ) -> None:
     """
     Fire-and-forget: append this exchange to the permanent conversation archive.
-    Inserts a new session row on first exchange; appends on subsequent ones.
+
+    Attempts atomic append via the append_conversation_exchange Postgres function
+    (requires one-time SQL migration above).  Falls back to fetch+patch if the
+    function is not installed.
     """
     try:
         ts = _now_iso()
@@ -79,10 +147,15 @@ async def save_exchange(
         ]
 
         async with httpx.AsyncClient(timeout=10) as client:
+            # Preferred path: atomic DB-level append via stored function
+            if await _save_via_rpc(client, user_id, companion_id, session_id, new_msgs):
+                logger.debug("Conversation archived (atomic RPC): session=%s", session_id[:8])
+                return
+
+            # Fallback: fetch+patch (TOCTOU risk on concurrent writes to same session)
             existing = await _fetch_session(client, session_id)
 
             if existing:
-                # Append to existing messages array
                 current: list = existing.get("messages") or []
                 current.extend(new_msgs)
                 await client.patch(
@@ -91,7 +164,6 @@ async def save_exchange(
                     json={"messages": current, "updated_at": ts},
                 )
             else:
-                # First exchange in this session — insert
                 await client.post(
                     f"{_sb_url()}/rest/v1/conversations",
                     headers=_sb_headers(prefer="return=minimal"),
@@ -103,7 +175,7 @@ async def save_exchange(
                     },
                 )
 
-        logger.debug("Conversation archived: session=%s", session_id[:8])
+        logger.debug("Conversation archived (fetch+patch fallback): session=%s", session_id[:8])
 
     except Exception as exc:
         logger.debug("Conversation store error (non-fatal): %s", exc)
@@ -151,8 +223,7 @@ async def get_recent_messages(
 ) -> list[dict]:
     """
     Return the most recent `limit` messages across all sessions for a user+companion pair.
-    Returns [{role, content}] sorted oldest-first — ready to seed the in-memory store
-    or display in the frontend.
+    Returns [{role, content}] sorted oldest-first.
     """
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -164,7 +235,7 @@ async def get_recent_messages(
                     "companion_id": f"eq.{companion_id}",
                     "select":       "messages",
                     "order":        "updated_at.desc",
-                    "limit":        "5",        # last 5 sessions max
+                    "limit":        "5",
                 },
             )
         if resp.status_code not in (200, 206):
@@ -173,13 +244,11 @@ async def get_recent_messages(
         if not rows:
             return []
 
-        # Flatten all messages from the returned sessions, sort by timestamp
         all_msgs: list[dict] = []
         for row in rows:
             all_msgs.extend(row.get("messages") or [])
         all_msgs.sort(key=lambda m: m.get("ts", ""))
 
-        # Take the last `limit` messages and strip to just role+content
         return [
             {"role": m["role"], "content": m["content"]}
             for m in all_msgs[-limit:]

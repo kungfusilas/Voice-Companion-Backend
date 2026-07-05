@@ -5,6 +5,7 @@ Scores users on Big Five personality traits from recent messages using Claude Ha
 persists snapshots to Supabase, and detects drift between the oldest and newest
 of the last 4 snapshots.
 """
+import logging
 import os
 import json
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from datetime import datetime, timezone
 import httpx
 
 from app import claude
+
+logger = logging.getLogger(__name__)
 
 _SUPABASE_TABLE = "personality_scores"
 
@@ -35,7 +38,10 @@ async def score_personality(
     persist the snapshot to Supabase, and return the score dict.
     Errors are logged and never bubble up — safe to fire-and-forget.
     """
-    print(f"[personality_tracker] score_personality: user={user_id} companion={companion_id} msgs={len(recent_messages)}")
+    logger.debug(
+        "[personality_tracker] score_personality: user=%s companion=%s msgs=%d",
+        user_id[:8], companion_id, len(recent_messages),
+    )
     try:
         joined = "\n".join(f"- {m}" for m in recent_messages)
         user_prompt = f"Here are the user's recent messages:\n\n{joined}\n\nScore their Big Five traits."
@@ -56,7 +62,6 @@ async def score_personality(
 
         scores = json.loads(cleaned)
 
-        # Validate — clamp each trait to 1-10
         traits = ["openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"]
         for t in traits:
             scores[t] = max(1, min(10, int(scores.get(t, 5))))
@@ -64,11 +69,11 @@ async def score_personality(
         scores["timestamp"] = datetime.now(timezone.utc).isoformat()
 
         await _save_snapshot(user_id, companion_id, scores)
-        print(f"[personality_tracker] snapshot saved: user={user_id} scores={scores}")
+        logger.info("[personality_tracker] snapshot saved: user=%s", user_id[:8])
         return scores
 
     except Exception as exc:
-        print(f"[personality_tracker] score_personality ERROR: {exc!r}")
+        logger.warning("[personality_tracker] score_personality ERROR: %r", exc)
         return {}
 
 
@@ -77,7 +82,10 @@ async def get_personality_drift(user_id: str, companion_id: str) -> dict:
     Read the last 4 personality snapshots and compare oldest to newest.
     Returns which traits shifted by more than 1.5 points and in which direction.
     """
-    print(f"[personality_tracker] get_personality_drift: user={user_id} companion={companion_id}")
+    logger.debug(
+        "[personality_tracker] get_personality_drift: user=%s companion=%s",
+        user_id[:8], companion_id,
+    )
     try:
         snapshots = await _fetch_snapshots(user_id, companion_id, limit=4)
 
@@ -97,7 +105,6 @@ async def get_personality_drift(user_id: str, companion_id: str) -> dict:
                 "note": "Only one snapshot so far — need at least 2 to detect drift.",
             }
 
-        # snapshots come back newest-first; oldest is last
         newest = snapshots[0].get("scores", {})
         oldest = snapshots[-1].get("scores", {})
 
@@ -127,7 +134,7 @@ async def get_personality_drift(user_id: str, companion_id: str) -> dict:
         }
 
     except Exception as exc:
-        print(f"[personality_tracker] get_personality_drift ERROR: {exc!r}")
+        logger.warning("[personality_tracker] get_personality_drift ERROR: %r", exc)
         return {"error": "Failed to retrieve drift data.", "drift": []}
 
 
@@ -150,7 +157,9 @@ async def _save_snapshot(user_id: str, companion_id: str, scores: dict) -> None:
             },
         )
         if resp.status_code not in (200, 201):
-            print(f"[personality_tracker] _save_snapshot HTTP {resp.status_code}: {resp.text[:200]}")
+            logger.warning(
+                "[personality_tracker] _save_snapshot HTTP %d", resp.status_code
+            )
 
 
 async def _fetch_snapshots(user_id: str, companion_id: str, limit: int = 4) -> list[dict]:
@@ -173,5 +182,7 @@ async def _fetch_snapshots(user_id: str, companion_id: str, limit: int = 4) -> l
         )
         if resp.status_code == 200:
             return resp.json() or []
-        print(f"[personality_tracker] _fetch_snapshots HTTP {resp.status_code}: {resp.text[:200]}")
+        logger.warning(
+            "[personality_tracker] _fetch_snapshots HTTP %d", resp.status_code
+        )
         return []

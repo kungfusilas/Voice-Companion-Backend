@@ -1,5 +1,5 @@
 """
-Weekly Insight Report — Premium only.
+Weekly Insight Report — Power tier only.
 
 Supabase table required (run once in Supabase SQL editor):
 
@@ -19,22 +19,22 @@ Supabase table required (run once in Supabase SQL editor):
       on weekly_reports (user_id, companion_id, week_start desc);
 """
 
-import os
 import json
-import asyncio
 import logging
-import httpx
-import anthropic
+import os
 from datetime import datetime, timezone, timedelta
+
+import anthropic
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.routers.auth import verify_token
+from app.routers.tier_check import fetch_tier, is_power_or_higher
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _HAIKU = "claude-haiku-4-5-20251001"
-_TIER_RANK: dict[str, int] = {"free": 0, "basic": 1, "premium": 2, "power": 3, "elite": 4}
 
 
 def _supa_headers() -> dict:
@@ -45,32 +45,6 @@ def _supa_headers() -> dict:
         "Content-Type": "application/json",
         "Prefer": "return=representation",
     }
-
-
-async def _get_user_tier(user_id: str) -> str:
-    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
-    if not url or not key:
-        return "free"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{url}/rest/v1/profiles",
-                headers=_supa_headers(),
-                params={"id": f"eq.{user_id}", "select": "subscription_tier", "limit": "1"},
-            )
-        if resp.status_code == 200 and resp.json():
-            return resp.json()[0].get("subscription_tier", "free") or "free"
-    except Exception:
-        pass
-    return "free"
-
-
-def _is_premium(tier: str) -> bool:
-    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
-
-def _is_power(tier: str) -> bool:
-    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["power"]
 
 
 def _week_start_iso() -> str:
@@ -133,8 +107,8 @@ Generate a JSON object with exactly these fields:
 Return ONLY valid JSON. No markdown, no explanation."""
 
     try:
-        client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
-        message = client.messages.create(
+        client = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+        message = await client.messages.create(
             model=_HAIKU,
             max_tokens=700,
             messages=[{"role": "user", "content": prompt}],
@@ -181,8 +155,8 @@ async def _store_report(user_id: str, companion_id: str, report: dict) -> None:
 
 @router.get("")
 async def get_weekly_report(companion_id: str = "aria", user_id: str = Depends(verify_token)):
-    tier = await _get_user_tier(user_id)
-    if not _is_power(tier):
+    tier = await fetch_tier(user_id)
+    if not is_power_or_higher(tier):
         raise HTTPException(status_code=403, detail="Power tier required")
 
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -210,8 +184,8 @@ async def get_weekly_report(companion_id: str = "aria", user_id: str = Depends(v
 
 @router.post("/generate")
 async def generate_weekly_report(companion_id: str = "aria", user_id: str = Depends(verify_token)):
-    tier = await _get_user_tier(user_id)
-    if not _is_power(tier):
+    tier = await fetch_tier(user_id)
+    if not is_power_or_higher(tier):
         raise HTTPException(status_code=403, detail="Power tier required")
 
     report = await _generate_report_data(user_id, companion_id)
@@ -221,7 +195,7 @@ async def generate_weekly_report(companion_id: str = "aria", user_id: str = Depe
 
 
 async def run_weekly_reports_for_all_users() -> None:
-    """Scheduled Monday job — generate reports for all premium users."""
+    """Scheduled Monday job — generate reports for all power users."""
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:
         return

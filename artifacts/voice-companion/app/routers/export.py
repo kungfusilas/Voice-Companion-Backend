@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from app.routers.auth import verify_token
+from app.routers.tier_check import fetch_tier, is_power_or_higher
 from app import personality_extractor, personality_tracker
 from app.companions import COMPANIONS
 
@@ -31,7 +32,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _EXPORT_VERSION = "1.0"
-_TIER_RANK: dict[str, int] = {"free": 0, "basic": 1, "premium": 2, "power": 3, "elite": 4}
 
 
 # ── Supabase helpers (same pattern as legacy_chapters.py) ─────────────────────
@@ -47,24 +47,6 @@ def _supa_headers() -> dict:
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
     }
-
-
-async def _get_user_tier(user_id: str) -> str:
-    url = _supa_url()
-    if not url:
-        return "free"
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(
-                f"{url}/rest/v1/profiles",
-                headers=_supa_headers(),
-                params={"id": f"eq.{user_id}", "select": "subscription_tier", "limit": "1"},
-            )
-        if resp.status_code == 200 and resp.json():
-            return resp.json()[0].get("subscription_tier", "free") or "free"
-    except Exception:
-        pass
-    return "free"
 
 
 # ── Data fetchers ─────────────────────────────────────────────────────────────
@@ -206,8 +188,8 @@ async def export_user_data(user_id: str = Depends(verify_token)):
     All four data fetches (memories, chapters, bond scores, personality) run
     concurrently. The result is streamed back as a downloadable .json attachment.
     """
-    tier = await _get_user_tier(user_id)
-    if _TIER_RANK.get(tier, 0) < _TIER_RANK["power"]:
+    tier = await fetch_tier(user_id)
+    if not is_power_or_higher(tier):
         raise HTTPException(
             status_code=403,
             detail={
