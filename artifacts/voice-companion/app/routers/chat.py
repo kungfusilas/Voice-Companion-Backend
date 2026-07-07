@@ -556,6 +556,71 @@ def _inject_date(prompt: str) -> str:
 _ENGLISH_INSTRUCTION = "\n\n## Language\nAlways reply in English regardless of what language the user writes in."
 
 
+# ── Session facts (in-process, keyed by "user_id:session_id") ────────────────
+# Accumulates named facts (people, ages, relationships) from the current
+# conversation so they are pinned into every system prompt regardless of
+# whether vector retrieval happens to return them on a given turn.
+# Cleared on process restart — designed for single-session consistency only.
+_SESSION_FACTS: dict[str, list[str]] = {}
+
+_FACT_EXTRACT_SYSTEM = (
+    "Extract concrete personal facts from the user's message that a companion should remember "
+    "for this conversation. Focus on: names of people (with their relationship to the user), "
+    "ages, locations, important ongoing situations. "
+    "Return ONLY a JSON array of concise fact strings, max 5. If nothing clear, return [].\n"
+    'Example: ["daughter Emma is 8 years old", "wife is named Sarah", "lives in Austin"]'
+)
+
+
+async def _extract_session_facts(user_id: str, session_id: str, user_message: str) -> None:
+    """
+    Fire-and-forget: extract key personal facts from the user's message and
+    cache them so they are pinned into every subsequent system prompt this session.
+    Never raises — errors are silently swallowed so the main chat path is never blocked.
+    """
+    try:
+        raw = await claude.send_message(
+            system_prompt=_FACT_EXTRACT_SYSTEM,
+            history=[],
+            user_message=user_message,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+        )
+        cleaned = raw.strip()
+        if "```" in cleaned:
+            parts = cleaned.split("```")
+            cleaned = parts[1] if len(parts) > 1 else parts[0]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+            cleaned = cleaned.strip()
+        facts: list = json.loads(cleaned)
+        if not isinstance(facts, list):
+            return
+        facts = [f for f in facts if isinstance(f, str) and f.strip()]
+        if not facts:
+            return
+        key = f"{user_id}:{session_id}"
+        existing = _SESSION_FACTS.get(key, [])
+        for fact in facts:
+            if fact not in existing:
+                existing.append(fact)
+        _SESSION_FACTS[key] = existing[:20]  # cap to prevent unbounded growth
+    except Exception:
+        pass
+
+
+def _build_session_facts_block(user_id: str, session_id: str) -> str:
+    """Return a formatted system prompt block with pinned session facts, or ''."""
+    facts = _SESSION_FACTS.get(f"{user_id}:{session_id}", [])
+    if not facts:
+        return ""
+    lines = "\n".join(f"- {f}" for f in facts)
+    return (
+        "\n\n## Things you already know this conversation (never ask about these again):\n"
+        + lines
+    )
+
+
 async def _build_system_prompt(
     persona,
     user_id: str,
@@ -564,6 +629,7 @@ async def _build_system_prompt(
     romantic_mode: bool = False,
     onboarding_context: str | None = None,
     is_guest: bool = False,
+    session_id: str = "",
 ) -> str:
     """
     Build the full system prompt.
@@ -601,6 +667,7 @@ async def _build_system_prompt(
         rel_context = relationship.build_relationship_context(persona.id, message_count)
         bond_context = _build_bond_context(connection_score, rel_type, message_count)
         personality_block = personality_extractor.format_personality_for_prompt(raw_pmap or {})
+        session_facts_block = _build_session_facts_block(user_id, session_id)
 
         romantic_block = ""
         if romantic_mode:
@@ -618,7 +685,7 @@ async def _build_system_prompt(
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
         prompt = _inject_date(
-            base_prompt + romantic_block + personality_block + memory_block + rel_context + bond_context + drift_block
+            base_prompt + romantic_block + personality_block + session_facts_block + memory_block + rel_context + bond_context + drift_block
         )
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
@@ -718,6 +785,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         romantic_mode=request.romantic_mode,
         onboarding_context=request.onboarding_context,
         is_guest=is_guest,
+        session_id=request.session_id,
     )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
@@ -766,6 +834,8 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         )
     )
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
+    if not is_guest:
+        asyncio.create_task(_extract_session_facts(user_id, request.session_id, request.message))
 
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
@@ -845,6 +915,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         romantic_mode=request.romantic_mode,
         onboarding_context=request.onboarding_context,
         is_guest=is_guest,
+        session_id=request.session_id,
     )
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
@@ -1000,6 +1071,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     asyncio.create_task(
                         relationship.increment_message_count(user_id, persona.id)
                     )
+                    if not is_guest:
+                        asyncio.create_task(
+                            _extract_session_facts(user_id, request.session_id, user_message)
+                        )
 
                     # Bond Score: analyze every 3 user messages
                     _hist = store.get_history(request.session_id)

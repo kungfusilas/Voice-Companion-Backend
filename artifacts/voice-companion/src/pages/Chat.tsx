@@ -296,6 +296,7 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const sendMessage = useCallback(async (userText: string) => {
+    unlockAudio(); // prime audio even when called from non-gesture paths (conv mode)
     if (busyRef.current || showUpgradeCard) return;
     busyRef.current = true;
     setBusy(true);
@@ -322,7 +323,7 @@ export function ChatPage({
     let firstSentenceEndIdx = 0;
     let firstSentenceLeg1Text = ""; // exact text sent to ElevenLabs for leg 1 — used as previous_text for leg 2
     let firstSentenceAudioP: Promise<Blob | null> | null = null;
-    let firstSentencePlayP:  Promise<void>       | null = null;
+    let firstSentencePlayP:  Promise<boolean>     | null = null;
 
     // Inject user name once so companion never needs to ask
     if (!nameContextSentRef.current && userName && !isGuest) {
@@ -374,8 +375,11 @@ export function ChatPage({
                   });
                 // Play immediately when audio is ready — concurrent with ongoing stream
                 firstSentencePlayP = firstSentenceAudioP
-                  .then(async (blob) => { if (blob) await playAudio(blob, "leg1"); })
-                  .catch(() => {});
+                  .then(async (blob): Promise<boolean> => {
+                    if (blob) { await playAudio(blob, "leg1"); return true; }
+                    return false;
+                  })
+                  .catch((): boolean => false);
               }
             }
           }
@@ -501,9 +505,18 @@ export function ChatPage({
                           return null;
                         })
                     : Promise.resolve(null);
-                  await firstSentencePlayP;          // wait for first sentence to finish
+                  const leg1Played = await firstSentencePlayP; // true if leg 1 was heard
                   const remResult = await remainingP;
-                  if (remResult) {
+                  if (!leg1Played) {
+                    // Leg 1 was never heard (fetch or play failed) — speak full reply
+                    if (MSE_AUDIO_MPEG) {
+                      const res = await speakTextStream(fullSpoken, persona.id);
+                      await playStream(res);
+                    } else {
+                      const fullBlob = await speakText(fullSpoken, persona.id);
+                      await playAudio(fullBlob, "full_fb");
+                    }
+                  } else if (remResult) {
                     if (remResult instanceof Response) await playStream(remResult);
                     else await playAudio(remResult as Blob, "leg2");
                   }
@@ -607,7 +620,7 @@ export function ChatPage({
         setWowGenerating(false);
       }
     }
-  }, [sessionId, persona.id, persona.name, userId, ttsEnabled, playAudio, playStream, romanticMode, isGuest, showUpgradeCard, isPremium]);
+  }, [sessionId, persona.id, persona.name, userId, ttsEnabled, playAudio, playStream, romanticMode, isGuest, showUpgradeCard, isPremium, unlockAudio]);
 
   const handleTtsRetry = useCallback(async () => {
     if (!ttsRetry) return;
