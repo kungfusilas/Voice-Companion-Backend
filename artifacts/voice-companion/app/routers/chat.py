@@ -621,6 +621,66 @@ def _build_session_facts_block(user_id: str, session_id: str) -> str:
     )
 
 
+_CORE_FACTS_CATEGORY_LABELS = {
+    "family":      "Family",
+    "work":        "Work",
+    "location":    "Location",
+    "health":      "Health",
+    "goals":       "Goals",
+    "personality": "Personality",
+    "history":     "Background",
+}
+_CORE_FACTS_CATEGORY_ORDER = ["family", "work", "location", "health", "goals", "personality", "history"]
+
+
+async def _build_core_facts_block(user_id: str) -> str:
+    """
+    Query all user_core_facts rows for this user and return a formatted system
+    prompt block grouped by category.  Returns '' if no facts exist or on error.
+    """
+    try:
+        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        if not supabase_url or not service_key:
+            return ""
+        async with httpx.AsyncClient(timeout=8.0) as _http:
+            resp = await _http.get(
+                f"{supabase_url}/rest/v1/user_core_facts",
+                headers={"Authorization": f"Bearer {service_key}", "apikey": service_key},
+                params={
+                    "user_id": f"eq.{user_id}",
+                    "select":  "category,fact",
+                    "order":   "category.asc",
+                },
+            )
+            if resp.status_code != 200:
+                return ""
+            rows = resp.json()
+            if not isinstance(rows, list) or not rows:
+                return ""
+
+        grouped: dict[str, list[str]] = {}
+        for row in rows:
+            cat  = row.get("category", "")
+            fact = row.get("fact", "").strip()
+            if cat and fact:
+                grouped.setdefault(cat, []).append(fact)
+        if not grouped:
+            return ""
+
+        parts = ["## What I know about you"]
+        for cat in _CORE_FACTS_CATEGORY_ORDER:
+            if cat not in grouped:
+                continue
+            label = _CORE_FACTS_CATEGORY_LABELS.get(cat, cat.title())
+            parts.append(f"\n[{label}]")
+            for fact in grouped[cat]:
+                parts.append(f"- {fact}")
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 async def _build_system_prompt(
     persona,
     user_id: str,
@@ -655,9 +715,11 @@ async def _build_system_prompt(
             relationship.get_stats(user_id, persona.id),
             relationship.needs_drift_inject(user_id, persona.id),
             personality_extractor._fetch_current_map(user_id) if _is_power_or_above(tier) else asyncio.sleep(0),
+            _build_core_facts_block(user_id),
         )
         memories, stats, needs_drift = gather_results[0], gather_results[1], gather_results[2]
-        raw_pmap = gather_results[3] if _is_power_or_above(tier) else {}
+        raw_pmap        = gather_results[3] if _is_power_or_above(tier) else {}
+        core_facts_block: str = gather_results[4] or ""
 
         message_count = stats.get("message_count", 0)
         connection_score: int = stats.get("connection_score") or 50
@@ -684,8 +746,9 @@ async def _build_system_prompt(
             )
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
+        core_facts_prefix = (core_facts_block + "\n\n") if core_facts_block else ""
         prompt = _inject_date(
-            base_prompt + romantic_block + personality_block + session_facts_block + memory_block + rel_context + bond_context + drift_block
+            core_facts_prefix + base_prompt + romantic_block + personality_block + session_facts_block + memory_block + rel_context + bond_context + drift_block
         )
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
@@ -836,6 +899,9 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
     if not is_guest:
         asyncio.create_task(_extract_session_facts(user_id, request.session_id, request.message))
+        asyncio.create_task(
+            memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
+        )
 
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
@@ -1074,6 +1140,11 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     if not is_guest:
                         asyncio.create_task(
                             _extract_session_facts(user_id, request.session_id, user_message)
+                        )
+                        asyncio.create_task(
+                            memory_extractor.extract_and_save_core_facts(
+                                user_id, user_message, full_text
+                            )
                         )
 
                     # Bond Score: analyze every 3 user messages

@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 
 import httpx
 
@@ -161,6 +162,138 @@ async def extract_and_save(
     except Exception as exc:
         logger.warning(
             "[memory_extractor] extract_and_save EXCEPTION: user=%s: %r", user_id[:8], exc
+        )
+
+
+_CORE_FACTS_SYSTEM = (
+    "Extract permanent facts about the user from this conversation turn. "
+    "Focus on: family members (names, ages, relationships), job/occupation, "
+    "location/city, health conditions, important life events, goals, and personality traits.\n"
+    "Return ONLY a JSON array of objects with 'category' and 'fact' keys. "
+    "Valid categories: family, work, location, health, goals, personality, history.\n"
+    "Include only specific, concrete facts — not opinions or inferences. "
+    "If nothing new is revealed, return [].\n"
+    'Example: [{"category": "family", "fact": "Daughter named Emma, age 8"}, '
+    '{"category": "work", "fact": "Works as a nurse on night shifts"}]'
+)
+
+_CORE_FACTS_VALID_CATEGORIES = frozenset(
+    {"family", "work", "location", "health", "goals", "personality", "history"}
+)
+
+
+async def extract_and_save_core_facts(
+    user_id: str,
+    user_message: str,
+    ai_response: str,
+) -> None:
+    """
+    Fire-and-forget: extract permanent user facts from a conversation turn and
+    upsert them into the user_core_facts Supabase table (max 50 per user).
+    Never raises — failures are logged and swallowed.
+    """
+    try:
+        raw = await claude.send_message(
+            system_prompt=_CORE_FACTS_SYSTEM,
+            history=[],
+            user_message=(
+                f"User said: {user_message}\n\n"
+                f"Companion replied: {ai_response}"
+            ),
+            model="claude-haiku-4-5-20251001",
+            max_tokens=400,
+        )
+        cleaned = raw.strip()
+        if "```" in cleaned:
+            parts = cleaned.split("```")
+            cleaned = parts[1] if len(parts) > 1 else parts[0]
+            if cleaned.startswith("json"):
+                cleaned = cleaned[4:]
+            cleaned = cleaned.strip()
+
+        facts: list = json.loads(cleaned)
+        if not isinstance(facts, list) or not facts:
+            return
+
+        facts = [
+            f for f in facts
+            if isinstance(f, dict)
+            and isinstance(f.get("category"), str)
+            and f["category"] in _CORE_FACTS_VALID_CATEGORIES
+            and isinstance(f.get("fact"), str)
+            and f["fact"].strip()
+        ]
+        if not facts:
+            return
+
+        supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+        service_key  = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        if not supabase_url or not service_key:
+            return
+
+        base_headers = {
+            "Authorization": f"Bearer {service_key}",
+            "apikey": service_key,
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            # Fetch existing facts to deduplicate and enforce 50-fact cap
+            resp = await http.get(
+                f"{supabase_url}/rest/v1/user_core_facts",
+                headers=base_headers,
+                params={"user_id": f"eq.{user_id}", "select": "category,fact"},
+            )
+            existing: list = resp.json() if resp.status_code == 200 else []
+            if not isinstance(existing, list):
+                existing = []
+
+            if len(existing) >= 50:
+                return  # hard cap reached
+
+            existing_set: set[tuple[str, str]] = {
+                (row["category"], row["fact"].lower().strip())
+                for row in existing
+                if isinstance(row, dict)
+            }
+
+            now = datetime.now(timezone.utc).isoformat()
+            to_insert: list[dict] = []
+            for item in facts:
+                cat       = item["category"]
+                fact_text = item["fact"].strip()
+                key       = (cat, fact_text.lower())
+                if key in existing_set:
+                    continue
+                to_insert.append({
+                    "user_id":    user_id,
+                    "category":   cat,
+                    "fact":       fact_text,
+                    "confidence": 1.0,
+                    "created_at": now,
+                    "updated_at": now,
+                })
+                existing_set.add(key)
+
+            if not to_insert:
+                return
+
+            remaining  = 50 - len(existing)
+            to_insert  = to_insert[:remaining]
+
+            await http.post(
+                f"{supabase_url}/rest/v1/user_core_facts",
+                headers={**base_headers, "Prefer": "return=minimal"},
+                json=to_insert,
+            )
+            logger.debug(
+                "[memory_extractor] core_facts saved: user=%s count=%d",
+                user_id[:8], len(to_insert),
+            )
+    except Exception as exc:
+        logger.warning(
+            "[memory_extractor] extract_and_save_core_facts EXCEPTION user=%s: %r",
+            user_id[:8], exc,
         )
 
 
