@@ -15,6 +15,29 @@ from app.routers.tier_check import is_premium_or_higher
 
 router = APIRouter()
 
+# Matches LLM action descriptors that TTS would read literally.
+# Strips asterisk-, bracket-, and paren-wrapped stage directions, e.g.
+# *laughs*, [sighs], (chuckles softly).
+_ACTION_DESCRIPTOR_RE = re.compile(
+    r"\*[^*]*(?:laugh|sigh|chuckle|giggle|smile|pause|gasp|groan|sniffle|cr[yi]|whisper|clears?\s+(?:her\s+|his\s+|their\s+)?throat)[^*]*\*"
+    r"|\[[^\]]*(?:laugh|sigh|chuckle|giggle|smile|pause|gasp|groan|sniffle|cr[yi]|whisper|clears?\s+(?:her\s+|his\s+|their\s+)?throat)[^\]]*\]"
+    r"|\([^)]*(?:laugh|sigh|chuckle|giggle|smile|pause|gasp|groan|sniffle|cr[yi]|whisper|clears?\s+(?:her\s+|his\s+|their\s+)?throat)[^)]*\)",
+    re.IGNORECASE,
+)
+
+
+def sanitize_for_tts(text: str) -> str:
+    """Strip LLM action descriptors that TTS would vocalise literally.
+
+    Removes patterns like *laughs*, [sighs softly], (chuckles), etc.
+    Intentional ElevenLabs audio tags injected later by _inject_el_tags()
+    are unaffected — they are added after this step.
+    """
+    cleaned = _ACTION_DESCRIPTOR_RE.sub("", text)
+    cleaned = re.sub(r" {2,}", " ", cleaned)
+    return cleaned.strip()
+
+
 # Matches emoji and non-speakable Unicode symbols.
 # Covers: supplementary-plane characters (U+10000+, where most emoji live),
 # BMP misc-symbol blocks (☀ ⭐ ♠ etc.), variation selectors, and zero-width joiners.
@@ -167,7 +190,7 @@ async def persona_speak_stream(
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
 
-    clean_text = _strip_non_speakable(request.text)
+    clean_text = _strip_non_speakable(sanitize_for_tts(request.text))
     if not clean_text:
         raise HTTPException(status_code=422, detail="text must not be empty")
 
@@ -255,7 +278,7 @@ async def persona_speak(
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
 
-    clean_text = _strip_non_speakable(request.text)
+    clean_text = _strip_non_speakable(sanitize_for_tts(request.text))
     if not clean_text:
         raise HTTPException(status_code=422, detail="text must not be empty")
 

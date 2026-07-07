@@ -554,7 +554,10 @@ def _inject_date(prompt: str) -> str:
     return f"Today's date is {today}.\n\n{prompt}"
 
 
-_ENGLISH_INSTRUCTION = "\n\n## Language\nAlways reply in English regardless of what language the user writes in."
+_ENGLISH_INSTRUCTION = (
+    "\n\n## Language\nAlways reply in English regardless of what language the user writes in."
+    "\n\n## Speech style\nNever use action descriptions or stage directions like *laughs*, *sighs*, *chuckles*, or similar. Express all emotions through your actual spoken words only."
+)
 
 
 # ── Session facts (in-process, keyed by "user_id:session_id") ────────────────
