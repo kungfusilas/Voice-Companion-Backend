@@ -912,6 +912,11 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
             memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
         )
         asyncio.create_task(graphiti_memory.add_episode(user_id, request.message, reply))
+        asyncio.create_task(
+            conversation_store.save_exchange(
+                user_id, persona.id, request.session_id, request.message, reply
+            )
+        )
 
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
@@ -1129,7 +1134,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     asyncio.create_task(
                         future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
                     )
-                    if is_premium:
+                    if not is_guest:
                         asyncio.create_task(
                             conversation_store.save_exchange(
                                 user_id, persona.id, request.session_id, user_message, full_text
