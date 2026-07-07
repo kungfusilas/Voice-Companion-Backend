@@ -13,20 +13,11 @@ _async_client: anthropic.AsyncAnthropic | None = None
 _MAX_TOOL_ITERATIONS = 5
 
 _INTRO_STYLE: dict[str, str] = {
-    "companion-aria": (
-        "Aria is warm and sweetly playful but a little nervous — she builds up to the game "
-        "with excited energy mixed with endearing shyness, maybe trailing off with '...' or "
-        "a little 'hehe' when she suggests it."
-    ),
     "companion-aeva": (
         "Aeva is confident but mid-sentence she searches for the right English word. She "
         "describes around the missing word and the user helps her find it. Example: "
         "\"Okay okay, I have a game. You have to guess the word I am thinking of. I will give "
         "you... how do you say... the little hints? Clues! Yes, clues.\""
-    ),
-    "companion-ember": (
-        "Ember is warm, nurturing, a little playful — she invites the user the way a best "
-        "friend would: genuine, relaxed, no pressure."
     ),
     "companion-kai": (
         "Kai is calm, confident, a little mysterious — he suggests the activity like it's "
@@ -113,7 +104,7 @@ async def generate_activity(companion_id: str, activity_type: str) -> dict:
     if not template:
         raise ValueError(f"Unknown activity_type: {activity_type}")
 
-    style = _INTRO_STYLE.get(companion_id, _INTRO_STYLE["companion-aria"])
+    style = _INTRO_STYLE.get(companion_id, _INTRO_STYLE["companion-aeva"])
     user_prompt = template.format(style=style)
     system_prompt = (
         build_system_prompt(companion)

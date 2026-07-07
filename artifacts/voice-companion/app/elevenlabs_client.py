@@ -13,22 +13,10 @@ _async_client: AsyncElevenLabs | None = None
 
 # Per-companion voice tuning — keyed by companion ID
 COMPANION_VOICE_SETTINGS: dict[str, VoiceSettings] = {
-    "companion-aria": VoiceSettings(
-        stability=0.35,     # low stability = lively, bouncy delivery
-        similarity_boost=0.75,
-        style=0.70,         # high style = lots of personality and energy
-        use_speaker_boost=True,
-    ),
     "companion-aeva": VoiceSettings(
         stability=0.55,
         similarity_boost=0.80,
         style=0.50,
-        use_speaker_boost=True,
-    ),
-    "companion-ember": VoiceSettings(
-        stability=0.45,
-        similarity_boost=0.75,
-        style=0.65,
         use_speaker_boost=True,
     ),
     "companion-kai": VoiceSettings(

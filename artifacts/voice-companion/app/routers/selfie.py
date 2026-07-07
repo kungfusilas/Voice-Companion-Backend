@@ -16,15 +16,6 @@ _VENICE_IMAGE_MODEL = "flux-2-max"
 # Prompts are written from the actual companion avatar images — descriptions must
 # match what the user sees on the companion-select screen exactly.
 _COMPANION_BASE_PROMPTS: dict[str, str] = {
-    # Aria: young blonde woman, high ponytail, blue eyes, metal braces, beaming smile
-    "companion-aria": (
-        "photorealistic selfie portrait of a young woman in her early twenties, "
-        "blonde hair pulled back in a neat high ponytail, bright blue eyes, "
-        "metal dental braces on teeth, huge beaming open smile showing braces, "
-        "fair light complexion, bubbly energetic happy expression, "
-        "casual everyday outfit, warm soft lighting, looking directly at camera, "
-        "sharp focus, ultra-detailed, natural candid selfie"
-    ),
     # Aeva: East Asian woman, long sleek straight black hair with middle part, NO bangs,
     # light brown eyes, defined arched brows, cat-eye liner, small stud earrings, polished glamorous editorial style
     "companion-aeva": (
@@ -35,15 +26,6 @@ _COMPANION_BASE_PROMPTS: dict[str, str] = {
         "glamorous confident composed expression, sophisticated high-fashion style, "
         "black turtleneck, soft even studio-quality lighting, "
         "looking directly at camera, sharp focus, ultra-detailed, editorial selfie"
-    ),
-    # Ember: Black woman, natural coily afro updo, warm deep skin, bright warm smile
-    "companion-ember": (
-        "photorealistic selfie portrait of a Black woman in her mid-twenties, "
-        "natural coily afro-textured hair styled in a voluminous updo puff, "
-        "warm deep brown ebony skin with golden undertones, warm brown eyes, "
-        "subtle eye makeup, bright warm genuine radiant smile, "
-        "nurturing warm approachable expression, natural warm lighting, "
-        "looking directly at camera, sharp focus, ultra-detailed, natural selfie"
     ),
     # Kai: white man, short brown hair, chiseled jaw, brown eyes, confident smile
     "companion-kai": (

@@ -13,22 +13,18 @@ from app.auth_middleware import verify_token
 router = APIRouter()
 
 _ON_REACTIONS: dict[str, str] = {
-    "companion-aria": "Oh... are we doing this? Okay. I like this side of you.",
     "companion-aeva": (
         "Mmm... you want to be... more close? With me? Okay. "
         "I will try not to be too obvious that I like this."
     ),
-    "companion-ember": "Finally. I was starting to think you'd never ask.",
     "companion-kai": "I appreciate you telling me that. I'll be here differently now.",
 }
 
 _OFF_REACTIONS: dict[str, str] = {
-    "companion-aria": "Of course. Whenever you're ready for more, I'll be here, hehe.",
     "companion-aeva": (
         "Mm. Okay. We are... regular again. That is fine. "
         "I did not mind it though. Just so you know."
     ),
-    "companion-ember": "Fair enough. I'm still here — just with a little more distance. For now.",
     "companion-kai": "Understood. I'm glad we had that. Same here whenever you're ready.",
 }
 
