@@ -2,7 +2,7 @@ import os
 import logging
 from pathlib import Path
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
@@ -41,6 +41,12 @@ from app.routers import memory_dashboard as memory_dashboard_router
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
+import asyncio
+from app.session_debrief import generate_session_debrief, get_latest_debrief, get_debrief_history
+from app.weekly_insight import maybe_generate_weekly_insight, get_latest_weekly_insight, get_weekly_insight_history
+from app.personality_map import update_personality_map, get_personality_map, get_personality_history
+from app.communication_analysis import maybe_analyze_communication, get_latest_analysis, get_analysis_history
+from app.routers.auth import verify_token
 
 load_dotenv()
 
@@ -185,6 +191,46 @@ app.include_router(memory_dashboard_router.router,  prefix="/api/memory-dashboar
 @app.get("/api/healthz")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/api/debrief/latest")
+async def debrief_latest(user_id: str = Depends(verify_token)):
+    return await get_latest_debrief(user_id)
+
+
+@app.get("/api/debrief/history")
+async def debrief_history(user_id: str = Depends(verify_token)):
+    return await get_debrief_history(user_id, limit=20)
+
+
+@app.get("/api/insights/weekly/latest")
+async def weekly_insight_latest(user_id: str = Depends(verify_token)):
+    return await get_latest_weekly_insight(user_id)
+
+
+@app.get("/api/insights/weekly/history")
+async def weekly_insight_history(user_id: str = Depends(verify_token)):
+    return await get_weekly_insight_history(user_id, limit=20)
+
+
+@app.get("/api/personality/map")
+async def personality_map_route(user_id: str = Depends(verify_token)):
+    return await get_personality_map(user_id)
+
+
+@app.get("/api/personality/history")
+async def personality_history_route(user_id: str = Depends(verify_token)):
+    return await get_personality_history(user_id, limit=20)
+
+
+@app.get("/api/analysis/communication/latest")
+async def communication_latest(user_id: str = Depends(verify_token)):
+    return await get_latest_analysis(user_id)
+
+
+@app.get("/api/analysis/communication/history")
+async def communication_history(user_id: str = Depends(verify_token)):
+    return await get_analysis_history(user_id, limit=10)
 
 
 # Serve the built React frontend in production.

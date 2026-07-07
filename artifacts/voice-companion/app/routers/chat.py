@@ -17,6 +17,10 @@ from app import future_memory_extractor
 from app import conversation_store
 from app import relationship
 from app import scoring
+from app.session_debrief import generate_session_debrief
+from app.weekly_insight import maybe_generate_weekly_insight
+from app.personality_map import update_personality_map, get_personality_map
+from app.communication_analysis import maybe_analyze_communication
 
 from app.companions import ROMANTIC_MODE_PROMPTS, build_system_prompt as companions_build_system_prompt
 from app.auth_middleware import verify_token_or_guest, verify_token
@@ -1006,6 +1010,16 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
                             )
                         )
+
+                    # ── Power Plan background tasks ─────────────────────────
+                    if tier in ("power", "elite"):
+                        _transcript = [{"role": m.role, "content": m.content} for m in _hist]
+                        existing_map = await get_personality_map(user_id)
+                        sessions_analyzed = existing_map.get("sessions_analyzed", 0) if existing_map else 0
+                        asyncio.create_task(generate_session_debrief(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript))
+                        asyncio.create_task(maybe_generate_weekly_insight(user_id=user_id))
+                        asyncio.create_task(update_personality_map(user_id=user_id, session_transcript=_transcript, existing_map=existing_map, sessions_analyzed=sessions_analyzed))
+                        asyncio.create_task(maybe_analyze_communication(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript))
                     return
 
             except Exception:
