@@ -137,25 +137,39 @@ async def _sb_select(table: str, filters: str, limit: int = 20) -> list:
 
 async def _fetch_week_conversations(user_id: str, week_start: date, week_end: date) -> list[dict]:
     """
-    Fetch all messages from the past week for this user.
-    Adjust the table name and column names to match your actual schema.
-    This assumes you have a 'messages' or 'sessions' table with created_at timestamps.
+    Fetch all messages from the past week by reading the conversations table.
+    Each row has a session_id and a messages JSON array.
+    Returns a flat list of message dicts with session_id injected.
     """
     start_iso = week_start.isoformat()
-    end_iso = week_end.isoformat()
+    end_iso = (week_end + timedelta(days=1)).isoformat()
     async with httpx.AsyncClient() as client:
-        # Adjust table name (messages / chat_messages / conversation_messages) to match yours
         r = await client.get(
-            f"{SUPABASE_URL}/rest/v1/messages"
+            f"{SUPABASE_URL}/rest/v1/conversations"
             f"?user_id=eq.{user_id}"
             f"&created_at=gte.{start_iso}"
-            f"&created_at=lte.{end_iso}T23:59:59Z"
-            f"&order=created_at.asc&limit=500",
+            f"&created_at=lt.{end_iso}"
+            f"&order=created_at.asc&limit=200",
             headers=_sb_headers(),
             timeout=20,
         )
         r.raise_for_status()
-        return r.json()
+        sessions = r.json()
+
+    # Flatten messages from all sessions, injecting session_id into each message
+    all_messages = []
+    for session in sessions:
+        session_id = session.get("session_id", "")
+        msgs = session.get("messages", []) or []
+        if isinstance(msgs, str):
+            try:
+                msgs = json.loads(msgs)
+            except Exception:
+                msgs = []
+        for m in msgs:
+            if isinstance(m, dict):
+                all_messages.append({**m, "session_id": session_id})
+    return all_messages
 
 
 # ─────────────────────────────────────────────

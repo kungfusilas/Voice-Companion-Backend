@@ -168,6 +168,11 @@ async def generate_session_debrief(
         logger.warning("generate_session_debrief: empty transcript — skipping")
         return {}
 
+    user_messages = [m for m in transcript if m.get("role") == "user"]
+    if len(user_messages) < 3:
+        logger.info(f"generate_session_debrief: too short ({len(user_messages)} user msgs) — skipping")
+        return {}
+
     transcript_text = "\n".join(
         f"{msg['role'].upper()}: {msg['content']}"
         for msg in transcript

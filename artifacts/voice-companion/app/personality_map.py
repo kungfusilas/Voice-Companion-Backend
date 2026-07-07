@@ -290,40 +290,46 @@ Sessions analyzed so far: {sessions_analyzed}
     now = datetime.now(timezone.utc).isoformat()
     new_sessions = sessions_analyzed + 1
 
+    _o = p.get("openness", {})
+    _c = p.get("conscientiousness", {})
+    _e = p.get("extraversion", {})
+    _a = p.get("agreeableness", {})
+    _n = p.get("neuroticism", {})
+
     row = await _sb_upsert("personality_map", {
         "user_id": user_id,
-        "openness_score": p["openness"]["score"],
-        "openness_label": p["openness"]["label"],
-        "openness_evidence": p["openness"]["evidence"],
-        "conscientiousness_score": p["conscientiousness"]["score"],
-        "conscientiousness_label": p["conscientiousness"]["label"],
-        "conscientiousness_evidence": p["conscientiousness"]["evidence"],
-        "extraversion_score": p["extraversion"]["score"],
-        "extraversion_label": p["extraversion"]["label"],
-        "extraversion_evidence": p["extraversion"]["evidence"],
-        "agreeableness_score": p["agreeableness"]["score"],
-        "agreeableness_label": p["agreeableness"]["label"],
-        "agreeableness_evidence": p["agreeableness"]["evidence"],
-        "neuroticism_score": p["neuroticism"]["score"],
-        "neuroticism_label": p["neuroticism"]["label"],
-        "neuroticism_evidence": p["neuroticism"]["evidence"],
+        "openness_score": _o.get("score"),
+        "openness_label": _o.get("label", ""),
+        "openness_evidence": _o.get("evidence", ""),
+        "conscientiousness_score": _c.get("score"),
+        "conscientiousness_label": _c.get("label", ""),
+        "conscientiousness_evidence": _c.get("evidence", ""),
+        "extraversion_score": _e.get("score"),
+        "extraversion_label": _e.get("label", ""),
+        "extraversion_evidence": _e.get("evidence", ""),
+        "agreeableness_score": _a.get("score"),
+        "agreeableness_label": _a.get("label", ""),
+        "agreeableness_evidence": _a.get("evidence", ""),
+        "neuroticism_score": _n.get("score"),
+        "neuroticism_label": _n.get("label", ""),
+        "neuroticism_evidence": _n.get("evidence", ""),
         "overall_summary": p.get("overall_summary", ""),
         "sessions_analyzed": new_sessions,
         "updated_at": now,
     }, on_conflict="user_id")
 
-    # Snapshot for history (async, best-effort)
+    # Snapshot for history (async, best-effort) — pass dict directly for JSONB
     try:
         await _sb_insert("personality_map_history", {
             "user_id": user_id,
-            "snapshot": json.dumps({
-                "openness": p["openness"]["score"],
-                "conscientiousness": p["conscientiousness"]["score"],
-                "extraversion": p["extraversion"]["score"],
-                "agreeableness": p["agreeableness"]["score"],
-                "neuroticism": p["neuroticism"]["score"],
+            "snapshot": {
+                "openness": _o.get("score"),
+                "conscientiousness": _c.get("score"),
+                "extraversion": _e.get("score"),
+                "agreeableness": _a.get("score"),
+                "neuroticism": _n.get("score"),
                 "sessions_analyzed": new_sessions,
-            }),
+            },
             "created_at": now,
         })
     except Exception as e:

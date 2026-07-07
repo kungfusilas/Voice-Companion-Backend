@@ -180,6 +180,12 @@ async def maybe_analyze_communication(
         )
         return None
 
+    # Dedup: skip if this session was already analyzed
+    existing = await _sb_select("communication_analyses", f"session_id=eq.{session_id}", limit=1)
+    if existing:
+        logger.info(f"maybe_analyze_communication: session {session_id} already analyzed — skipping")
+        return existing[0]
+
     return await _analyze_communication(
         user_id=user_id,
         session_id=session_id,
