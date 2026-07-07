@@ -1,12 +1,16 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from app.models import Persona, CreatePersonaRequest
 from app import store
+from app.auth_middleware import verify_token, verify_token_or_guest
 
 router = APIRouter()
 
 
 @router.post("", response_model=Persona, status_code=201)
-async def create_persona(body: CreatePersonaRequest):
+async def create_persona(
+    body: CreatePersonaRequest,
+    user_id: str = Depends(verify_token),
+):
     persona = Persona(
         name=body.name,
         relationship_type=body.relationship_type,
@@ -20,12 +24,15 @@ async def create_persona(body: CreatePersonaRequest):
 
 
 @router.get("", response_model=list[Persona])
-async def list_personas():
+async def list_personas(user_id: str = Depends(verify_token_or_guest)):
     return store.list_personas()
 
 
 @router.get("/{persona_id}", response_model=Persona)
-async def get_persona(persona_id: str):
+async def get_persona(
+    persona_id: str,
+    user_id: str = Depends(verify_token_or_guest),
+):
     persona = store.get_persona(persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail="Persona not found")
@@ -33,6 +40,9 @@ async def get_persona(persona_id: str):
 
 
 @router.delete("/{persona_id}", status_code=204)
-async def delete_persona(persona_id: str):
+async def delete_persona(
+    persona_id: str,
+    user_id: str = Depends(verify_token),
+):
     if not store.delete_persona(persona_id):
         raise HTTPException(status_code=404, detail="Persona not found")
