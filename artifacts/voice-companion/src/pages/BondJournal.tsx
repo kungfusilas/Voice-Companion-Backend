@@ -4,9 +4,7 @@ import { apiFetchJSON } from "@/lib/api";
 import type { Persona } from "@/lib/api";
 
 const PERSONA_IDS = [
-  { id: "companion-aria",  name: "Aria"  },
   { id: "companion-aeva",  name: "Aeva"  },
-  { id: "companion-ember", name: "Ember" },
   { id: "companion-kai",   name: "Kai"   },
 ];
 

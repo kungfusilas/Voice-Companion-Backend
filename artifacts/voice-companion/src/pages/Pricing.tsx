@@ -95,7 +95,7 @@ const TIER_COLORS: Record<string, string> = {
 // ── Feature tooltip info ──────────────────────────────────────────────────────
 
 const FEATURE_INFO: Record<string, string> = {
-  "All 4 companions":       "Choose from Aria, Aeva, and more. Each companion has a unique personality, voice, and way of connecting. Find the one that feels right.",
+  "All 4 companions":       "Choose from Aeva or Kai. Each companion has a unique personality, voice, and way of connecting. Find the one that feels right.",
   "Voice & text chat":      "Your companion speaks to you in her own voice. Talk back by text — she listens, responds, and remembers.",
   "Long-term memory":       "Your companion remembers what you share across sessions. You never have to repeat yourself.",
   "Daily check-ins":        "Your companion reaches out each day — a simple moment of connection to start or end your day.",

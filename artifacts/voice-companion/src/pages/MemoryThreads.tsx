@@ -4,9 +4,7 @@ import { apiFetchJSON } from "@/lib/api";
 import type { Persona } from "@/lib/api";
 
 const PERSONA_IDS = [
-  { id: "companion-aria",  name: "Aria",  color: "rgba(244,114,182,0.6)" },
   { id: "companion-aeva",  name: "Aeva",  color: "rgba(167,139,250,0.6)" },
-  { id: "companion-ember", name: "Ember", color: "rgba(251,191,36,0.5)"  },
   { id: "companion-kai",   name: "Kai",   color: "rgba(56,189,248,0.5)"  },
 ];
 

@@ -80,7 +80,7 @@ export function PersonaSetup({ onCreated }: PersonaSetupProps) {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Luna, Aria, Kai…"
+          placeholder="e.g. Luna, Aeva, Kai…"
           className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-2 focus:ring-violet-500/50"
         />
       </div>
