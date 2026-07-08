@@ -105,6 +105,7 @@ async def stt_stream(
 
     tier, _ = await get_user_tier(user_id)
     if tier not in PAID_TIERS:
+        logger.warning("WS tier rejected: uid=%s tier=%s", user_id[:8], tier)
         await websocket.close(code=4003, reason="paid account required")
         return
 

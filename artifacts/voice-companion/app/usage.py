@@ -10,13 +10,17 @@ Public surface:
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta
 
 import httpx
+
 from fastapi import HTTPException
 
 from app.usage_config import ALLOWANCES, HOURLY_CAPS, TOPUP_PACKS
+
+logger = logging.getLogger(__name__)
 
 
 # ── Supabase helpers ──────────────────────────────────────────────────────────
@@ -58,8 +62,8 @@ async def get_user_tier(user_id: str) -> tuple[str, str]:
                 row.get("subscription_tier", "free"),
                 row.get("subscription_status", "inactive"),
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("get_user_tier fallback for uid=%s: %s", user_id[:8], exc)
     return ("free", "inactive")
 
 
