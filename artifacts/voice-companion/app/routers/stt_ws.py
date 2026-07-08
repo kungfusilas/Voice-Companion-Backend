@@ -41,7 +41,7 @@ _DG_BASE = (
 
 # ── Token verification (WebSocket-safe — no FastAPI Depends here) ─────────────
 
-def _verify_ws_token(token: str) -> str:
+async def _verify_ws_token(token: str) -> str:
     """Verify a raw JWT string; return user_id or raise ValueError."""
     try:
         header = pyjwt.get_unverified_header(token)
@@ -50,7 +50,7 @@ def _verify_ws_token(token: str) -> str:
 
     kid = header.get("kid")
     alg = header.get("alg", "ES256")
-    keys = _get_public_keys()
+    keys = await _get_public_keys()
     candidates = [k for kid2, k in keys if kid2 == kid] or [k for _, k in keys]
 
     for pub_key in candidates:
@@ -97,7 +97,7 @@ async def stt_stream(
 
     # ── Auth ──
     try:
-        user_id = _verify_ws_token(token)
+        user_id = await _verify_ws_token(token)
     except ValueError as exc:
         await websocket.close(code=4001, reason=str(exc))
         return
