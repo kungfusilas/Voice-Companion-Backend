@@ -92,6 +92,9 @@ async def stt_stream(
     Proxy browser PCM audio to Deepgram and forward transcript events back.
     Paid tiers only. Deducts voice quota per finalized utterance.
     """
+    # ── Accept first — Starlette requires accept() before any close() ──
+    await websocket.accept()
+
     # ── Auth ──
     try:
         user_id = _verify_ws_token(token)
@@ -109,8 +112,6 @@ async def stt_stream(
         await websocket.close(code=4003, reason="paid account required")
         return
 
-    # ── Accept ──
-    await websocket.accept()
     await websocket.send_json({
         "type": "connected",
         "tier": tier,
