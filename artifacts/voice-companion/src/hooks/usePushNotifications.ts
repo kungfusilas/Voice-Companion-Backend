@@ -94,7 +94,10 @@ export function usePushNotifications(): UsePushNotificationsResult {
             "Content-Type": "application/json",
             Authorization: `Bearer ${authToken}`,
           },
-          body: JSON.stringify(json),
+          body: JSON.stringify({
+          ...json,
+          timezone_offset_hours: Math.round(new Date().getTimezoneOffset() / -60),
+        }),
         });
 
         if (!res.ok) throw new Error("Subscription save failed");

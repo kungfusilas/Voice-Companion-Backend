@@ -32,6 +32,7 @@ import {
   getMilestones,
   markMilestonesSeen,
   getRitualStatus,
+  getPendingQuestion,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
@@ -259,15 +260,16 @@ export function ChatPage({
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Load conversation history + proactive messages on mount (authenticated users only)
+  // Load conversation history + proactive messages + daily question on mount (authenticated users only)
   useEffect(() => {
     if (isGuest) return;
     let cancelled = false;
 
     (async () => {
-      const [histResult, proactResult] = await Promise.allSettled([
+      const [histResult, proactResult, questionResult] = await Promise.allSettled([
         getChatHistory(persona.id, 20),
         fetchProactiveMessages(userId, persona.id),
+        getPendingQuestion(),
       ]);
       if (cancelled) return;
 
@@ -289,7 +291,26 @@ export function ChatPage({
       if (proactiveMsgs.length > 0) {
         setProactiveLabel(`💭 ${persona.name} was thinking about you while you were away`);
       }
-      setMessages([...histMsgs, ...proactiveMsgs]);
+
+      // Daily question — show once per calendar day per session
+      const dailyQ = questionResult.status === "fulfilled" ? questionResult.value : null;
+      const seenKey = dailyQ ? `bondai_daily_q_${dailyQ.date}` : null;
+      const alreadySeen = seenKey ? sessionStorage.getItem(seenKey) === "1" : true;
+
+      let questionMsg: ChatMessage | null = null;
+      if (dailyQ && !alreadySeen && proactiveMsgs.length === 0) {
+        const opener = histMsgs.length === 0
+          ? `Hey — I have a question for you today.\n\n${dailyQ.question}`
+          : `Something I've been wanting to ask you...\n\n${dailyQ.question}`;
+        questionMsg = { role: "assistant", content: opener, proactive: true };
+        if (seenKey) sessionStorage.setItem(seenKey, "1");
+        if (histMsgs.length === 0) {
+          setProactiveLabel(`✨ Today's question from ${persona.name}`);
+        }
+      }
+
+      const allMsgs = [...histMsgs, ...proactiveMsgs, ...(questionMsg ? [questionMsg] : [])];
+      setMessages(allMsgs);
     })();
 
     return () => { cancelled = true; };

@@ -39,6 +39,8 @@ from app.routers import milestones as milestones_router
 from app.routers import ritual as ritual_router
 from app.routers import memory_dashboard as memory_dashboard_router
 from app.routers import push as push_router
+from app.routers import notifications as notifications_router
+from app.services import notification_service
 from app import store
 from app.companions import COMPANIONS, build_system_prompt
 from app import proactive, daily_checkin
@@ -92,8 +94,32 @@ async def lifespan(app: FastAPI):
         id="weekly_insight_reports",
         replace_existing=True,
     )
+    scheduler.add_job(
+        notification_service.send_daily_question_notifications,
+        "interval",
+        hours=1,
+        id="push_daily_questions",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        notification_service.send_weekly_question_set_notifications,
+        "cron",
+        day_of_week="mon",
+        hour=9,
+        minute=0,
+        id="push_weekly_set",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        notification_service.send_reengagement_notifications,
+        "cron",
+        hour=9,
+        minute=10,
+        id="push_reengagement",
+        replace_existing=True,
+    )
     scheduler.start()
-    logger.info("Schedulers started: proactive check-in + daily activity + daily morning check-in")
+    logger.info("Schedulers started: proactive + daily activity + morning check-in + push notifications")
 
     yield
 
@@ -188,6 +214,7 @@ app.include_router(milestones_router.router,        prefix="/api/milestones",   
 app.include_router(ritual_router.router,            prefix="/api/ritual",                tags=["ritual"])
 app.include_router(memory_dashboard_router.router,  prefix="/api/memory-dashboard",      tags=["memory-dashboard"])
 app.include_router(push_router.router,              prefix="/api/push",                  tags=["push"])
+app.include_router(notifications_router.router,     prefix="/api/notifications",          tags=["notifications"])
 
 
 @app.get("/api/healthz")

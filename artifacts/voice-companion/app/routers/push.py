@@ -65,6 +65,7 @@ class PushSubscriptionKeys(BaseModel):
 class PushSubscribeRequest(BaseModel):
     endpoint: str
     keys: PushSubscriptionKeys
+    timezone_offset_hours: int = 0  # e.g. -5 for EST, +1 for CET
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
@@ -89,6 +90,7 @@ async def subscribe(body: PushSubscribeRequest, user_id: str = Depends(verify_to
         "endpoint": body.endpoint,
         "p256dh": body.keys.p256dh,
         "auth": body.keys.auth,
+        "timezone_offset_hours": body.timezone_offset_hours,
     }
 
     async with httpx.AsyncClient(timeout=10.0) as client:

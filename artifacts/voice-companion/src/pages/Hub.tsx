@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard, Bell } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -13,6 +13,7 @@ import { ConversationDebrief } from "./ConversationDebrief";
 import { LegacyModal } from "@/components/LegacyModal";
 import { LegacyChapters } from "./LegacyChapters";
 import { MemoryDashboard } from "./MemoryDashboard";
+import { NotificationSettings } from "@/components/NotificationSettings";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -31,6 +32,7 @@ const BASE_TABS = [
   { id: "journal",         label: "Bond Journal",        icon: BookOpen      },
   { id: "goals",           label: "Connection Goals",    icon: Target        },
   { id: "roleplay",        label: "Roleplay Simulator",  icon: Drama         },
+  { id: "notifications",   label: "Notifications",       icon: Bell          },
 ] as const;
 
 const PREMIUM_TABS = [
@@ -303,6 +305,17 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
                 currentPersona={currentPersona}
                 isPremium={isPremiumHub}
               />
+            </motion.div>
+          )}
+          {tab === "notifications" && (
+            <motion.div key="notifications" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <div className="pt-4 space-y-4">
+                <div>
+                  <h2 className="text-white/70 text-base font-semibold mb-1">Notification Settings</h2>
+                  <p className="text-white/30 text-xs mb-4">Stay connected to your reflections — even when life gets busy.</p>
+                </div>
+                <NotificationSettings />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

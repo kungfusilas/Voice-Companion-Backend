@@ -594,3 +594,21 @@ export async function getRitualStatus(companionId: string): Promise<RitualStatus
     return { due: false, questions: null };
   }
 }
+
+// ── Daily question ─────────────────────────────────────────────────────────────
+
+export interface DailyQuestion {
+  question: string;
+  type: "legacy" | "checkin";
+  date: string;
+}
+
+export async function getPendingQuestion(): Promise<DailyQuestion | null> {
+  try {
+    const resp = await apiFetch(`${BASE}/notifications/pending-question`);
+    if (!resp.ok) return null;
+    return resp.json();
+  } catch {
+    return null;
+  }
+}
