@@ -30,7 +30,7 @@ _jwks_lock = asyncio.Lock()
 
 def _jwks_url() -> str:
     """Derive the JWKS URL from the SUPABASE_URL environment variable."""
-    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    base = (os.environ.get("SUPABASE_URL") or os.environ.get("VITE_SUPABASE_URL", "")).rstrip("/")
     if not base:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
