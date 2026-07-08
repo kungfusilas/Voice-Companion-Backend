@@ -84,3 +84,4 @@ packages = ["libxcrypt"]
 
 [userenv.shared]
 SUPABASE_URL = "https://kyeqlkqbhwaiwwnvjrtt.supabase.co"
+VAPID_CLAIM_EMAIL = "support@legacybond.ai"
