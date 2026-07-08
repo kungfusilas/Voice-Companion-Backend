@@ -8,12 +8,13 @@ Push notification router.
 Database table required in Supabase (run once in SQL Editor):
 ─────────────────────────────────────────────────────────────
   CREATE TABLE IF NOT EXISTS push_subscriptions (
-    id         bigserial PRIMARY KEY,
-    user_id    uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    endpoint   text        NOT NULL UNIQUE,
-    p256dh     text        NOT NULL,
-    auth       text        NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
+    id                    bigserial PRIMARY KEY,
+    user_id               uuid        NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    endpoint              text        NOT NULL UNIQUE,
+    p256dh                text        NOT NULL,
+    auth                  text        NOT NULL,
+    timezone_offset_hours integer     NOT NULL DEFAULT 0,
+    created_at            timestamptz NOT NULL DEFAULT now()
   );
 
   ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
