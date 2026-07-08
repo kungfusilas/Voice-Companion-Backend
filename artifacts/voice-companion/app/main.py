@@ -143,6 +143,11 @@ _ALLOWED_ORIGINS: list[str] = [
 _dev_domain = os.environ.get("REPLIT_DEV_DOMAIN", "")
 if _dev_domain:
     _ALLOWED_ORIGINS.append(f"https://{_dev_domain}")
+# Include all production domains assigned by Replit (comma-separated).
+for _prod_domain in os.environ.get("REPLIT_DOMAINS", "").split(","):
+    _prod_domain = _prod_domain.strip()
+    if _prod_domain:
+        _ALLOWED_ORIGINS.append(f"https://{_prod_domain}")
 
 app.add_middleware(
     CORSMiddleware,
