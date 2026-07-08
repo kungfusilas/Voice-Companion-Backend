@@ -164,28 +164,6 @@ export function CompanionSelect({ onSelect, onSignOut, onSignIn, onUpgrade, onHu
                 <p className="text-base font-semibold text-white leading-tight">
                   {companion.name}
                 </p>
-
-                {/* Tagline */}
-                <p className="text-xs text-white/50 mt-0.5 leading-tight">
-                  {companion.tagline}
-                </p>
-
-                {/* Trait chips */}
-                <div className="flex flex-wrap justify-center gap-1 mt-2">
-                  {companion.traits.map((trait) => (
-                    <span
-                      key={trait}
-                      className="text-[10px] px-2 py-0.5 rounded-full"
-                      style={{
-                        background: companion.glow,
-                        border: `1px solid ${companion.border}`,
-                        color: "rgba(255,255,255,0.7)",
-                      }}
-                    >
-                      {trait}
-                    </span>
-                  ))}
-                </div>
               </div>
             </motion.button>
           ))}
