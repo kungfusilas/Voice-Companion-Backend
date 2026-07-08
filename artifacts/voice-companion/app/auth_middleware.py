@@ -2,7 +2,7 @@
 JWT auth middleware for Supabase-issued tokens.
 
 Supabase signs JWTs with ECC (P-256 / ES256) keys.  We verify tokens by
-fetching the project's public JWKS endpoint and caching the keys in memory.
+fetching the project's public JWKS endpoint and caching the keys in memry.
 No shared secret is required.
 
 Usage in a route:
