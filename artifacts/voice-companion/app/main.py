@@ -151,8 +151,8 @@ for _prod_domain in os.environ.get("REPLIT_DOMAINS", "").split(","):
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_ALLOWED_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
