@@ -480,14 +480,22 @@ export function ChatPage({
 
           // Inline TTS for regular messages only — wow sequence speaks Q10 explicitly
           if (ttsEnabled && fullReply && !shouldTriggerWow) {
-            const cleanTTS = (s: string) =>
-              s.replace(/\*[^*]*\*/g, "")
-               .replace(/\[[^\]]*\]/g, "")
-               .replace(/\((?:laughs?|chuckles?|sighs?|gasps?|smiles?|grins?|pauses?|whispers?|softly|quietly|nervously|warmly|teasingly|playfully|gently|hesitates?|nods?)[^)]*\)/gi, "")
-               .replace(/\p{Extended_Pictographic}/gu, "")
-               .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
-               .replace(/\s+/g, " ")
-               .trim();
+            const cleanTTS = (s: string) => {
+              const name = (persona?.name ?? "").trim();
+              let r = s;
+              if (name) {
+                r = r.replace(new RegExp("^" + name + ":\\s*", "i"), "");
+                r = r.replace(new RegExp("\\s*[-\u2014]?\\s*" + name + "\\s*$", "i"), "");
+              }
+              return r
+                .replace(/\*[^*]*\*/g, "")
+                .replace(/\[[^\]]*\]/g, "")
+                .replace(/\((?:laughs?|chuckles?|sighs?|gasps?|smiles?|grins?|pauses?|whispers?|softly|quietly|nervously|warmly|teasingly|playfully|gently|hesitates?|nods?)[^)]*\)/gi, "")
+                .replace(/\p{Extended_Pictographic}/gu, "")
+                .replace(/[\u2600-\u27BF\u2B00-\u2BFF\u2300-\u23FF\u25A0-\u25FF]/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+            };
             const fullSpoken = cleanTTS(fullReply);
             if (fullSpoken) {
               currentTtsTextRef.current = fullSpoken;
