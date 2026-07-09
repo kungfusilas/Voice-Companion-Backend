@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Mic, MicOff, Loader2, Lock } from "lucide-react";
 import type { RecorderState } from "@/hooks/useVoiceRecorder";
@@ -16,37 +16,36 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
   const isRecording = state === "recording";
   const isProcessing = state === "processing";
 
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const onStartRef = useRef(onStart);
-  const onStopRef = useRef(onStop);
-  useEffect(() => { onStartRef.current = onStart; }, [onStart]);
-  useEffect(() => { onStopRef.current = onStop; }, [onStop]);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const isHeldRef = useRef(false);
+
+  const handleStart = useCallback(() => {
+    if (isHeldRef.current) return;
+    isHeldRef.current = true;
+    onStart();
+  }, [onStart]);
+
+  const handleStop = useCallback(() => {
+    if (!isHeldRef.current) return;
+    isHeldRef.current = false;
+    onStop();
+  }, [onStop]);
 
   useEffect(() => {
-    const el = btnRef.current;
-    if (!el) return;
-
-    const handleTouchStart = (e: TouchEvent) => {
-      e.preventDefault();
-      if (!(e.currentTarget as HTMLButtonElement).disabled) {
-        onStartRef.current();
-      }
-    };
-    const handleTouchEnd = (e: TouchEvent) => {
-      e.preventDefault();
-      onStopRef.current();
-    };
-
-    el.addEventListener("touchstart", handleTouchStart, { passive: false });
-    el.addEventListener("touchend",   handleTouchEnd,   { passive: false });
-    el.addEventListener("touchcancel",handleTouchEnd,   { passive: false });
-
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const onTouchStart  = (e: TouchEvent) => { e.preventDefault(); handleStart(); };
+    const onTouchEnd    = (e: TouchEvent) => { e.preventDefault(); handleStop(); };
+    const onTouchCancel = (e: TouchEvent) => { e.preventDefault(); handleStop(); };
+    btn.addEventListener("touchstart",  onTouchStart,  { passive: false });
+    btn.addEventListener("touchend",    onTouchEnd,    { passive: false });
+    btn.addEventListener("touchcancel", onTouchCancel, { passive: false });
     return () => {
-      el.removeEventListener("touchstart",  handleTouchStart);
-      el.removeEventListener("touchend",    handleTouchEnd);
-      el.removeEventListener("touchcancel", handleTouchEnd);
+      btn.removeEventListener("touchstart",  onTouchStart);
+      btn.removeEventListener("touchend",    onTouchEnd);
+      btn.removeEventListener("touchcancel", onTouchCancel);
     };
-  }, []);
+  }, [handleStart, handleStop]);
 
   const activeColor = nsfw
     ? "from-red-700 to-red-500 shadow-red-700/50"
@@ -83,11 +82,12 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.button
-        ref={btnRef}
-        onMouseDown={() => { if (!disabled && !isProcessing) onStart(); }}
-        onMouseUp={onStop}
-        onMouseLeave={onStop}
+        ref={buttonRef}
+        onMouseDown={handleStart}
+        onMouseUp={handleStop}
+        onMouseLeave={handleStop}
         disabled={disabled || isProcessing}
+        style={{ WebkitTapHighlightColor: "transparent", userSelect: "none" }}
         className={`relative w-16 h-16 rounded-full bg-gradient-to-b shadow-lg flex items-center justify-center cursor-pointer select-none outline-none disabled:opacity-40 disabled:cursor-not-allowed ${isRecording ? activeColor : idleColor}`}
         whileTap={{ scale: 0.93 }}
         animate={isRecording ? { scale: [1, 1.06, 1] } : { scale: 1 }}
