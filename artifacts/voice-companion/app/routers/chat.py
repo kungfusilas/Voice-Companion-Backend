@@ -848,7 +848,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         for _m in _recent:
             store.append_message(request.session_id, ChatMessage(role=_m["role"], content=_m["content"]))
 
-    history = store.get_or_create_session(request.session_id, request.persona_id)
+    history = list(store.get_or_create_session(request.session_id, request.persona_id))
     if not is_guest:
         store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
@@ -987,7 +987,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                 ChatMessage(role=_m["role"], content=_m["content"]),
             )
 
-    history = store.get_or_create_session(request.session_id, request.persona_id)
+    history = list(store.get_or_create_session(request.session_id, request.persona_id))
     if not is_guest:
         store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(

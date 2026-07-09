@@ -47,19 +47,26 @@ export function useVoiceRecorder(
   useEffect(() => { onAudioRef.current = onAudio; },  [onAudio]);
   useEffect(() => { onErrorRef.current = onError; },  [onError]);
 
+  // Tracks whether the user is still holding the button. Cleared by stop() so a
+  // release that lands *before* getUserMedia resolves aborts cleanly instead of
+  // starting a recording nobody can stop.
+  const wantActiveRef = useRef(false);
+
   const _setState = useCallback((s: RecorderState) => {
     stateRef.current = s;
     setState(s);
   }, []);
 
-  // ── start — STABLE (no state/onAudio deps) ─────────────────────────────
+  // ── start — STABLE (no state/onAudio deps) ────────────────────────────
   const start = useCallback(async () => {
     if (stateRef.current !== "idle") return;
+    wantActiveRef.current = true;
 
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (err) {
+      wantActiveRef.current = false;
       const msg =
         err instanceof Error && err.name === "NotAllowedError"
           ? "Microphone permission denied — allow mic access and try again."
@@ -68,8 +75,8 @@ export function useVoiceRecorder(
       return;
     }
 
-    // Guard: user may have released before getUserMedia resolved
-    if (stateRef.current !== "idle") {
+    // User released (stop() ran) before the mic stream resolved — abort cleanly.
+    if (!wantActiveRef.current || stateRef.current !== "idle") {
       stream.getTracks().forEach((t) => t.stop());
       return;
     }
@@ -83,6 +90,7 @@ export function useVoiceRecorder(
         ? new MediaRecorder(stream, { mimeType })
         : new MediaRecorder(stream);
     } catch (err) {
+      wantActiveRef.current = false;
       stream.getTracks().forEach((t) => t.stop());
       onErrorRef.current?.(
         "Audio recording is not supported in this browser — please try Chrome or update Safari.",
@@ -108,10 +116,18 @@ export function useVoiceRecorder(
     recorder.start(250);
     mediaRecorderRef.current = recorder;
     _setState("recording");
+
+    // Released during the synchronous setup above — stop now so we never hang
+    // in a recording state that nobody is holding.
+    if (!wantActiveRef.current) {
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    }
   }, [_setState]); // STABLE — reads stateRef, not state
 
   // ── stop — STABLE (no state deps) ─────────────────────────────────────
   const stop = useCallback(() => {
+    wantActiveRef.current = false;
     if (mediaRecorderRef.current && stateRef.current === "recording") {
       mediaRecorderRef.current.stop();
       mediaRecorderRef.current = null;
