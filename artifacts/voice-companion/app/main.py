@@ -222,6 +222,7 @@ app.include_router(push_router.router,              prefix="/api/push",         
 app.include_router(notifications_router.router,     prefix="/api/notifications",          tags=["notifications"])
 
 
+@app.get("/health")
 @app.get("/api/healthz")
 async def health():
     return {"status": "ok"}

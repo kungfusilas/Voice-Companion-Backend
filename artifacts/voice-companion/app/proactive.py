@@ -169,7 +169,7 @@ async def check_and_send_daily_activity() -> None:
 
         rows = (
             db.table("relationship_stats")
-            .select("user_id, companion_id, last_active_at, last_activity_sent_at")
+            .select("user_id, companion_id, last_active_at")
             .execute()
         ).data or []
 
@@ -180,11 +180,6 @@ async def check_and_send_daily_activity() -> None:
             # Only for users active within the last 7 days
             last_active = _parse_ts(row.get("last_active_at"))
             if not last_active or last_active < seven_days_ago:
-                continue
-
-            # Skip if already sent today
-            last_sent = _parse_ts(row.get("last_activity_sent_at"))
-            if last_sent and last_sent >= today_start:
                 continue
 
             activity_type = random.choice(_ACTIVITY_TYPES)
@@ -222,7 +217,6 @@ async def check_and_send_daily_activity() -> None:
                 {
                     "user_id": user_id,
                     "companion_id": companion_id,
-                    "last_activity_sent_at": now.isoformat(),
                     "updated_at": "now()",
                 },
                 on_conflict="user_id,companion_id",
