@@ -18,6 +18,7 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
 
   const buttonRef = useRef<HTMLButtonElement>(null);
   const isHeldRef = useRef(false);
+  const touchHandledRef = useRef(false);
 
   const handleStart = useCallback(() => {
     if (isHeldRef.current) return;
@@ -34,9 +35,9 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
   useEffect(() => {
     const btn = buttonRef.current;
     if (!btn) return;
-    const onTouchStart  = (e: TouchEvent) => { e.preventDefault(); handleStart(); };
-    const onTouchEnd    = (e: TouchEvent) => { e.preventDefault(); handleStop(); };
-    const onTouchCancel = (e: TouchEvent) => { e.preventDefault(); handleStop(); };
+    const onTouchStart  = (e: TouchEvent) => { e.preventDefault(); touchHandledRef.current = true; handleStart(); };
+    const onTouchEnd    = (e: TouchEvent) => { e.preventDefault(); handleStop(); setTimeout(() => { touchHandledRef.current = false; }, 500); };
+    const onTouchCancel = (e: TouchEvent) => { e.preventDefault(); handleStop(); setTimeout(() => { touchHandledRef.current = false; }, 500); };
     btn.addEventListener("touchstart",  onTouchStart,  { passive: false });
     btn.addEventListener("touchend",    onTouchEnd,    { passive: false });
     btn.addEventListener("touchcancel", onTouchCancel, { passive: false });
@@ -83,9 +84,9 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
     <div className="flex flex-col items-center gap-2">
       <motion.button
         ref={buttonRef}
-        onMouseDown={handleStart}
-        onMouseUp={handleStop}
-        onMouseLeave={handleStop}
+        onMouseDown={() => { if (!touchHandledRef.current) handleStart(); }}
+        onMouseUp={() => { if (!touchHandledRef.current) handleStop(); }}
+        onMouseLeave={() => { if (!touchHandledRef.current) handleStop(); }}
         disabled={disabled || isProcessing}
         style={{ WebkitTapHighlightColor: "transparent", userSelect: "none" }}
         className={`relative w-16 h-16 rounded-full bg-gradient-to-b shadow-lg flex items-center justify-center cursor-pointer select-none outline-none disabled:opacity-40 disabled:cursor-not-allowed ${isRecording ? activeColor : idleColor}`}
