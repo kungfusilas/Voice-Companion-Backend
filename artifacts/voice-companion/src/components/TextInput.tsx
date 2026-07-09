@@ -1,4 +1,4 @@
-import { useState, useEffect, type KeyboardEvent } from "react";
+import { useRef, useEffect, useState, useCallback, type KeyboardEvent } from "react";
 import { Send } from "lucide-react";
 
 interface TextInputProps {
@@ -13,17 +13,39 @@ interface TextInputProps {
 export function TextInput({ onSend, disabled, nsfw, placeholder, romantic, initialValue }: TextInputProps) {
   const [value, setValue] = useState(initialValue ?? "");
 
-  // If parent changes initialValue (e.g. from Future Memory "Talk about this"), update local value
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const touchHandledRef = useRef(false);
+
   useEffect(() => {
     if (initialValue) setValue(initialValue);
   }, [initialValue]);
 
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     const trimmed = value.trim();
     if (!trimmed || disabled) return;
     onSend(trimmed);
     setValue("");
-  };
+  }, [value, disabled, onSend]);
+
+  useEffect(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const onTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      touchHandledRef.current = true;
+      handleSend();
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      setTimeout(() => { touchHandledRef.current = false; }, 500);
+    };
+    btn.addEventListener("touchstart", onTouchStart, { passive: false });
+    btn.addEventListener("touchend",   onTouchEnd,   { passive: false });
+    return () => {
+      btn.removeEventListener("touchstart", onTouchStart);
+      btn.removeEventListener("touchend",   onTouchEnd);
+    };
+  }, [handleSend]);
 
   const handleKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -53,7 +75,8 @@ export function TextInput({ onSend, disabled, nsfw, placeholder, romantic, initi
         style={{ fieldSizing: "content" } as React.CSSProperties}
       />
       <button
-        onClick={handleSend}
+        ref={buttonRef}
+        onClick={() => { if (!touchHandledRef.current) handleSend(); }}
         disabled={disabled || !value.trim()}
         className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/70 hover:text-white transition disabled:opacity-30 disabled:cursor-not-allowed"
       >
