@@ -105,7 +105,7 @@ export function useVoiceRecorder(
       onAudioRef.current(blob);
     };
 
-    recorder.start();
+    recorder.start(250);
     mediaRecorderRef.current = recorder;
     _setState("recording");
   }, [_setState]); // STABLE — reads stateRef, not state
