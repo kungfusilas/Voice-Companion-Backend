@@ -1,3 +1,4 @@
+import { useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Mic, MicOff, Loader2, Lock } from "lucide-react";
 import type { RecorderState } from "@/hooks/useVoiceRecorder";
@@ -14,6 +15,38 @@ interface PushToTalkButtonProps {
 export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPremium = true }: PushToTalkButtonProps) {
   const isRecording = state === "recording";
   const isProcessing = state === "processing";
+
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const onStartRef = useRef(onStart);
+  const onStopRef = useRef(onStop);
+  useEffect(() => { onStartRef.current = onStart; }, [onStart]);
+  useEffect(() => { onStopRef.current = onStop; }, [onStop]);
+
+  useEffect(() => {
+    const el = btnRef.current;
+    if (!el) return;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      e.preventDefault();
+      if (!(e.currentTarget as HTMLButtonElement).disabled) {
+        onStartRef.current();
+      }
+    };
+    const handleTouchEnd = (e: TouchEvent) => {
+      e.preventDefault();
+      onStopRef.current();
+    };
+
+    el.addEventListener("touchstart", handleTouchStart, { passive: false });
+    el.addEventListener("touchend",   handleTouchEnd,   { passive: false });
+    el.addEventListener("touchcancel",handleTouchEnd,   { passive: false });
+
+    return () => {
+      el.removeEventListener("touchstart",  handleTouchStart);
+      el.removeEventListener("touchend",    handleTouchEnd);
+      el.removeEventListener("touchcancel", handleTouchEnd);
+    };
+  }, []);
 
   const activeColor = nsfw
     ? "from-red-700 to-red-500 shadow-red-700/50"
@@ -50,9 +83,10 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
   return (
     <div className="flex flex-col items-center gap-2">
       <motion.button
-        onPointerDown={onStart}
-        onPointerUp={onStop}
-        onPointerCancel={onStop}
+        ref={btnRef}
+        onMouseDown={() => { if (!disabled && !isProcessing) onStart(); }}
+        onMouseUp={onStop}
+        onMouseLeave={onStop}
         disabled={disabled || isProcessing}
         className={`relative w-16 h-16 rounded-full bg-gradient-to-b shadow-lg flex items-center justify-center cursor-pointer select-none outline-none disabled:opacity-40 disabled:cursor-not-allowed ${isRecording ? activeColor : idleColor}`}
         whileTap={{ scale: 0.93 }}
