@@ -177,6 +177,7 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const busyRef = useRef(false);
+  const pttActiveRef = useRef(false); // true while push-to-talk is active
   const { playing: speaking, play: playAudio, prepare: prepareAudio, playStream, stop: stopAudio, unlock: unlockAudio } = useAudioPlayer();
 
   // ── Conversation-mode supporting refs ────────────────────────────────────────
@@ -779,7 +780,11 @@ export function ChatPage({
       // Reset immediately once we have the transcript — don't hold "processing"
       // state through the entire sendMessage / TTS playback chain (can be 10+ s).
       resetRecorder();
-      await sendMessage(transcript);
+      try {
+        await sendMessage(transcript);
+      } finally {
+        pttActiveRef.current = false;
+      }
     } catch (sttErr) {
       if (sttErr instanceof ApiError && sttErr.status === 402) {
         setQuotaErrorDetail(sttErr.detail as QuotaDetail);
@@ -800,6 +805,7 @@ export function ChatPage({
 
   // ── Always-on conversation mode (paid tiers) ─────────────────────────────────
   const handleConvTranscript = useCallback((text: string) => {
+    if (pttActiveRef.current) return; // PTT recording in progress — skip conv-mode transcript
     unlockAudio();
     sendMessage(text);
   }, [unlockAudio, sendMessage]);
@@ -1194,7 +1200,7 @@ export function ChatPage({
         ) : (
           <PushToTalkButton
             state={recorderState}
-            onStart={() => { unlockAudio(); start(); }}
+            onStart={() => { unlockAudio(); pttActiveRef.current = true; start(); }}
             onStop={stop}
             disabled={busy || showUpgradeCard}
             nsfw={persona.nsfw_mode}
