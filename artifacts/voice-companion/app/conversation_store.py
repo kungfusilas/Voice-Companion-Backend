@@ -116,12 +116,13 @@ async def _save_via_rpc(
             return False  # function not yet created — fall back
         if resp.status_code in (200, 201, 204):
             return True
-        logger.debug(
-            "conversation_store: RPC returned unexpected status %d", resp.status_code
+        logger.error(
+            "conversation_store: RPC returned unexpected status %d body=%s",
+            resp.status_code, resp.text[:300],
         )
         return False
     except Exception as exc:
-        logger.debug("conversation_store: RPC call failed: %s", exc)
+        logger.error("conversation_store: RPC call failed: %s", exc)
         return False
 
 
@@ -158,13 +159,19 @@ async def save_exchange(
             if existing:
                 current: list = existing.get("messages") or []
                 current.extend(new_msgs)
-                await client.patch(
+                patch_resp = await client.patch(
                     f"{_sb_url()}/rest/v1/conversations?session_id=eq.{session_id}",
                     headers=_sb_headers(prefer="return=minimal"),
                     json={"messages": current, "updated_at": ts},
                 )
+                if patch_resp.status_code not in (200, 201, 204):
+                    logger.error(
+                        "conversation_store: PATCH failed status=%d session=%s body=%s",
+                        patch_resp.status_code, session_id[:8], patch_resp.text[:300],
+                    )
+                    return
             else:
-                await client.post(
+                post_resp = await client.post(
                     f"{_sb_url()}/rest/v1/conversations",
                     headers=_sb_headers(prefer="return=minimal"),
                     json={
@@ -174,11 +181,17 @@ async def save_exchange(
                         "messages":     new_msgs,
                     },
                 )
+                if post_resp.status_code not in (200, 201, 204):
+                    logger.error(
+                        "conversation_store: POST failed status=%d session=%s body=%s",
+                        post_resp.status_code, session_id[:8], post_resp.text[:300],
+                    )
+                    return
 
         logger.debug("Conversation archived (fetch+patch fallback): session=%s", session_id[:8])
 
     except Exception as exc:
-        logger.debug("Conversation store error (non-fatal): %s", exc)
+        logger.error("conversation_store: save_exchange failed (non-fatal): %s", exc, exc_info=True)
 
 
 async def get_session_info(session_id: str) -> dict | None:
