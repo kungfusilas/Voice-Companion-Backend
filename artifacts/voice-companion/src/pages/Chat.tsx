@@ -766,34 +766,32 @@ export function ChatPage({
   }, [persona.id, persona.name, userId, selfieLoading, busy, isGuest]);
 
   const handleAudio = useCallback(async (blob: Blob) => {
-    if (blob.size < 100) {
-      setError("Recording was too short — hold the button while speaking.");
-      resetRecorder();
-      return;
-    }
     try {
-      const transcript = await transcribeAudio(blob);
-      if (!transcript.trim()) {
-        setError("Couldn't make out what you said — please try again.");
+      if (blob.size < 100) {
+        setError("Recording was too short — hold the button while speaking.");
+        resetRecorder();
         return;
       }
-      // Reset immediately once we have the transcript — don't hold "processing"
-      // state through the entire sendMessage / TTS playback chain (can be 10+ s).
-      resetRecorder();
       try {
+        const transcript = await transcribeAudio(blob);
+        if (!transcript.trim()) {
+          setError("Couldn't make out what you said — please try again.");
+          resetRecorder();
+          return;
+        }
+        resetRecorder();
         await sendMessage(transcript);
+      } catch (sttErr) {
+        if (sttErr instanceof ApiError && sttErr.status === 402) {
+          setQuotaErrorDetail(sttErr.detail as QuotaDetail);
+        } else {
+          setError("Transcription failed — try again");
+        }
       } finally {
-        pttActiveRef.current = false;
-      }
-    } catch (sttErr) {
-      if (sttErr instanceof ApiError && sttErr.status === 402) {
-        setQuotaErrorDetail(sttErr.detail as QuotaDetail);
-      } else {
-        setError("Transcription failed — try again");
+        resetRecorder();
       }
     } finally {
-      // Safety-net: ensure we always return to idle on any error path.
-      resetRecorder();
+      pttActiveRef.current = false; // clears on ALL exit paths
     }
   }, [sendMessage]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -801,6 +799,12 @@ export function ChatPage({
     handleAudio,
     (msg) => setError(msg),
   );
+
+  const handlePttStart = useCallback(() => {
+    unlockAudio();
+    pttActiveRef.current = true;
+    start();
+  }, [unlockAudio, start]);
   const isBusy = busy || recorderState === "processing";
 
   // ── Always-on conversation mode (paid tiers) ─────────────────────────────────
@@ -1200,7 +1204,7 @@ export function ChatPage({
         ) : (
           <PushToTalkButton
             state={recorderState}
-            onStart={() => { unlockAudio(); pttActiveRef.current = true; start(); }}
+            onStart={handlePttStart}
             onStop={stop}
             disabled={busy || showUpgradeCard}
             nsfw={persona.nsfw_mode}
