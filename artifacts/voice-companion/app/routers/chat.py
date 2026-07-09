@@ -18,6 +18,8 @@ from app import conversation_store
 from app import relationship
 from app import scoring
 from app import graphiti_memory
+from app import memory_manager
+from app import memory_distillation
 from app.session_debrief import generate_session_debrief
 from app.weekly_insight import maybe_generate_weekly_insight
 from app.personality_map import update_personality_map, get_personality_map
@@ -721,11 +723,13 @@ async def _build_system_prompt(
             personality_extractor._fetch_current_map(user_id) if _is_power_or_above(tier) else asyncio.sleep(0),
             _build_core_facts_block(user_id),
             graphiti_memory.search_graph(user_id, user_message),
+            memory_manager.get_memory_context(user_id, persona.id),
         )
         memories, stats, needs_drift = gather_results[0], gather_results[1], gather_results[2]
         raw_pmap          = gather_results[3] if _is_power_or_above(tier) else {}
         core_facts_block: str = gather_results[4] or ""
         graph_memories:   str = gather_results[5] or ""
+        tiered_memory_context: str = gather_results[6] or ""
 
         message_count = stats.get("message_count", 0)
         connection_score: int = stats.get("connection_score") or 50
@@ -756,8 +760,9 @@ async def _build_system_prompt(
             asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
 
         core_facts_prefix = (core_facts_block + "\n\n") if core_facts_block else ""
+        tiered_memory_block = f"\n\n{tiered_memory_context}" if tiered_memory_context else ""
         prompt = _inject_date(
-            core_facts_prefix + base_prompt + romantic_block + personality_block + session_facts_block + memory_block + graph_memory_block + rel_context + bond_context + drift_block
+            core_facts_prefix + base_prompt + romantic_block + personality_block + session_facts_block + memory_block + graph_memory_block + tiered_memory_block + rel_context + bond_context + drift_block
         )
         if onboarding_context:
             prompt += f"\n\n{onboarding_context}"
@@ -848,7 +853,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         for _m in _recent:
             store.append_message(request.session_id, ChatMessage(role=_m["role"], content=_m["content"]))
 
-    history = list(store.get_or_create_session(request.session_id, request.persona_id))
+    history = list(store.get_or_create_session(request.session_id, request.persona_id))[-40:]
     if not is_guest:
         store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
@@ -987,7 +992,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                 ChatMessage(role=_m["role"], content=_m["content"]),
             )
 
-    history = list(store.get_or_create_session(request.session_id, request.persona_id))
+    history = list(store.get_or_create_session(request.session_id, request.persona_id))[-40:]
     if not is_guest:
         store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
@@ -1174,6 +1179,14 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
                             )
                         )
+
+                    # ── Memory distillation (all authenticated users) ───────
+                    asyncio.create_task(
+                        memory_distillation.distill_memories(
+                            user_id,
+                            [{"role": m.role, "content": m.content} for m in _hist],
+                        )
+                    )
 
                     # ── Power Plan background tasks ─────────────────────────
                     if tier in ("power", "elite"):
