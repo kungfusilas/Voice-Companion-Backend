@@ -77,6 +77,10 @@ export function useConversationMode(opts: ConversationModeOptions) {
   // Mirror state in a ref so async callbacks see the latest value
   const stateRef = useRef<ConvState>("off");
 
+  // Accumulates finalized transcript fragments for the CURRENT utterance so the
+  // whole sentence is sent, not just the last `speech_final` fragment.
+  const finalTranscriptRef = useRef("");
+
   const _setState = useCallback((s: ConvState) => {
     stateRef.current = s;
     setState(s);
@@ -149,6 +153,7 @@ export function useConversationMode(opts: ConversationModeOptions) {
     try { wsRef.current?.close(); } catch {}
     wsRef.current = null;
 
+    finalTranscriptRef.current = "";
     setInterimTranscript("");
     _setState(target);
   }, [_setState]);
@@ -224,10 +229,6 @@ export function useConversationMode(opts: ConversationModeOptions) {
 
     if (!text) return;
 
-    if (!isFinal) {
-      setInterimTranscript(text);
-    }
-
     const curState = stateRef.current;
 
     // ── Barge-in detection (while companion is speaking) ───────────────────
@@ -256,10 +257,28 @@ export function useConversationMode(opts: ConversationModeOptions) {
       return;
     }
 
-    // ── Turn completion (while listening) ──────────────────────────────────
-    if (isFinal && spFinal && curState === "listening") {
-      setInterimTranscript("");
+    if (!isFinal) {
+      const prefix = finalTranscriptRef.current;
+      setInterimTranscript(prefix ? `${prefix} ${text}` : text);
+      return;
+    }
+
+    // Accumulate finalized fragments; only the last carries speech_final, so
+    // this keeps the beginning of the sentence instead of just the last words.
+    if (curState === "listening") {
+      finalTranscriptRef.current = finalTranscriptRef.current
+        ? `${finalTranscriptRef.current} ${text}`
+        : text;
       lastActivityRef.current = Date.now();
+
+      if (!spFinal) {
+        setInterimTranscript(finalTranscriptRef.current);
+        return;
+      }
+
+      const fullText = finalTranscriptRef.current.trim();
+      finalTranscriptRef.current = "";
+      setInterimTranscript("");
 
       // Cancel check-in countdown — user responded
       if (checkinTimerRef.current) {
@@ -269,10 +288,10 @@ export function useConversationMode(opts: ConversationModeOptions) {
       }
 
       // Don't overlap with an in-flight chat turn
-      if (isBusyRef.current) return;
+      if (isBusyRef.current || !fullText) return;
 
       _setState("processing");
-      clientLog("conv_turn", { transcript: text, confidence: conf });
+      clientLog("conv_turn", { transcript: fullText, confidence: conf });
       // Safety timeout: if TTS never starts within 25 s (e.g. network error), reopen mic
       setTimeout(() => {
         if (stateRef.current === "processing") {
@@ -280,7 +299,7 @@ export function useConversationMode(opts: ConversationModeOptions) {
           lastActivityRef.current = Date.now();
         }
       }, 25_000);
-      onTranscriptFinalized(text);
+      onTranscriptFinalized(fullText);
     }
   }, [
     currentTtsTextRef,
@@ -399,6 +418,7 @@ export function useConversationMode(opts: ConversationModeOptions) {
       }
     };
 
+    finalTranscriptRef.current = "";
     lastActivityRef.current = Date.now();
     _setState("listening");
     startSilenceTimer();
