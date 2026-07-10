@@ -6,8 +6,8 @@ see elevenlabs_client.py). Mirrors the synthesize()/synthesize_stream() shape
 of elevenlabs_client.py so callers in routers/tts.py can branch on tier
 without changing their calling convention.
 
-Model: tts-1-hd, Voice: nova (fixed per product spec — no per-persona voice
-tuning for this tier).
+Model: tts-1-hd. Voice is per-persona: Aeva → nova, Kai → onyx (deep male).
+Default voice is nova.
 """
 import os
 from typing import AsyncGenerator
@@ -16,6 +16,16 @@ from openai import AsyncOpenAI
 
 TTS_MODEL = "tts-1-hd"
 TTS_VOICE = "nova"
+
+# Per-persona OpenAI voice mapping (Premium tier)
+PERSONA_VOICES = {
+    "companion-aeva": "nova",
+    "companion-kai": "onyx",
+}
+
+
+def voice_for_persona(persona_id: str) -> str:
+    return PERSONA_VOICES.get(persona_id, TTS_VOICE)
 
 _async_client: AsyncOpenAI | None = None
 
@@ -40,13 +50,13 @@ def get_async_client() -> AsyncOpenAI:
     return _async_client
 
 
-async def synthesize(text: str) -> bytes:
+async def synthesize(text: str, voice: str = TTS_VOICE) -> bytes:
     """Convert text to speech via OpenAI TTS and return full audio as bytes (mp3)."""
     client = get_async_client()
     try:
         response = await client.audio.speech.create(
             model=TTS_MODEL,
-            voice=TTS_VOICE,
+            voice=voice,
             input=text,
         )
         return response.read()
@@ -54,13 +64,13 @@ async def synthesize(text: str) -> bytes:
         raise OpenAITTSError(str(e))
 
 
-async def synthesize_stream(text: str) -> AsyncGenerator[bytes, None]:
+async def synthesize_stream(text: str, voice: str = TTS_VOICE) -> AsyncGenerator[bytes, None]:
     """Stream audio chunks as they arrive from OpenAI TTS."""
     client = get_async_client()
     try:
         async with client.audio.speech.with_streaming_response.create(
             model=TTS_MODEL,
-            voice=TTS_VOICE,
+            voice=voice,
             input=text,
         ) as response:
             async for chunk in response.iter_bytes():

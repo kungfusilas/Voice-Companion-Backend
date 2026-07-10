@@ -220,11 +220,11 @@ async def persona_speak_stream(
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
-    # Premium tier uses OpenAI TTS (tts-1-hd / nova). Power+ keeps ElevenLabs unchanged.
+    # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
     if not is_power_or_higher(tier):
         async def openai_audio_stream():
             try:
-                async for chunk in openai_tts_client.synthesize_stream(clean_text):
+                async for chunk in openai_tts_client.synthesize_stream(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)):
                     yield chunk
             except OpenAITTSError as e:
                 raise RuntimeError(str(e))
@@ -327,10 +327,10 @@ async def persona_speak(
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
-    # Premium tier uses OpenAI TTS (tts-1-hd / nova). Power+ keeps ElevenLabs unchanged.
+    # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
     if not is_power_or_higher(tier):
         try:
-            audio = await openai_tts_client.synthesize(clean_text)
+            audio = await openai_tts_client.synthesize(clean_text, voice=openai_tts_client.voice_for_persona(persona.id))
         except OpenAITTSError as e:
             raise HTTPException(status_code=502, detail=str(e))
 
