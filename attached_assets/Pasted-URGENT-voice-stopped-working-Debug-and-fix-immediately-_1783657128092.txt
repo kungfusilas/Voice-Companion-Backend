@@ -1,0 +1,42 @@
+URGENT — voice stopped working. Debug and fix immediately. Power mode.
+
+LIKELY CAUSE: The user_entitlements table doesn't exist in Supabase yet (it was never created), so every entitlement call in chat.py is throwing a PostgresError, crashing the request handler, and silently killing voice after it starts failing.
+
+STEP 1 — Check logs for errors right now. Look for any exception traceback, especially PostgresError, relation "user_entitlements" does not exist, or 500 errors on the chat/voice endpoint.
+
+STEP 2 — Create the user_entitlements table in Supabase NOW by running this SQL:
+CREATE TABLE IF NOT EXISTS user_entitlements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  plan TEXT NOT NULL DEFAULT 'free',
+  sessions_used INTEGER DEFAULT 0,
+  period_start TIMESTAMPTZ DEFAULT NOW(),
+  current_session_messages INTEGER DEFAULT 0,
+  bonus_sessions INTEGER DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id)
+);
+ALTER TABLE user_entitlements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can read own entitlements" ON user_entitlements FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Service role full access" ON user_entitlements FOR ALL USING (true);
+
+STEP 3 — Fix the increment_session bug in entitlements.py. The nested Supabase call inside the update dict is broken. Replace increment_session with:
+async def increment_session(user_id: str, supabase: Client):
+    try:
+        r = supabase.table('user_entitlements').select('sessions_used').eq('user_id', user_id).maybe_single().execute()
+        current = r.data.get('sessions_used', 0) if r.data else 0
+        supabase.table('user_entitlements').update({
+            'sessions_used': current + 1,
+            'current_session_messages': 0
+        }).eq('user_id', user_id).execute()
+    except Exception as e:
+        print(f"[entitlements] increment_session error (non-fatal): {e}")
+
+STEP 4 — Add try/except around ALL entitlement calls in chat.py so that if entitlements fails for ANY reason, voice continues working. Entitlement errors must NEVER crash the voice pipeline. Wrap every call like:
+try:
+    result = await check_session_allowed(user_id, plan, supabase)
+except Exception as e:
+    print(f"[entitlements] check failed (non-fatal): {e}")
+    result = {"allowed": True}  # fail open
+
+STEP 5 — Restart server and confirm voice works again. Republish.

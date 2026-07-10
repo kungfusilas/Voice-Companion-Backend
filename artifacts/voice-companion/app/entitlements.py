@@ -186,7 +186,7 @@ async def get_or_create_entitlement(user_id: str, plan: str) -> dict | None:
                     f"{base}?user_id=eq.{user_id}", headers=_headers(), json=updates
                 )
             return row
-    except httpx.HTTPError as e:
+    except Exception as e:
         logger.warning("entitlements: get_or_create error user=%s err=%s", user_id[:8], e)
         return None
 
@@ -236,7 +236,7 @@ async def increment_session(user_id: str) -> None:
                 headers=_headers(),
                 json={"sessions_used": current + 1, "current_session_messages": 0},
             )
-    except httpx.HTTPError as e:
+    except Exception as e:
         logger.warning("entitlements: increment_session error user=%s err=%s", user_id[:8], e)
 
 
@@ -286,7 +286,7 @@ async def increment_message(user_id: str) -> dict:
             if new_count > limits["messages"]:
                 return {"allowed": False, "messages_used": new_count, "limit": limits["messages"]}
             return {"allowed": True, "messages_used": new_count, "limit": limits["messages"]}
-    except httpx.HTTPError as e:
+    except Exception as e:
         logger.warning("entitlements: increment_message error user=%s err=%s", user_id[:8], e)
         return {"allowed": True, "messages_used": 0, "limit": 999}
 
@@ -305,7 +305,7 @@ async def get_plan(user_id: str) -> str:
             rows = resp.json() if resp.status_code in (200, 206) else []
             if rows and rows[0].get("subscription_tier"):
                 return str(rows[0]["subscription_tier"])
-    except httpx.HTTPError:
+    except Exception:
         pass
     return "free"
 
@@ -328,6 +328,6 @@ async def check_facts_allowed(user_id: str, plan: str) -> bool:
             if "/" in content_range:
                 count = int(content_range.split("/")[-1])
                 return count < limits["max_facts"]
-    except (httpx.HTTPError, ValueError):
+    except Exception:
         pass
     return True

@@ -17,3 +17,8 @@ description: Session/message/fact cap system design decisions and Supabase DDL c
 
 ## Reference-code adaptation rule
 - User-pasted reference code using sync supabase-py clients inside async FastAPI handlers must be reimplemented with async httpx REST (this app's pattern) — sync calls block the event loop (previously caused real incidents here).
+
+## Fail-open must catch Exception, not just httpx.HTTPError
+- Catching only `httpx.HTTPError` leaves JSON-decode/KeyError/TypeError paths able to 500 the chat/voice pipeline. All entitlement helpers catch broad `Exception`, and chat.py wraps enforcement in an outer guard that re-raises HTTPException (intentional 429s) but swallows+logs everything else.
+- **Why:** a voice-outage scare traced to fear of exactly this class of crash; forced-failure test confirmed the guard.
+- **How to apply:** any new quota/billing check called from a request handler needs the same two-layer guard, verified with a monkeypatched raise test.

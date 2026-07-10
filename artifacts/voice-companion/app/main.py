@@ -53,6 +53,14 @@ from app.routers.auth import verify_token
 
 load_dotenv()
 
+# Surface app-level INFO logs (e.g. [CLIENT] voice diagnostics from client_log)
+# in the console. Uvicorn configures its own loggers; this covers the "app.*"
+# namespace without touching uvicorn's handlers.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s %(name)s: %(message)s",
+)
+
 logger = logging.getLogger(__name__)
 
 

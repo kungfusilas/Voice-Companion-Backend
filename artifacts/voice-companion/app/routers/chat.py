@@ -3,6 +3,8 @@ import json
 import asyncio
 import httpx
 import urllib.parse
+import logging as _logging
+_chat_logger = _logging.getLogger(__name__)
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -88,6 +90,16 @@ async def _enforce_entitlements(user_id: str, tier: str, session_id: str) -> Non
     (entitlements module returns allowed=True when Supabase is unreachable or
     the user_entitlements table doesn't exist yet).
     """
+    try:
+        await _enforce_entitlements_inner(user_id, tier, session_id)
+    except HTTPException:
+        raise  # intentional 429 cap responses
+    except Exception as e:
+        # Entitlement errors must NEVER crash the chat/voice pipeline — fail open.
+        _chat_logger.warning("entitlements enforcement failed (non-fatal) user=%.8s: %s", user_id, e)
+
+
+async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) -> None:
     key = f"{user_id}:{session_id}"
     if key not in _COUNTED_SESSIONS:
         async with _entitlement_lock(user_id):
@@ -353,9 +365,6 @@ def _offer_cooldown_ok(last_offer_ts: str | None) -> bool:
 
 
 # ── Profile / tier fetch ──────────────────────────────────────────────────────
-
-import logging as _logging
-_chat_logger = _logging.getLogger(__name__)
 
 
 async def _get_user_profile(user_id: str) -> tuple[str, str]:
