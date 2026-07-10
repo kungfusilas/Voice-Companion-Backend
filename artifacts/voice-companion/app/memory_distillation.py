@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 import httpx
 import anthropic
 
+from app import entitlements
+
 logger = logging.getLogger(__name__)
 
 _MODEL = "claude-haiku-4-5-20251001"
@@ -147,9 +149,17 @@ async def _upsert_core_facts(client: httpx.AsyncClient, user_id: str, facts: lis
     if not to_insert:
         return
 
-    remaining_slots = max(0, 50 - len(existing))
+    # Per-tier fact cap (entitlements). Fails open to the free-tier cap floor
+    # of 25 only if the plan lookup fails open to 'free'.
+    plan = await entitlements.get_plan(user_id)
+    max_facts = entitlements.get_limits(plan)["max_facts"]
+    remaining_slots = max(0, max_facts - len(existing))
     to_insert = to_insert[:remaining_slots]
     if not to_insert:
+        logger.debug(
+            "memory_distillation: fact cap reached user=%s plan=%s max=%d",
+            user_id[:8], plan, max_facts,
+        )
         return
 
     await client.post(

@@ -19,7 +19,7 @@ from app import relationship
 from app import scoring
 from app import graphiti_memory
 from app import memory_manager
-from app import memory_distillation
+from app import entitlements, memory_distillation
 from app.session_debrief import generate_session_debrief
 from app.weekly_insight import maybe_generate_weekly_insight
 from app.personality_map import update_personality_map, get_personality_map
@@ -64,6 +64,72 @@ def _is_power_or_above(tier: str) -> bool:
 def _voice_available_for_tier(tier: str) -> bool:
     """True only for premium and above; free/basic get no TTS voice output."""
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
+
+
+# ── Session/message cap enforcement (entitlements) ───────────────────────────
+# Sessions already counted this process lifetime, keyed "user_id:session_id".
+_COUNTED_SESSIONS: set[str] = set()
+# Per-user locks so concurrent requests for the same new session can't
+# double-count it (TOCTOU guard within this process).
+_ENTITLEMENT_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _entitlement_lock(user_id: str) -> asyncio.Lock:
+    lock = _ENTITLEMENT_LOCKS.get(user_id)
+    if lock is None:
+        lock = _ENTITLEMENT_LOCKS.setdefault(user_id, asyncio.Lock())
+    return lock
+
+
+async def _enforce_entitlements(user_id: str, tier: str, session_id: str) -> None:
+    """Enforce per-tier session and per-session message caps.
+
+    Raises HTTPException 429 when a cap is hit. Fails open on backend errors
+    (entitlements module returns allowed=True when Supabase is unreachable or
+    the user_entitlements table doesn't exist yet).
+    """
+    key = f"{user_id}:{session_id}"
+    if key not in _COUNTED_SESSIONS:
+        async with _entitlement_lock(user_id):
+            if key not in _COUNTED_SESSIONS:
+                # Durable new-session check: a session persisted in Supabase and
+                # owned by this user was already counted before (survives
+                # server restarts, unlike the in-process set).
+                _existing = await conversation_store.get_session_info(session_id)
+                if _existing is not None and _existing.get("user_id") == user_id:
+                    _COUNTED_SESSIONS.add(key)
+                else:
+                    gate = await entitlements.check_session_allowed(user_id, tier)
+                    if not gate.get("allowed", True):
+                        raise HTTPException(
+                            status_code=429,
+                            detail={
+                                "error": "session_limit_reached",
+                                "sessions_used": gate.get("used", 0),
+                                "sessions_limit": gate.get("limit", 0),
+                                "plan": tier,
+                                "message": "You've used all your sessions for this period. Upgrade or wait for reset.",
+                            },
+                        )
+                    _COUNTED_SESSIONS.add(key)
+                    await entitlements.increment_session(user_id)
+
+    await _enforce_message_cap(user_id)
+
+
+async def _enforce_message_cap(user_id: str) -> None:
+    """Increment the per-session message counter and raise 429 past the cap."""
+    msg = await entitlements.increment_message(user_id)
+    if not msg.get("allowed", True):
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "error": "message_limit_reached",
+                "messages_used": msg.get("messages_used", 0),
+                "messages_limit": msg.get("limit", 0),
+                "message": "You've reached the message limit for this session.",
+            },
+        )
 
 def _is_elite(tier: str) -> bool:
     return tier == "elite"
@@ -844,6 +910,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     # Usage quota check (authenticated users only)
     if not is_guest:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
+        await _enforce_entitlements(user_id, tier, request.session_id)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -982,6 +1049,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     # Usage quota check (authenticated users only)
     if not is_guest:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
+        await _enforce_entitlements(user_id, tier, request.session_id)
 
     persona = store.get_persona(request.persona_id)
     if not persona:

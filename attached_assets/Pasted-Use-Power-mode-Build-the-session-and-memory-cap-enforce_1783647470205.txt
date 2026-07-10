@@ -1,0 +1,129 @@
+Use Power mode. Build the session and memory cap enforcement system. Do this in order.
+
+STEP 1 — READ FIRST:
+- Read artifacts/voice-companion/app/chat.py — find: (a) where a session starts, (b) where each user message is processed, (c) how user_id and plan/tier are retrieved, (d) where distill_memories is called at session end
+- Read artifacts/voice-companion/app/memory_distillation.py — find where user_core_facts is written
+
+STEP 2 — CREATE Supabase table (run this SQL):
+```sql
+CREATE TABLE IF NOT EXISTS user_entitlements (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  plan TEXT NOT NULL DEFAULT 'free',
+  sessions_used INTEGER DEFAULT 0,
+  period_start TIMESTAMPTZ DEFAULT NOW(),
+  current_session_messages INTEGER DEFAULT 0,
+  bonus_sessions INTEGER DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id)
+);
+
+-- Auto-update updated_at
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN NEW.updated_at = NOW(); RETURN NEW; END;
+$$ language 'plpgsql';
+
+CREATE TRIGGER update_user_entitlements_updated_at
+  BEFORE UPDATE ON user_entitlements
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- RLS
+ALTER TABLE user_entitlements ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can read own entitlements" ON user_entitlements
+  FOR SELECT USING (auth.uid() = user_id);
+```
+
+STEP 3 — CREATE artifacts/voice-companion/app/entitlements.py:
+```python
+from datetime import datetime, timezone, timedelta
+from supabase import Client
+
+# Tier limits
+TIER_LIMITS = {
+    'free':    {'sessions': 15,  'period_days': 7,  'messages': 25,  'max_facts': 25},
+    'basic':   {'sessions': 80,  'period_days': 30, 'messages': 50,  'max_facts': 100},
+    'premium': {'sessions': 150, 'period_days': 30, 'messages': 75,  'max_facts': 500},
+    'power':   {'sessions': 250, 'period_days': 30, 'messages': 100, 'max_facts': 2000},
+}
+
+def get_limits(plan: str) -> dict:
+    return TIER_LIMITS.get(plan, TIER_LIMITS['free'])
+
+async def get_or_create_entitlement(user_id: str, plan: str, supabase: Client) -> dict:
+    """Fetch entitlement row, create if missing, reset if period expired."""
+    r = supabase.table('user_entitlements').select('*').eq('user_id', user_id).maybe_single().execute()
+    now = datetime.now(timezone.utc)
+
+    if not r.data:
+        row = {'user_id': user_id, 'plan': plan, 'sessions_used': 0,
+               'period_start': now.isoformat(), 'current_session_messages': 0, 'bonus_sessions': 0}
+        supabase.table('user_entitlements').insert(row).execute()
+        return row
+
+    row = r.data
+    period_start = datetime.fromisoformat(row['period_start'].replace('Z', '+00:00'))
+    limits = get_limits(plan)
+    if (now - period_start).days >= limits['period_days']:
+        # Reset period
+        supabase.table('user_entitlements').update({
+            'sessions_used': 0, 'period_start': now.isoformat(), 'plan': plan
+        }).eq('user_id', user_id).execute()
+        row['sessions_used'] = 0
+
+    # Sync plan in case it changed
+    if row.get('plan') != plan:
+        supabase.table('user_entitlements').update({'plan': plan}).eq('user_id', user_id).execute()
+    return row
+
+async def check_session_allowed(user_id: str, plan: str, supabase: Client) -> dict:
+    """Returns {'allowed': bool, 'reason': str, 'used': int, 'limit': int}"""
+    row = await get_or_create_entitlement(user_id, plan, supabase)
+    limits = get_limits(plan)
+    total_allowed = limits['sessions'] + row.get('bonus_sessions', 0)
+    used = row.get('sessions_used', 0)
+    if used >= total_allowed:
+        return {'allowed': False, 'reason': 'session_limit', 'used': used, 'limit': total_allowed}
+    return {'allowed': True, 'used': used, 'limit': total_allowed}
+
+async def increment_session(user_id: str, supabase: Client):
+    """Call when a new session starts."""
+    supabase.table('user_entitlements').update({
+        'sessions_used': supabase.table('user_entitlements')
+            .select('sessions_used').eq('user_id', user_id).execute().data[0]['sessions_used'] + 1,
+        'current_session_messages': 0
+    }).eq('user_id', user_id).execute()
+
+async def increment_message(user_id: str, supabase: Client) -> dict:
+    """Call on each user message. Returns {'allowed': bool, 'messages_used': int, 'limit': int}"""
+    r = supabase.table('user_entitlements').select('*').eq('user_id', user_id).maybe_single().execute()
+    if not r.data:
+        return {'allowed': True, 'messages_used': 0, 'limit': 999}
+    row = r.data
+    plan = row.get('plan', 'free')
+    limits = get_limits(plan)
+    new_count = row.get('current_session_messages', 0) + 1
+    supabase.table('user_entitlements').update({'current_session_messages': new_count}).eq('user_id', user_id).execute()
+    if new_count >= limits['messages']:
+        return {'allowed': False, 'messages_used': new_count, 'limit': limits['messages']}
+    return {'allowed': True, 'messages_used': new_count, 'limit': limits['messages']}
+
+async def check_facts_allowed(user_id: str, plan: str, supabase: Client) -> bool:
+    """Returns True if user can store more facts."""
+    limits = get_limits(plan)
+    r = supabase.table('user_core_facts').select('id', count='exact').eq('user_id', user_id).execute()
+    count = r.count if hasattr(r, 'count') else len(r.data or [])
+    return count < limits['max_facts']
+```
+
+STEP 4 — MODIFY chat.py:
+- Add `from entitlements import check_session_allowed, increment_session, increment_message` at top
+- At session start: call `check_session_allowed`. If not allowed, return HTTP 429 with `{"error": "session_limit_reached", "sessions_used": X, "sessions_limit": Y, "plan": plan, "message": "You've used all your sessions for this period. Upgrade or wait for reset."}`
+- If allowed: call `increment_session`
+- On each user message received: call `increment_message`. If not allowed, return `{"error": "message_limit_reached", "message": "You've reached the message limit for this session."}` with HTTP 429
+
+STEP 5 — MODIFY memory_distillation.py:
+- Add `from entitlements import check_facts_allowed` at top
+- Before writing each fact to user_core_facts: call `check_facts_allowed`. Skip writing if at limit.
+
+STEP 6 — Republish after confirming no errors.
