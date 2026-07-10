@@ -70,6 +70,7 @@ class ChatResponse(BaseModel):
     stage_min: int = 0
     stage_max: int = 100
     stage_up_text: str = ""
+    voice_available: bool = False
 
 
 class CreatePersonaRequest(BaseModel):

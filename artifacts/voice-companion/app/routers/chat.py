@@ -61,6 +61,10 @@ def _is_premium_or_above(tier: str) -> bool:
 def _is_power_or_above(tier: str) -> bool:
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["power"]
 
+def _voice_available_for_tier(tier: str) -> bool:
+    """True only for premium and above; free/basic get no TTS voice output."""
+    return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
+
 def _is_elite(tier: str) -> bool:
     return tier == "elite"
 
@@ -890,6 +894,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
             reply=reply,
             message_count=len(store.get_history(request.session_id)),
             model_backend="venice" if use_venice else "claude",
+            voice_available=False,
         )
 
     stats = await relationship.get_stats(user_id, persona.id)
@@ -944,6 +949,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         stage_min=stage_min,
         stage_max=stage_max,
         stage_up_text=stage_up_text,
+        voice_available=_voice_available_for_tier(tier),
     )
 
 
@@ -1084,6 +1090,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     )
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
+                    payload["voice_available"] = False if is_guest else _voice_available_for_tier(tier)
 
                     if is_guest:
                         # Guests: skip all Supabase ops

@@ -22,6 +22,11 @@ description: Rules for 5-year plan expiry enforcement and Stripe tier resolution
 - If price unresolvable → log INFO with `tier_unchanged` note, keep existing tier.
 - **Why:** Portal plan switches fire `subscription.updated` but not a new `checkout.session.completed`, so the old code left the DB tier stale after upgrades/downgrades.
 
+## Misleading tier-check helper names
+- In `chat.py`, `_is_premium_or_above(tier)` is misnamed — it actually returns True for `basic` too (checks `rank >= basic`). `_is_power_or_above` is correctly named.
+- Any feature gated to "premium and above only" (excluding basic) must NOT reuse `_is_premium_or_above`; add/verify a helper that compares against `_TIER_RANK["premium"]` directly (e.g. `_voice_available_for_tier`).
+- **Why:** blindly reusing `_is_premium_or_above` for a premium-gated feature (e.g. TTS voice output) silently leaks it to basic-tier users.
+
 ## CORS (C2)
 - `main.py` no longer uses `allow_origins=["*"]`. Explicit list: `legacybond.ai`, `www.legacybond.ai`, `voice-companion-backend.replit.app`, plus `REPLIT_DEV_DOMAIN` at startup.
 - **Why:** `allow_origins=*` + `allow_credentials=True` is invalid per Fetch spec; browsers block credentialed cross-origin requests from wildcard origins.
