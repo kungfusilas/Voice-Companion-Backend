@@ -7,7 +7,7 @@ import logging as _logging
 _chat_logger = _logging.getLogger(__name__)
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
 from app import store, claude, venice_client
 from app import memory as mem_store
@@ -918,6 +918,15 @@ async def _build_system_prompt(
 
 @router.post("", response_model=ChatResponse)
 async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify_token_or_guest)):
+    _chat_logger.info(f"[REQUEST] user={user_id} endpoint=chat method=POST")
+    try:
+        return await asyncio.wait_for(_chat_impl(request, req, user_id), timeout=45.0)
+    except asyncio.TimeoutError:
+        _chat_logger.warning("[TIMEOUT] chat endpoint exceeded 45s for user=%s", user_id)
+        return JSONResponse(status_code=504, content={"message": "Request timed out"})
+
+
+async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatResponse:
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -1057,6 +1066,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
          "stage_min": N, "stage_max": N, "stage_up_text": "..."}
         {"type": "error",     "message": "..."}
     """
+    _chat_logger.info(f"[REQUEST] user={user_id} endpoint=chat_stream method=POST")
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -1148,7 +1158,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
 
     user_message = request.message
 
-    async def event_generator():
+    async def _raw_event_generator():
         if photo_bytes:
             stream_iter = claude.stream_message_with_image(
                 system_prompt=system_prompt,
@@ -1301,6 +1311,30 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                 pass
 
             yield chunk
+
+    async def event_generator():
+        # Global deadline: if the full stream takes more than 45s, emit a terminal
+        # error event so the frontend stops waiting instead of hanging forever.
+        # (SSE cannot switch to a 504 status once streaming has begun, so we signal
+        # via the error event the client already handles.)
+        agen = _raw_event_generator()
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 45.0
+        try:
+            while True:
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                try:
+                    chunk = await asyncio.wait_for(agen.__anext__(), timeout=remaining)
+                except StopAsyncIteration:
+                    break
+                yield chunk
+        except asyncio.TimeoutError:
+            _chat_logger.warning("[TIMEOUT] chat stream exceeded 45s for user=%s", user_id)
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Request timed out'})}\n\n"
+        finally:
+            await agen.aclose()
 
     return StreamingResponse(
         event_generator(),

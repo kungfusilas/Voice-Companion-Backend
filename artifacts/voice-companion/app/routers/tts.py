@@ -265,6 +265,8 @@ async def persona_speak_stream(
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
+    logger.info(f"[TTS] starting for user={user_id}")
+
     # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
     if not is_power_or_higher(tier):
         async def openai_audio_stream():
@@ -275,6 +277,7 @@ async def persona_speak_stream(
                     "OpenAI TTS",
                 ):
                     yield chunk
+                logger.info(f"[TTS] done for user={user_id}")
             except OpenAITTSError as e:
                 # Degrade gracefully — end the stream instead of raising so the
                 # frontend gets a clean (possibly empty) 200 and shows text.
@@ -309,6 +312,7 @@ async def persona_speak_stream(
                 "ElevenLabs",
             ):
                 yield chunk
+            logger.info(f"[TTS] done for user={user_id}")
         except ElevenLabsError as e:
             if tagged_text != clean_text:
                 # Tag may have caused the rejection — retry with plain text
@@ -325,6 +329,7 @@ async def persona_speak_stream(
                         "ElevenLabs",
                     ):
                         yield chunk
+                    logger.info(f"[TTS] done for user={user_id}")
                 except ElevenLabsError as e2:
                     logger.warning("ElevenLabs TTS stream failed, degrading to text-only: %s", e2)
                     return
@@ -389,6 +394,8 @@ async def persona_speak(
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
+    logger.info(f"[TTS] starting for user={user_id}")
+
     # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
     if not is_power_or_higher(tier):
         try:
@@ -406,6 +413,7 @@ async def persona_speak(
             logger.warning("OpenAI TTS failed, degrading to text-only: %s", e)
             return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
 
+        logger.info(f"[TTS] done for user={user_id}")
         return Response(
             content=audio,
             media_type="audio/mpeg",
@@ -455,6 +463,7 @@ async def persona_speak(
             logger.warning("ElevenLabs TTS failed, degrading to text-only: %s", e)
             return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
 
+    logger.info(f"[TTS] done for user={user_id}")
     return Response(
         content=audio,
         media_type="audio/mpeg",

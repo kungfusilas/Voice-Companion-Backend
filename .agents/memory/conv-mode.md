@@ -27,6 +27,12 @@ Browser mic (AudioWorklet PCM Int16) → FastAPI WS /api/stt/stream → Deepgram
 
 **TTS calls need hard `asyncio.wait_for` timeouts (ElevenLabs 12s, OpenAI 10s).** A stalled provider call can hang forever WITHOUT raising, so `try/except` alone never fires and the client freezes. **Why:** the observed "voice hang" was a silent ElevenLabs stall, not an exception. **How to apply:** wrap non-streaming `synthesize()` in `asyncio.wait_for`; for streaming, use a PER-CHUNK timeout on `it.__anext__()` (not a total-duration cap, which would truncate long-but-healthy audio). On `asyncio.TimeoutError`, degrade to text-only. Non-timeout exceptions must still propagate so the plain-text retry/degrade logic runs.
 
+**Two chat endpoints; mobile uses the STREAMING one.** `chat.py` has `POST /chat` (non-streaming, returns `ChatResponse`) and `POST /chat/stream` (SSE). The frontend (`src/lib/api.ts`) calls `/chat/stream`. Any "chat endpoint" behavior change must target the streaming one to affect mobile.
+
+**Global request timeout differs by endpoint shape.** Non-streaming `/chat` wraps its body (`_chat_impl`) in `asyncio.wait_for(..., 45)` → returns `JSONResponse(504, {"message":"Request timed out"})`; only `asyncio.TimeoutError` is caught so `HTTPException` (402/404) still propagates. Streaming `/chat/stream` CANNOT return a 504 status once SSE headers flush — instead an outer `event_generator` wraps the inner `_raw_event_generator`, enforces a 45s wall-clock deadline via per-`__anext__` `wait_for` against remaining budget, and on timeout emits a terminal SSE `{"type":"error","message":"Request timed out"}` event (frontend already handles `error` type) + `aclose()`. **Why:** silent LLM/network hangs froze the client. **Caveat:** the 45s is total wall-clock incl. client backpressure, so very slow clients can trip it — accepted as strict anti-hang.
+
+**Diagnostic logging convention:** `[REQUEST] user=... endpoint=chat|chat_stream method=POST` at top of each chat handler; `[TTS] starting/done for user=...` around synthesis IN tts.py (NOT chat.py — chat never calls TTS). Lets logs show whether a request arrived vs hung at TTS.
+
 **Silence safeguard:** 4.5 min idle → "Still there?" TTS check-in → 30s → pause. Activity tracked: user utterance finalized, TTS playback start.
 
 **isPaid:** `!isGuest && subscriptionTier !== "free"` (includes basic, premium, power, elite). Conversation mode is gated on `isPaid && ttsEnabled && CONV_MODE_SUPPORTED`.
