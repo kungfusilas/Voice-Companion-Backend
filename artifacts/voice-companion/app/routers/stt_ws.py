@@ -38,6 +38,14 @@ _DG_BASE = (
     "&encoding=linear16&channels=1"
 )
 
+# ── Liveness / cleanup tuning ────────────────────────────────────────────────
+# The browser AudioWorklet streams PCM continuously while the mic is open, so a
+# live client never goes more than a couple of seconds without sending bytes.
+_HEARTBEAT_INTERVAL = 10.0   # seconds between {"type":"ping"} liveness frames to the browser
+_RECV_SLICE = 5.0            # polling granularity for detecting a silent client
+_CLIENT_IDLE_LIMIT = 30.0    # no audio from client for this long → client is gone, tear down
+_MAX_SESSION_SECONDS = 1800  # absolute per-session cap (30 min) — defense in depth
+
 
 # ── Token verification (WebSocket-safe — no FastAPI Depends here) ─────────────
 
@@ -134,16 +142,39 @@ async def stt_stream(
         ) as dg_ws:
 
             # ── Task 1: browser → Deepgram ──────────────────────────────────
+            # A half-open client socket (mobile network switch, backgrounded tab)
+            # never delivers a close frame, so receive_bytes() would block
+            # forever. Poll in short slices: if no audio arrives for
+            # _CLIENT_IDLE_LIMIT the client is dead — break so the whole session
+            # tears down (async-with closes Deepgram, finally closes the socket)
+            # instead of pinning an upstream STT session open indefinitely.
             async def client_to_dg() -> None:
+                loop = asyncio.get_event_loop()
+                started = loop.time()
+                idle = 0.0
                 try:
                     while True:
+                        if loop.time() - started > _MAX_SESSION_SECONDS:
+                            logger.info(
+                                "STT session hit max duration — closing uid=%s",
+                                user_id[:8],
+                            )
+                            break
                         try:
                             data = await asyncio.wait_for(
-                                websocket.receive_bytes(), timeout=60.0
+                                websocket.receive_bytes(), timeout=_RECV_SLICE
                             )
+                            idle = 0.0
                             await dg_ws.send(data)
                         except asyncio.TimeoutError:
-                            # Send KeepAlive so Deepgram doesn't close idle stream
+                            idle += _RECV_SLICE
+                            if idle >= _CLIENT_IDLE_LIMIT:
+                                logger.info(
+                                    "STT client idle %.0fs — closing dead session uid=%s",
+                                    idle, user_id[:8],
+                                )
+                                break
+                            # Brief gap — keep Deepgram warm and keep waiting.
                             try:
                                 await dg_ws.send(json.dumps({"type": "KeepAlive"}))
                             except Exception:
@@ -159,10 +190,27 @@ async def stt_stream(
                     except Exception:
                         pass
 
-            # ── Task 2: Deepgram → browser, quota accounting ─────────────────
+            # ── Task 2: Deepgram → browser, heartbeat, quota accounting ──────
+            # This is the ONLY task that writes to the browser socket, so client
+            # sends never interleave. When Deepgram is quiet (user silent) the
+            # recv() times out and we emit a lightweight {"type":"ping"} so the
+            # browser watchdog can tell a live-but-idle line from a dead one.
             async def dg_to_client() -> None:
                 try:
-                    async for msg in dg_ws:
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(
+                                dg_ws.recv(), timeout=_HEARTBEAT_INTERVAL
+                            )
+                        except asyncio.TimeoutError:
+                            try:
+                                await websocket.send_json({"type": "ping"})
+                            except Exception:
+                                break
+                            continue
+                        except Exception:
+                            break  # Deepgram connection closed
+
                         if isinstance(msg, bytes):
                             continue
 

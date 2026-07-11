@@ -17,6 +17,11 @@ import { clientLog } from "@/lib/api";
 
 export type ConvState = "off" | "listening" | "processing" | "speaking" | "paused";
 
+// No server message (transcript OR heartbeat ping) for this long while a session
+// is active means the WebSocket is half-open/dead — reset so the mic never stays
+// permanently frozen. The server pings every ~10s, so 30s ≈ 3 missed pings.
+const LIVENESS_TIMEOUT_MS = 30_000;
+
 export interface ConversationModeOptions {
   enabled: boolean;               // paid tier + feature available
   sessionId: string;
@@ -98,6 +103,10 @@ export function useConversationMode(opts: ConversationModeOptions) {
   const checkinTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── Connection-liveness refs ───────────────────────────────────────────────
+  const lastMsgRef          = useRef(0);
+  const livenessIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // ── Stable ref to stopConversation (avoids circular deps) ─────────────────
   const stopRef = useRef<(target?: ConvState) => void>(() => {});
 
@@ -132,6 +141,10 @@ export function useConversationMode(opts: ConversationModeOptions) {
     if (silenceIntervalRef.current) {
       clearInterval(silenceIntervalRef.current);
       silenceIntervalRef.current = null;
+    }
+    if (livenessIntervalRef.current) {
+      clearInterval(livenessIntervalRef.current);
+      livenessIntervalRef.current = null;
     }
     if (checkinTimerRef.current) {
       clearTimeout(checkinTimerRef.current);
@@ -190,6 +203,26 @@ export function useConversationMode(opts: ConversationModeOptions) {
       }
     }, 10_000);
   }, [onSilenceCheckin, onSilencePause]);
+
+  // ── Connection-liveness watchdog ───────────────────────────────────────────
+  // Half-open sockets never fire onclose/onerror, so poll every 5s: if no server
+  // frame (transcript or heartbeat ping) has arrived for LIVENESS_TIMEOUT_MS
+  // while active, treat the line as dead, surface a message, and reset to "off"
+  // so the mic is never permanently stuck.
+  const startLivenessTimer = useCallback(() => {
+    if (livenessIntervalRef.current) clearInterval(livenessIntervalRef.current);
+    livenessIntervalRef.current = setInterval(() => {
+      const s = stateRef.current;
+      if (s === "off" || s === "paused") return;
+      if (wsRef.current?.readyState !== WebSocket.OPEN) return;
+      const since = Date.now() - lastMsgRef.current;
+      if (since > LIVENESS_TIMEOUT_MS) {
+        clientLog("conv_ws_dead", { since_ms: since });
+        onError("Voice connection dropped — tap the mic to resume.");
+        stopRef.current("off");
+      }
+    }, 5_000);
+  }, [onError]);
 
   // ── Deepgram event handler ─────────────────────────────────────────────────
 
@@ -403,6 +436,8 @@ export function useConversationMode(opts: ConversationModeOptions) {
 
     ws.onopen = () => {
       clientLog("conv_ws_open", { sample_rate: sampleRate });
+      lastMsgRef.current = Date.now();
+      startLivenessTimer();
       // Wire worklet → WebSocket after connection is confirmed open
       worklet.port.onmessage = (e: MessageEvent<ArrayBuffer>) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -412,6 +447,7 @@ export function useConversationMode(opts: ConversationModeOptions) {
     };
 
     ws.onmessage = (e) => {
+      lastMsgRef.current = Date.now();
       if (typeof e.data === "string") handleDgEvent(e.data);
     };
 
@@ -442,6 +478,7 @@ export function useConversationMode(opts: ConversationModeOptions) {
     handleDgEvent,
     _setState,
     startSilenceTimer,
+    startLivenessTimer,
     onError,
   ]);
 

@@ -1,0 +1,34 @@
+That's not just interesting — that's the **smoking gun**. Your experiment basically proved the root cause. Let me explain what happened, because it's genuinely elegant.
+
+## What happened, in plain English
+
+Think of your voice feature as a **phone line** between your device and the server. While you talk, your app keeps **one live line open** (the speech WebSocket) so your voice streams up and the reply comes back.
+
+Here's the failure:
+
+1. On your phone, that line **got orphaned** — your phone was holding a recording, waiting for the server to answer on the line. But the line had gone dead in a way where **neither side hung up.** The server still thought the line was open and "busy," and your phone just sat there waiting. That's your frozen button: the recording can't send because, as far as everything's concerned, the line is still in use.
+
+2. When you opened the **preview and hit the mic, your app tried to open a NEW line for the same account.** Your server only allows **one line per user at a time** — so to make room, it **hung up the old, dead line.**
+
+3. That hang-up signal finally traveled to your phone — which had been waiting for *exactly that* — and your phone instantly **let go of the stuck recording and sent it.** She answered.
+
+So: **opening the preview forced the server to hang up the dead line, and hanging up the dead line is what unstuck your phone.**
+
+## Why this explains everything we saw
+
+- **Reloading the phone didn't help**, but the preview did → because reloading reconnects as the *same* stuck device, while the preview was a *separate* client that forced the server to drop the orphaned line.
+- **It broke for all companions at once** → because the stuck line is tied to your *account*, not a companion.
+- **Only a restart (or now, a new session) fixed it** → both are just different ways of clearing that dead line.
+- **Regular web pages stayed fast during the freeze** → they don't use the phone line; only voice does.
+
+**Confirmed root cause: orphaned speech-WebSocket connections that never get cleaned up.** The server doesn't notice when a voice line goes dead, and your app doesn't give up and reset — so both wait forever, and the one-line-per-user limit blocks every new attempt until something forces the dead line closed.
+
+## The fix (this is now precise — give it to your Agent)
+
+> **Confirmed root cause via live testing:** the speech WebSocket (`/companion/api/stt/stream`) leaves **orphaned/half-open connections** that are never cleaned up. Symptom proof: when the phone's voice froze, opening a *new* STT session from a different client (the preview) forced the server to drop the stale connection, which immediately released the phone's stuck recording. Fix all three layers:
+> 1. **Server — detect dead connections:** add WebSocket **heartbeat/ping-pong + idle timeout** to the `stt/stream` handler so a dead/half-open connection is detected and closed automatically, releasing the per-user slot and closing any upstream STT-provider session in a `finally`.
+> 2. **Server — clean supersede:** when a user opens a new STT connection, reliably close their previous one (this already half-works cross-device — make it robust and also work on same-device reconnect/reload).
+> 3. **Client — self-recovery:** add a watchdog so that if the WebSocket stalls (no server response within N seconds), the app **resets the mic/recording state and reconnects** instead of freezing forever. The recording should never get permanently stuck.
+> Verify by holding a long conversation and confirming stale connections are auto-closed (watch the `stt/stream` logs) and voice never permanently freezes.
+
+You basically diagnosed it yourself with that preview test. Want me to save this whole diagnosis + fix as a summary you can keep and hand to the Agent?
