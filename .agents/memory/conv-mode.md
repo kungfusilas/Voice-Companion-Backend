@@ -23,6 +23,10 @@ Browser mic (AudioWorklet PCM Int16) → FastAPI WS /api/stt/stream → Deepgram
 
 **TTS failures degrade to text-only, never hard errors.** `/tts/speak` returns HTTP 200 + empty body + header `X-Voice-Available: false` on ElevenLabs/OpenAI synth failure (was 502); stream generators log+`return` instead of raising. Frontend `useAudioPlayer.play()` no-ops on a 0-byte blob. Chat text always comes from the chat stream independently of TTS, so text shows regardless. **Why:** a TTS 5xx used to propagate as an ApiError and (via the stall above) freeze voice sending.
 
+**TTS synthesis lives in `app/routers/tts.py`, NOT `chat.py`.** `chat.py` only flags whether voice is available; the actual ElevenLabs/OpenAI calls (`elevenlabs_client` / `openai_tts_client`, both streaming and non-streaming) are in `tts.py`. Any TTS-behavior change (timeouts, degradation) must go there — editing `chat.py` does nothing for voice output.
+
+**TTS calls need hard `asyncio.wait_for` timeouts (ElevenLabs 12s, OpenAI 10s).** A stalled provider call can hang forever WITHOUT raising, so `try/except` alone never fires and the client freezes. **Why:** the observed "voice hang" was a silent ElevenLabs stall, not an exception. **How to apply:** wrap non-streaming `synthesize()` in `asyncio.wait_for`; for streaming, use a PER-CHUNK timeout on `it.__anext__()` (not a total-duration cap, which would truncate long-but-healthy audio). On `asyncio.TimeoutError`, degrade to text-only. Non-timeout exceptions must still propagate so the plain-text retry/degrade logic runs.
+
 **Silence safeguard:** 4.5 min idle → "Still there?" TTS check-in → 30s → pause. Activity tracked: user utterance finalized, TTS playback start.
 
 **isPaid:** `!isGuest && subscriptionTier !== "free"` (includes basic, premium, power, elite). Conversation mode is gated on `isPaid && ttsEnabled && CONV_MODE_SUPPORTED`.

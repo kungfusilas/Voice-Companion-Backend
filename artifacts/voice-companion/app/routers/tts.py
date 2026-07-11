@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 from fastapi import APIRouter, HTTPException, Depends, Request
@@ -18,6 +19,40 @@ from app.routers.tier_check import is_premium_or_higher, is_power_or_higher
 
 router = APIRouter()
 logger = logging.getLogger("tts")
+
+# Hard timeouts for TTS providers. A stalled provider call can hang without ever
+# raising an exception, which freezes the client. These caps guarantee we fall
+# back to text-only (voice_available: false) instead of waiting forever.
+_ELEVEN_TIMEOUT = 12.0
+_OPENAI_TIMEOUT = 10.0
+
+
+async def _stream_with_timeout(agen, timeout: float, label: str):
+    """Yield chunks from an async audio generator, ending the stream if any
+    single chunk stalls longer than `timeout` seconds.
+
+    This is a per-chunk cap (not a total-duration cap) so long-but-healthy audio
+    keeps flowing while a genuine hang is bounded. Non-timeout exceptions (e.g.
+    ElevenLabsError) propagate to the caller so existing retry/degrade logic runs.
+    """
+    it = agen.__aiter__()
+    try:
+        while True:
+            try:
+                chunk = await asyncio.wait_for(it.__anext__(), timeout=timeout)
+            except StopAsyncIteration:
+                return
+            except asyncio.TimeoutError:
+                logger.warning("%s timed out after %ss — ending stream, falling back to text-only", label, timeout)
+                return
+            yield chunk
+    finally:
+        aclose = getattr(agen, "aclose", None)
+        if aclose is not None:
+            try:
+                await aclose()
+            except Exception:
+                pass
 
 # Sent when speech synthesis fails but the chat text is still available.
 # The frontend reads this header to degrade gracefully (show text, no audio)
@@ -234,7 +269,11 @@ async def persona_speak_stream(
     if not is_power_or_higher(tier):
         async def openai_audio_stream():
             try:
-                async for chunk in openai_tts_client.synthesize_stream(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)):
+                async for chunk in _stream_with_timeout(
+                    openai_tts_client.synthesize_stream(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)),
+                    _OPENAI_TIMEOUT,
+                    "OpenAI TTS",
+                ):
                     yield chunk
             except OpenAITTSError as e:
                 # Degrade gracefully — end the stream instead of raising so the
@@ -258,24 +297,32 @@ async def persona_speak_stream(
 
     async def audio_stream():
         try:
-            async for chunk in elevenlabs_client.synthesize_stream(
-                text=tagged_text,
-                voice_id=persona.voice_id,
-                model_id=request.model_id,
-                voice_settings=voice_settings,
-                previous_text=request.previous_text or None,
+            async for chunk in _stream_with_timeout(
+                elevenlabs_client.synthesize_stream(
+                    text=tagged_text,
+                    voice_id=persona.voice_id,
+                    model_id=request.model_id,
+                    voice_settings=voice_settings,
+                    previous_text=request.previous_text or None,
+                ),
+                _ELEVEN_TIMEOUT,
+                "ElevenLabs",
             ):
                 yield chunk
         except ElevenLabsError as e:
             if tagged_text != clean_text:
                 # Tag may have caused the rejection — retry with plain text
                 try:
-                    async for chunk in elevenlabs_client.synthesize_stream(
-                        text=clean_text,
-                        voice_id=persona.voice_id,
-                        model_id=request.model_id,
-                        voice_settings=voice_settings,
-                        previous_text=request.previous_text or None,
+                    async for chunk in _stream_with_timeout(
+                        elevenlabs_client.synthesize_stream(
+                            text=clean_text,
+                            voice_id=persona.voice_id,
+                            model_id=request.model_id,
+                            voice_settings=voice_settings,
+                            previous_text=request.previous_text or None,
+                        ),
+                        _ELEVEN_TIMEOUT,
+                        "ElevenLabs",
                     ):
                         yield chunk
                 except ElevenLabsError as e2:
@@ -345,7 +392,13 @@ async def persona_speak(
     # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
     if not is_power_or_higher(tier):
         try:
-            audio = await openai_tts_client.synthesize(clean_text, voice=openai_tts_client.voice_for_persona(persona.id))
+            audio = await asyncio.wait_for(
+                openai_tts_client.synthesize(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)),
+                timeout=_OPENAI_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("OpenAI TTS timed out after %ss — falling back to text-only", _OPENAI_TIMEOUT)
+            return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
         except OpenAITTSError as e:
             # Voice synthesis failed — degrade gracefully to text-only.
             # Return 200 with an empty body + X-Voice-Available: false so the
@@ -364,24 +417,36 @@ async def persona_speak(
     voice_settings = build_voice_settings_for_register(request.persona_id, register)
 
     try:
-        audio = await elevenlabs_client.synthesize(
-            text=tagged_text,
-            voice_id=persona.voice_id,
-            model_id=request.model_id,
-            voice_settings=voice_settings,
-            previous_text=request.previous_text or None,
+        audio = await asyncio.wait_for(
+            elevenlabs_client.synthesize(
+                text=tagged_text,
+                voice_id=persona.voice_id,
+                model_id=request.model_id,
+                voice_settings=voice_settings,
+                previous_text=request.previous_text or None,
+            ),
+            timeout=_ELEVEN_TIMEOUT,
         )
+    except asyncio.TimeoutError:
+        logger.warning("ElevenLabs timed out after %ss — falling back to text-only", _ELEVEN_TIMEOUT)
+        return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
     except ElevenLabsError as e:
         if tagged_text != clean_text:
             # Tag may have caused the rejection — retry with plain text
             try:
-                audio = await elevenlabs_client.synthesize(
-                    text=clean_text,
-                    voice_id=persona.voice_id,
-                    model_id=request.model_id,
-                    voice_settings=voice_settings,
-                    previous_text=request.previous_text or None,
+                audio = await asyncio.wait_for(
+                    elevenlabs_client.synthesize(
+                        text=clean_text,
+                        voice_id=persona.voice_id,
+                        model_id=request.model_id,
+                        voice_settings=voice_settings,
+                        previous_text=request.previous_text or None,
+                    ),
+                    timeout=_ELEVEN_TIMEOUT,
                 )
+            except asyncio.TimeoutError:
+                logger.warning("ElevenLabs timed out after %ss — falling back to text-only", _ELEVEN_TIMEOUT)
+                return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
             except ElevenLabsError as e2:
                 # Voice synthesis failed — degrade gracefully to text-only.
                 logger.warning("ElevenLabs TTS failed, degrading to text-only: %s", e2)
