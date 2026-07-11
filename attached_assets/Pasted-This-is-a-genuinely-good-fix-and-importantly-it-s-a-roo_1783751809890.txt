@@ -1,0 +1,37 @@
+This is a genuinely good fix — and importantly, it's a *root-cause* fix, not another band-aid. Let me translate what it means and then give you the one thing I'd verify before you hit publish.
+
+## In plain terms: what they actually fixed
+
+Your companion has a "memory" system (the graph/Neo4j part). The real problem was that **every time you spoke, the server went and read your memory — and as that memory grew with each conversation, those reads got slower and eventually just hung with no limit.** After several exchanges, the read never finished, the response never came back, and the button stuck. That's a perfect match for your symptom ("works several times, then sticks, then keeps coming back").
+
+The old 45-second timeout just gave up after 45s — a band-aid. **These new changes close the actual leak:** they put a strict time limit on each memory/graph read (3–4 seconds) and cap how much data one query can pull (`limit=60`), so a slow memory lookup now quietly falls back instead of freezing the whole turn. They also confirmed your button-reset code was already correct — it just needed the server to reliably finish, which this now guarantees. That's the right diagnosis and the right layer to fix it at.
+
+## Before you publish — verify it *behaviorally*, not just the health check
+
+Here's my one real caution, and it comes straight from why this kept coming back before: **"health check returns 200" does not prove your specific bug is fixed.** A green health check just means the server starts. The only proof that matters is reproducing your exact scenario and seeing it *not* stick.
+
+So before publishing to production, I'd do two things:
+
+**1. Actually reproduce it on the dev version.** Have a long voice conversation — go past the number of back-and-forths where it usually stuck before (you mentioned it takes several). If the button keeps working through a long chat, *that's* your confirmation.
+
+**2. Paste these two questions to the Replit Agent** — they close the only gaps I can see in the description:
+
+---
+
+> Two verification questions before I publish:
+>
+> 1. Do the 7 guarded prompt-build dependencies run **concurrently** (e.g. `asyncio.gather`) or one-after-another? If they run sequentially, what's the worst-case total time when several hit their timeouts at once — and is that comfortably under the 45s deadline? I don't want 7 separate timeouts adding up to another stall.
+>
+> 2. Did you actually **reproduce the original bug** — a long voice conversation with many back-and-forth turns against the dev backend — and confirm the button no longer sticks? Or was it only the health check and architect review? If you haven't run the long-conversation test, please do.
+
+---
+
+The reason for question 1: putting a time limit on each of 7 steps is great, but if they run in a line, 7 small waits can still add up to a big one. If they run at the same time (which is the right design), you're solid. That's the last thing I'd want confirmed.
+
+## Bottom line
+
+This is the most legit fix of the bunch — it targets *why* the server hung, which the earlier attempts never did. I'd feel good about publishing **once you've had one long voice conversation on the dev version without the button sticking.** That real-world test is what turns "should be fixed" into "is fixed."
+
+One small tradeoff to know about, not a problem: once your memory gets very large, a memory lookup might occasionally hit its 3–4s limit and fall back — meaning the companion could *occasionally* recall a little less, but it will **never freeze**. That's exactly the right trade. If you ever notice the companion forgetting more than you'd like down the road, that's the knob to revisit — but it's not something to hold up this release for.
+
+Want me to stick around while you run the long-conversation test, and help read the Agent's answers to those two questions?
