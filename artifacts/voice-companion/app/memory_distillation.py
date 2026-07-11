@@ -27,7 +27,8 @@ from datetime import datetime, timezone
 import httpx
 import anthropic
 
-from app import entitlements
+# HOTFIX(entitlements-disabled): entitlements removed from request path for diagnostics. Re-enable later.
+# from app import entitlements
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +152,11 @@ async def _upsert_core_facts(client: httpx.AsyncClient, user_id: str, facts: lis
 
     # Per-tier fact cap (entitlements). Fails open to the free-tier cap floor
     # of 25 only if the plan lookup fails open to 'free'.
-    plan = await entitlements.get_plan(user_id)
-    max_facts = entitlements.get_limits(plan)["max_facts"]
+    # HOTFIX(entitlements-disabled): fact cap bypassed — allow a high ceiling.
+    plan = "disabled"
+    max_facts = 1_000_000
+    # plan = await entitlements.get_plan(user_id)
+    # max_facts = entitlements.get_limits(plan)["max_facts"]
     remaining_slots = max(0, max_facts - len(existing))
     to_insert = to_insert[:remaining_slots]
     if not to_insert:

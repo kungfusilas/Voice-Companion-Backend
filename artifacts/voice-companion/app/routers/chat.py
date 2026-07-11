@@ -21,7 +21,9 @@ from app import relationship
 from app import scoring
 from app import graphiti_memory
 from app import memory_manager
-from app import entitlements, memory_distillation
+# HOTFIX(entitlements-disabled): entitlements removed from request path for diagnostics. Re-enable later.
+# from app import entitlements
+from app import memory_distillation
 from app.session_debrief import generate_session_debrief
 from app.weekly_insight import maybe_generate_weekly_insight
 from app.personality_map import update_personality_map, get_personality_map
@@ -90,13 +92,15 @@ async def _enforce_entitlements(user_id: str, tier: str, session_id: str) -> Non
     (entitlements module returns allowed=True when Supabase is unreachable or
     the user_entitlements table doesn't exist yet).
     """
-    try:
-        await _enforce_entitlements_inner(user_id, tier, session_id)
-    except HTTPException:
-        raise  # intentional 429 cap responses
-    except Exception as e:
-        # Entitlement errors must NEVER crash the chat/voice pipeline — fail open.
-        _chat_logger.warning("entitlements enforcement failed (non-fatal) user=%.8s: %s", user_id, e)
+    # HOTFIX(entitlements-disabled): pass-through — always allow, no caps enforced.
+    return
+    # try:
+    #     await _enforce_entitlements_inner(user_id, tier, session_id)
+    # except HTTPException:
+    #     raise  # intentional 429 cap responses
+    # except Exception as e:
+    #     # Entitlement errors must NEVER crash the chat/voice pipeline — fail open.
+    #     _chat_logger.warning("entitlements enforcement failed (non-fatal) user=%.8s: %s", user_id, e)
 
 
 async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) -> None:
@@ -111,7 +115,8 @@ async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) 
                 if _existing is not None and _existing.get("user_id") == user_id:
                     _COUNTED_SESSIONS.add(key)
                 else:
-                    gate = await entitlements.check_session_allowed(user_id, tier)
+                    gate = {"allowed": True}  # HOTFIX(entitlements-disabled)
+                    # gate = await entitlements.check_session_allowed(user_id, tier)
                     if not gate.get("allowed", True):
                         raise HTTPException(
                             status_code=429,
@@ -124,14 +129,16 @@ async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) 
                             },
                         )
                     _COUNTED_SESSIONS.add(key)
-                    await entitlements.increment_session(user_id)
+                    # HOTFIX(entitlements-disabled): session counting removed from request path.
+                    # await entitlements.increment_session(user_id)
 
     await _enforce_message_cap(user_id)
 
 
 async def _enforce_message_cap(user_id: str) -> None:
     """Increment the per-session message counter and raise 429 past the cap."""
-    msg = await entitlements.increment_message(user_id)
+    msg = {"allowed": True}  # HOTFIX(entitlements-disabled)
+    # msg = await entitlements.increment_message(user_id)
     if not msg.get("allowed", True):
         raise HTTPException(
             status_code=429,
@@ -919,7 +926,8 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
     # Usage quota check (authenticated users only)
     if not is_guest:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
-        await _enforce_entitlements(user_id, tier, request.session_id)
+        # HOTFIX(entitlements-disabled): entitlement enforcement removed from request path.
+        # await _enforce_entitlements(user_id, tier, request.session_id)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -1058,7 +1066,8 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     # Usage quota check (authenticated users only)
     if not is_guest:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
-        await _enforce_entitlements(user_id, tier, request.session_id)
+        # HOTFIX(entitlements-disabled): entitlement enforcement removed from request path.
+        # await _enforce_entitlements(user_id, tier, request.session_id)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
