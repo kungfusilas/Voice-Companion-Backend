@@ -83,6 +83,15 @@ def _entitlement_lock(user_id: str) -> asyncio.Lock:
     return lock
 
 
+async def _bg(coro, timeout: float = 20.0) -> None:
+    """Guard fire-and-forget tasks: 20s timeout, swallow errors.
+    Prevents task accumulation from starving the event loop."""
+    try:
+        await asyncio.wait_for(coro, timeout=timeout)
+    except Exception:
+        pass
+
+
 async def _enforce_entitlements(user_id: str, tier: str, session_id: str) -> None:
     """Enforce per-tier session and per-session message caps.
 
@@ -850,7 +859,7 @@ async def _build_system_prompt(
                 "Make it clear you're okay with it: they can use you as a brilliant assistant or talk personally, "
                 "no pressure either way. Keep it to 1-2 sentences, then continue with your normal reply."
             )
-            asyncio.create_task(relationship.acknowledge_drift(user_id, persona.id))
+            asyncio.create_task(_bg(relationship.acknowledge_drift(user_id, persona.id)))
 
         core_facts_prefix = (core_facts_block + "\n\n") if core_facts_block else ""
         tiered_memory_block = f"\n\n{tiered_memory_context}" if tiered_memory_context else ""
@@ -880,7 +889,7 @@ async def _build_system_prompt(
                         "Do NOT include a [SELFIE] tag in this message. "
                         "Do NOT repeat this offer in future messages."
                     )
-                    asyncio.create_task(_record_selfie_offer(user_id))
+                    asyncio.create_task(_bg(_record_selfie_offer(user_id)))
         elif tier_rank >= _TIER_RANK["basic"]:
             prompt += _BASIC_SELFIE_NOTE
 
@@ -902,7 +911,7 @@ async def _build_system_prompt(
                             f"zero pressure. Example style: 'You mentioned the {event} — want me to play the other "
                             f"person so you can rehearse before it happens?' Do NOT repeat this offer in future messages."
                         )
-                        asyncio.create_task(_record_roleplay_offer(user_id))
+                        asyncio.create_task(_bg(_record_roleplay_offer(user_id)))
         else:
             # Non-Power: never proactively sell or mention higher tiers.
             prompt += _ENGAGEMENT_OVER_UPSELL
@@ -1009,32 +1018,32 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
             persona.name, companions_build_system_prompt(persona), new_stage_name, rel_type
         )
 
-    asyncio.create_task(
+    asyncio.create_task(_bg(
         memory_extractor.extract_and_save(
             user_id, persona.id, request.message, reply
         )
-    )
-    asyncio.create_task(relationship.increment_message_count(user_id, persona.id))
+    ))
+    asyncio.create_task(_bg(relationship.increment_message_count(user_id, persona.id)))
     if not is_guest:
-        asyncio.create_task(_extract_session_facts(user_id, request.session_id, request.message))
-        asyncio.create_task(
+        asyncio.create_task(_bg(_extract_session_facts(user_id, request.session_id, request.message)))
+        asyncio.create_task(_bg(
             memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
-        )
-        asyncio.create_task(graphiti_memory.add_episode(user_id, request.message, reply))
-        asyncio.create_task(
+        ))
+        asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
+        asyncio.create_task(_bg(
             conversation_store.save_exchange(
                 user_id, persona.id, request.session_id, request.message, reply
             )
-        )
+        ))
 
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
     if len(_user_msgs) >= 3 and len(_user_msgs) % 3 == 0:
-        asyncio.create_task(
+        asyncio.create_task(_bg(
             bond_analyzer.analyze_and_save(
                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
             )
-        )
+        ))
     return ChatResponse(
         session_id=request.session_id,
         persona_id=request.persona_id,
@@ -1221,7 +1230,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         full_history = store.get_history(request.session_id)
                         user_msgs = [m.content for m in full_history if m.role == "user"]
                         if relationship.check_drift_condition(user_msgs):
-                            asyncio.create_task(relationship.mark_drift(user_id, persona.id))
+                            asyncio.create_task(_bg(relationship.mark_drift(user_id, persona.id)))
 
                     payload.update({
                         "connection_score": new_score,
@@ -1239,72 +1248,72 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         yield f"data: {json.dumps({'type': 'waitlist_prompt', 'companion_id': persona.id})}\n\n"
 
                     # ── Memory persistence (all users) ──────────────────────
-                    asyncio.create_task(
+                    asyncio.create_task(_bg(
                         memory_extractor.extract_and_save(
                             user_id, persona.id, user_message, full_text,
                         )
-                    )
-                    asyncio.create_task(
+                    ))
+                    asyncio.create_task(_bg(
                         future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
-                    )
+                    ))
                     if not is_guest:
-                        asyncio.create_task(
+                        asyncio.create_task(_bg(
                             conversation_store.save_exchange(
                                 user_id, persona.id, request.session_id, user_message, full_text
                             )
-                        )
+                        ))
 
                     # ── Personality mapping (power tier only) ──────────────
                     if tier in ("power", "elite"):
-                        asyncio.create_task(
+                        asyncio.create_task(_bg(
                             personality_extractor.extract_and_update(
                                 user_id, user_message, full_text
                             )
-                        )
+                        ))
 
-                    asyncio.create_task(
+                    asyncio.create_task(_bg(
                         relationship.increment_message_count(user_id, persona.id)
-                    )
+                    ))
                     if not is_guest:
-                        asyncio.create_task(
+                        asyncio.create_task(_bg(
                             _extract_session_facts(user_id, request.session_id, user_message)
-                        )
-                        asyncio.create_task(
+                        ))
+                        asyncio.create_task(_bg(
                             memory_extractor.extract_and_save_core_facts(
                                 user_id, user_message, full_text
                             )
-                        )
-                        asyncio.create_task(
+                        ))
+                        asyncio.create_task(_bg(
                             graphiti_memory.add_episode(user_id, user_message, full_text)
-                        )
+                        ))
 
                     # Bond Score: analyze every 3 user messages
                     _hist = store.get_history(request.session_id)
                     _user_msgs = [m.content for m in _hist if m.role == "user"]
                     if len(_user_msgs) >= 3 and len(_user_msgs) % 3 == 0:
-                        asyncio.create_task(
+                        asyncio.create_task(_bg(
                             bond_analyzer.analyze_and_save(
                                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
                             )
-                        )
+                        ))
 
                     # ── Memory distillation (all authenticated users) ───────
-                    asyncio.create_task(
+                    asyncio.create_task(_bg(
                         memory_distillation.distill_memories(
                             user_id,
                             [{"role": m.role, "content": m.content} for m in _hist],
                         )
-                    )
+                    ))
 
                     # ── Power Plan background tasks ─────────────────────────
                     if tier in ("power", "elite"):
                         _transcript = [{"role": m.role, "content": m.content} for m in _hist]
                         existing_map = await get_personality_map(user_id)
                         sessions_analyzed = existing_map.get("sessions_analyzed", 0) if existing_map else 0
-                        asyncio.create_task(generate_session_debrief(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript))
-                        asyncio.create_task(maybe_generate_weekly_insight(user_id=user_id))
-                        asyncio.create_task(update_personality_map(user_id=user_id, session_transcript=_transcript, existing_map=existing_map, sessions_analyzed=sessions_analyzed))
-                        asyncio.create_task(maybe_analyze_communication(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript))
+                        asyncio.create_task(_bg(generate_session_debrief(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript)))
+                        asyncio.create_task(_bg(maybe_generate_weekly_insight(user_id=user_id)))
+                        asyncio.create_task(_bg(update_personality_map(user_id=user_id, session_transcript=_transcript, existing_map=existing_map, sessions_analyzed=sessions_analyzed)))
+                        asyncio.create_task(_bg(maybe_analyze_communication(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript)))
                     return
 
             except Exception:
