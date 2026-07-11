@@ -92,6 +92,22 @@ async def _bg(coro, timeout: float = 20.0) -> None:
         pass
 
 
+async def _guard(coro, timeout: float, default):
+    """Run a prompt-building dependency with a hard timeout.
+
+    On timeout OR error, return *default* instead of propagating. This bounds
+    system-prompt build latency: because these coroutines run concurrently in a
+    gather, the whole build can never take longer than the slowest single
+    timeout — no matter how large the memory/knowledge-graph stores grow. One
+    slow dependency degrades that block gracefully rather than stalling the turn.
+    """
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except Exception as exc:
+        _chat_logger.warning("prompt dependency degraded (timeout/error), using default: %r", exc)
+        return default
+
+
 async def _enforce_entitlements(user_id: str, tier: str, session_id: str) -> None:
     """Enforce per-tier session and per-session message caps.
 
@@ -759,6 +775,9 @@ async def _build_core_facts_block(user_id: str) -> str:
                     "user_id": f"eq.{user_id}",
                     "select":  "category,fact",
                     "order":   "category.asc",
+                    # Cap rows so the prompt block can't grow unbounded as the
+                    # user accumulates facts over a long relationship.
+                    "limit":   "60",
                 },
             )
             if resp.status_code != 200:
@@ -818,14 +837,19 @@ async def _build_system_prompt(
         return prompt
 
     try:
+        # Each dependency is time-boxed via _guard so the concurrent gather can
+        # never take longer than the slowest single timeout below — even as the
+        # memory / knowledge-graph stores grow across a long relationship. A slow
+        # or hung dependency (e.g. Neo4j graph search) degrades to its default
+        # instead of stalling the entire turn before the first token streams.
         gather_results = await asyncio.gather(
-            mem_store.retrieve_memories(user_id, persona.id, user_message, top_k=5),
-            relationship.get_stats(user_id, persona.id),
-            relationship.needs_drift_inject(user_id, persona.id),
-            personality_extractor._fetch_current_map(user_id) if _is_power_or_above(tier) else asyncio.sleep(0),
-            _build_core_facts_block(user_id),
-            graphiti_memory.search_graph(user_id, user_message),
-            memory_manager.get_memory_context(user_id, persona.id),
+            _guard(mem_store.retrieve_memories(user_id, persona.id, user_message, top_k=5), 8.0, []),
+            _guard(relationship.get_stats(user_id, persona.id), 6.0, {}),
+            _guard(relationship.needs_drift_inject(user_id, persona.id), 6.0, False),
+            _guard(personality_extractor._fetch_current_map(user_id), 6.0, {}) if _is_power_or_above(tier) else asyncio.sleep(0),
+            _guard(_build_core_facts_block(user_id), 8.0, ""),
+            _guard(graphiti_memory.search_graph(user_id, user_message), 4.0, ""),
+            _guard(memory_manager.get_memory_context(user_id, persona.id), 6.0, ""),
         )
         memories, stats, needs_drift = gather_results[0], gather_results[1], gather_results[2]
         raw_pmap          = gather_results[3] if _is_power_or_above(tier) else {}
@@ -1208,21 +1232,25 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         return
 
                     # ── Scoring (all authenticated users) ────────────────────
-                    stats = await relationship.get_stats(user_id, persona.id)
+                    # These run BEFORE the done event is yielded, so each is
+                    # time-boxed via _guard: a slow scoring/stage-up LLM call
+                    # degrades to a no-op delta instead of pushing the whole turn
+                    # to the 45s stream deadline.
+                    stats = await _guard(relationship.get_stats(user_id, persona.id), 6.0, {})
                     rel_type: str = stats.get("relationship_type") or "romance"
                     old_score: int = stats.get("connection_score") or 50
 
-                    delta = await scoring.score_user_message(user_message, rel_type, persona.name)
-                    new_score = await relationship.apply_score_delta(user_id, persona.id, delta)
+                    delta = await _guard(scoring.score_user_message(user_message, rel_type, persona.name), 8.0, 0)
+                    new_score = await _guard(relationship.apply_score_delta(user_id, persona.id, delta), 6.0, old_score)
 
                     old_stage_name, _, _ = scoring.get_stage(old_score, rel_type)
                     new_stage_name, stage_min, stage_max = scoring.get_stage(new_score, rel_type)
 
                     stage_up_text = ""
                     if old_stage_name != new_stage_name:
-                        stage_up_text = await scoring.generate_stage_up_reaction(
+                        stage_up_text = await _guard(scoring.generate_stage_up_reaction(
                             persona.name, companions_build_system_prompt(persona), new_stage_name, rel_type
-                        )
+                        ), 8.0, "")
 
                     # ── Drift detection every 10 messages ────────────────────
                     msg_count_before: int = stats.get("message_count") or 0
@@ -1308,7 +1336,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     # ── Power Plan background tasks ─────────────────────────
                     if tier in ("power", "elite"):
                         _transcript = [{"role": m.role, "content": m.content} for m in _hist]
-                        existing_map = await get_personality_map(user_id)
+                        existing_map = await _guard(get_personality_map(user_id), 6.0, {})
                         sessions_analyzed = existing_map.get("sessions_analyzed", 0) if existing_map else 0
                         asyncio.create_task(_bg(generate_session_debrief(user_id=user_id, session_id=request.session_id, companion_name=persona.name, transcript=_transcript)))
                         asyncio.create_task(_bg(maybe_generate_weekly_insight(user_id=user_id)))

@@ -99,10 +99,15 @@ async def search_graph(user_id: str, query: str) -> str:
     if not _neo4j_configured():
         return ""
     try:
-        g = await _get_graphiti()
+        g = await asyncio.wait_for(_get_graphiti(), timeout=3.0)
         if g is None:
             return ""
-        results = await g.search(query, group_ids=[user_id], num_results=5)
+        # Hard-cap the Neo4j query: graph search latency grows with the size of
+        # the knowledge graph, and an unbounded await here can stall the caller's
+        # whole prompt build. Time out to '' rather than hang the chat turn.
+        results = await asyncio.wait_for(
+            g.search(query, group_ids=[user_id], num_results=5), timeout=3.0
+        )
         if not results:
             return ""
         lines: list[str] = []
