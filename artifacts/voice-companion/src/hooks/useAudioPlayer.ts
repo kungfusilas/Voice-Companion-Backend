@@ -358,6 +358,13 @@ export function useAudioPlayer() {
    */
   const play = useCallback(
     async (blob: Blob, logLabel = "play"): Promise<void> => {
+      // Voice-unavailable / text-only response — nothing to play. Treat as a
+      // clean no-op so a TTS failure never surfaces as a decode error.
+      if (!blob || blob.size === 0) {
+        clientLog("tts_empty_blob", { label: logLabel });
+        setPlaying(false);
+        return;
+      }
       // ── Non-MSE (Safari / iOS) ───────────────────────────────────────────
       // Check the pre-buffer hit BEFORE calling stop(), which would revoke the
       // prepEl's blob URL and clear prepBlobRef — making the hit permanently

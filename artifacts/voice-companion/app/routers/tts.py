@@ -1,3 +1,4 @@
+import logging
 import re
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import Response, StreamingResponse
@@ -16,6 +17,15 @@ from app.usage import check_voice_quota, get_user_tier
 from app.routers.tier_check import is_premium_or_higher, is_power_or_higher
 
 router = APIRouter()
+logger = logging.getLogger("tts")
+
+# Sent when speech synthesis fails but the chat text is still available.
+# The frontend reads this header to degrade gracefully (show text, no audio)
+# instead of treating a TTS failure as a fatal error that breaks the send flow.
+VOICE_UNAVAILABLE_HEADERS = {
+    "X-Voice-Available": "false",
+    "Content-Disposition": 'inline; filename="speech.mp3"',
+}
 
 # Matches LLM action descriptors that TTS would read literally.
 # Strips asterisk-, bracket-, and paren-wrapped stage directions, e.g.
@@ -227,7 +237,10 @@ async def persona_speak_stream(
                 async for chunk in openai_tts_client.synthesize_stream(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)):
                     yield chunk
             except OpenAITTSError as e:
-                raise RuntimeError(str(e))
+                # Degrade gracefully — end the stream instead of raising so the
+                # frontend gets a clean (possibly empty) 200 and shows text.
+                logger.warning("OpenAI TTS stream failed, degrading to text-only: %s", e)
+                return
 
         return StreamingResponse(
             openai_audio_stream(),
@@ -266,9 +279,11 @@ async def persona_speak_stream(
                     ):
                         yield chunk
                 except ElevenLabsError as e2:
-                    raise RuntimeError(str(e2))
+                    logger.warning("ElevenLabs TTS stream failed, degrading to text-only: %s", e2)
+                    return
             else:
-                raise RuntimeError(str(e))
+                logger.warning("ElevenLabs TTS stream failed, degrading to text-only: %s", e)
+                return
 
     return StreamingResponse(
         audio_stream(),
@@ -332,7 +347,11 @@ async def persona_speak(
         try:
             audio = await openai_tts_client.synthesize(clean_text, voice=openai_tts_client.voice_for_persona(persona.id))
         except OpenAITTSError as e:
-            raise HTTPException(status_code=502, detail=str(e))
+            # Voice synthesis failed — degrade gracefully to text-only.
+            # Return 200 with an empty body + X-Voice-Available: false so the
+            # frontend shows the chat text and never enters a broken send state.
+            logger.warning("OpenAI TTS failed, degrading to text-only: %s", e)
+            return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
 
         return Response(
             content=audio,
@@ -364,9 +383,12 @@ async def persona_speak(
                     previous_text=request.previous_text or None,
                 )
             except ElevenLabsError as e2:
-                raise _elevenlabs_http_error(e2)
+                # Voice synthesis failed — degrade gracefully to text-only.
+                logger.warning("ElevenLabs TTS failed, degrading to text-only: %s", e2)
+                return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
         else:
-            raise _elevenlabs_http_error(e)
+            logger.warning("ElevenLabs TTS failed, degrading to text-only: %s", e)
+            return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
 
     return Response(
         content=audio,

@@ -19,6 +19,10 @@ Browser mic (AudioWorklet PCM Int16) → FastAPI WS /api/stt/stream → Deepgram
 
 **State machine:** off → listening → processing → speaking → listening (loop). Processing has a 25s safety timeout that falls back to listening if TTS never starts.
 
+**Recovery must NOT depend only on `isPlaying` toggling.** The processing→speaking→listening transition is driven by the audio player's `isPlaying` flag. If TTS synthesis fails, no audio plays, `isPlaying` never toggles, and the loop stalls in "processing" until the 25s backstop — so every turn stalls ~25s while a provider (e.g. ElevenLabs) is failing, which users report as "voice completely broken, nothing sends." **Why:** the flag is only a proxy for "turn done." **How to apply:** `onTranscriptFinalized` is awaitable and returns `sendMessage`'s promise; on `.finally()`, if still "processing", force back to "listening" immediately. Keep the 25s timeout only as a network-hang backstop.
+
+**TTS failures degrade to text-only, never hard errors.** `/tts/speak` returns HTTP 200 + empty body + header `X-Voice-Available: false` on ElevenLabs/OpenAI synth failure (was 502); stream generators log+`return` instead of raising. Frontend `useAudioPlayer.play()` no-ops on a 0-byte blob. Chat text always comes from the chat stream independently of TTS, so text shows regardless. **Why:** a TTS 5xx used to propagate as an ApiError and (via the stall above) freeze voice sending.
+
 **Silence safeguard:** 4.5 min idle → "Still there?" TTS check-in → 30s → pause. Activity tracked: user utterance finalized, TTS playback start.
 
 **isPaid:** `!isGuest && subscriptionTier !== "free"` (includes basic, premium, power, elite). Conversation mode is gated on `isPaid && ttsEnabled && CONV_MODE_SUPPORTED`.

@@ -811,7 +811,9 @@ export function ChatPage({
   const handleConvTranscript = useCallback((text: string) => {
     if (pttActiveRef.current) return; // PTT recording in progress — skip conv-mode transcript
     unlockAudio();
-    sendMessage(text);
+    // Return the promise so conversation mode can await turn completion and
+    // resume listening immediately even when TTS produced no audio.
+    return sendMessage(text);
   }, [unlockAudio, sendMessage]);
 
   const handleConvBargeIn = useCallback((companionText: string, userWords: string) => {

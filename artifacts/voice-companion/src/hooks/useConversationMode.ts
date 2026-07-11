@@ -25,7 +25,7 @@ export interface ConversationModeOptions {
   isPlaying: boolean;             // from useAudioPlayer — drives state transitions
   isBusyRef: RefObject<boolean>;  // Chat busy ref — gate for new turns
   currentTtsTextRef: RefObject<string>; // current companion TTS text for echo detection
-  onTranscriptFinalized: (text: string) => void;
+  onTranscriptFinalized: (text: string) => void | Promise<void>;
   onBargeIn: (companionText: string, userWords: string) => void;
   onSilenceCheckin: () => void;   // companion says "Still there?"
   onSilencePause: () => void;     // close mic, show paused state
@@ -292,14 +292,26 @@ export function useConversationMode(opts: ConversationModeOptions) {
 
       _setState("processing");
       clientLog("conv_turn", { transcript: fullText, confidence: conf });
-      // Safety timeout: if TTS never starts within 25 s (e.g. network error), reopen mic
+      // Safety-net backstop: if the turn never completes (e.g. network hang),
+      // reopen the mic so the user is never stuck.
       setTimeout(() => {
         if (stateRef.current === "processing") {
           _setState("listening");
           lastActivityRef.current = Date.now();
         }
       }, 25_000);
-      onTranscriptFinalized(fullText);
+      // Await the turn. If synthesis produced no audio (voice_available=false),
+      // isPlaying never toggles, so the speaking→listening transition never
+      // fires and we'd otherwise stay stuck in "processing" until the 25 s
+      // backstop. Resume listening immediately once the turn resolves.
+      Promise.resolve(onTranscriptFinalized(fullText))
+        .catch(() => {})
+        .finally(() => {
+          if (stateRef.current === "processing") {
+            _setState("listening");
+            lastActivityRef.current = Date.now();
+          }
+        });
     }
   }, [
     currentTtsTextRef,
