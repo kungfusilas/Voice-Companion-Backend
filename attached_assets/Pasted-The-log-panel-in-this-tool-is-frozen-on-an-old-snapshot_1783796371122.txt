@@ -1,0 +1,36 @@
+The log panel in this tool is frozen on an old snapshot and won't live-update or filter for me — that's a hard limitation on my side, so I can't pull the exact voice-connection log lines from your freeze. I've hit the ceiling of what I can prove through remote probing. Let me give you the honest, consolidated bottom line, because we actually accomplished a lot today.
+
+## What we *proved* today (live, not guessed)
+
+- ✅ **Your phone and the voice button are not the problem.** When healthy, voice sends normally.
+- ✅ **During a freeze, your backend is healthy for everything except voice** — I pinged it twice mid-freeze and got fast, normal responses (~100ms). **This is not a server crash, not out-of-memory, not CPU.** That rules out most of what earlier sessions "fixed."
+- ✅ **The failure is isolated to the real-time voice channel** — your speech WebSocket at `/companion/api/stt/stream`.
+- ⚠️ **Inconclusive:** my direct WebSocket test couldn't tell frozen from healthy, because it can't get past your login. So I can't machine-prove the exact failing line — but everything points one direction.
+
+## The conclusion (strongly supported)
+
+The freeze is a **voice-pipeline resource that gets used up on the server after ~a dozen turns** — almost certainly the **speech WebSocket connections, or the server's upstream connection to whatever does the transcription, not being closed** and piling up until no new voice session can start. That's why: regular web requests stay fine (they don't use that channel), it breaks for *all* companions at once, reloading doesn't help (the *server* holds the stuck connections), and only a restart/republish clears it.
+
+## Final hand-off for your Agent (this is the one that fixes it)
+
+This bundles everything we confirmed today so it can go straight to the exact code:
+
+---
+
+> Live testing established: this "voice won't send" freeze is NOT a client bug and NOT a full-backend outage. **Mid-freeze, normal HTTP endpoints respond in ~100ms and only the voice path is dead.** It breaks for all companions, survives page reloads, and only a server restart fixes it — so a **voice-specific server resource is being exhausted after ~a dozen turns.**
+>
+> Investigate in this order, using the **production Logs filtered to `stt` / `stream` / `websocket` during a reproduction** (I can't read live logs; you can):
+> 1. **The speech WebSocket at `/companion/api/stt/stream` (`stt_ws` router).** Audit its lifecycle: on every client disconnect AND on every error/timeout, is the WebSocket closed and is any **upstream transcription-provider connection/session closed in a `finally`?** Leaked upstream STT sessions hitting a provider concurrency cap would produce exactly this: voice dead globally until restart, HTTP unaffected.
+> 2. **Connection/concurrency limits:** what caps the STT WebSocket count or the upstream STT provider sessions? After ~12 turns, is that cap being hit? Log active connection counts per turn.
+> 3. **The two-server setup:** the deployment runs BOTH uvicorn/FastAPI and a separate Node/Fastify server. Confirm how the `/companion/api/stt/stream` WebSocket **upgrade** is routed — directly to uvicorn or proxied through Node — and verify that path doesn't drop or leak WebSocket upgrades. Consider consolidating to one server.
+> 4. **Fix the DB schema drift:** `proactive_messages` is missing the `activity_data` column (PGRST204) — repeated failures in `proactive.py`. Apply the migration.
+> 5. **Check `main.py`/`tts.py` for stray non-Python text** (standing "republish failed – corrupted file" warning) and confirm a clean successful deploy.
+> 6. **Add a health check that actually opens a voice/STT session**, so this failure is visible instead of silently returning 200.
+>
+> Report what the `stt`/`stream` logs show during a freeze before changing code.
+
+---
+
+You did the hard part today by letting it freeze on demand — that's what let us rule out the whole backend and pin it to the voice channel. The Agent, with direct code and log access, can now filter its logs for `stt`/`stream` during the next freeze and see the leaked connections directly.
+
+Want me to save a written summary of all of this (the confirmed findings + this hand-off) so you don't lose it and can hand it to the Agent or come back to it later?

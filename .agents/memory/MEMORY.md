@@ -2,6 +2,7 @@
 - [Safari audio fixes](safari-audio.md) — singleton + prepEl double-buffer; WebM→MP4 mimeType fallback chain
 - [Async event-loop fixes](async-fixes.md) — scoring/relationship/chapters were sync; now AsyncAnthropic + asyncio.to_thread
 - [Billing guardrails](billing-guardrails.md) — 5yr expiry in _get_user_profile; tier update in subscription.updated; fail-open rules
+- [Supabase schema drift](supabase-schema-drift.md) — real data is in Supabase not DATABASE_URL; docstring migrations were never applied to prod; how to probe/fix
 - [Prompt-build turn hang](prompt-build-hang.md) — stuck record button = server stream stall; time-box every per-turn external dep (_guard); cap all-rows queries
 - [Entitlements caps](entitlements.md) — session/message/fact limits; Supabase DDL is manual SQL Editor only; RPC grant + fail-open rules
 - [Tiered memory context](tiered-memory.md) — memory_manager/memory_distillation: Supabase reads must be best-effort per-table since onboarding_answers table doesn't exist yet
