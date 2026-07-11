@@ -207,30 +207,24 @@ async def check_session_allowed(user_id: str, plan: str) -> dict:
 async def increment_session(user_id: str) -> None:
     """Call when a new session starts. Increments sessions_used, resets message count.
 
-    Uses an atomic SQL RPC when available; falls back to read-then-write.
+    Two separate Supabase calls (read the current count, then write count + 1).
+    The entire body is wrapped in try/except — any failure is logged and the
+    function returns silently. Entitlements must NEVER block chat or voice.
     """
     if not _configured():
         return
     base = f"{_sb_url()}/rest/v1/user_entitlements"
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-            rpc = await client.post(
-                f"{_sb_url()}/rest/v1/rpc/entitlements_start_session",
-                headers=_headers(prefer=""),
-                json={"p_user_id": user_id},
-            )
-            if rpc.status_code in (200, 201, 204):
-                return
-            # RPC not installed yet — non-atomic fallback
-            resp = await client.get(
+            # 1) Read current session count.
+            read_resp = await client.get(
                 base,
                 headers=_headers(prefer=""),
                 params={"user_id": f"eq.{user_id}", "select": "sessions_used", "limit": "1"},
             )
-            rows = resp.json() if resp.status_code in (200, 206) else []
-            if not rows:
-                return
-            current = int(rows[0].get("sessions_used") or 0)
+            rows = read_resp.json() if read_resp.status_code in (200, 206) else []
+            current = int(rows[0].get("sessions_used") or 0) if rows else 0
+            # 2) Write incremented count (and reset per-session message counter).
             await client.patch(
                 f"{base}?user_id=eq.{user_id}",
                 headers=_headers(),
@@ -238,6 +232,7 @@ async def increment_session(user_id: str) -> None:
             )
     except Exception as e:
         logger.warning("entitlements: increment_session error user=%s err=%s", user_id[:8], e)
+        return
 
 
 async def increment_message(user_id: str) -> dict:
