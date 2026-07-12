@@ -37,9 +37,30 @@ def get_async_client() -> anthropic.AsyncAnthropic:
     return _async_client
 
 
-def _build_messages(history: list[ChatMessage], user_message: str) -> list[dict]:
+def _build_messages(
+    history: list[ChatMessage],
+    user_message: str,
+    image_base64: str | None = None,
+    image_url: str | None = None,
+) -> list[dict]:
     messages = [{"role": msg.role, "content": msg.content} for msg in history]
-    messages.append({"role": "user", "content": user_message})
+    if image_base64 or image_url:
+        content: list = []
+        if image_base64:
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64},
+            })
+        elif image_url:
+            content.append({
+                "type": "image",
+                "source": {"type": "url", "url": image_url},
+            })
+        if user_message.strip():
+            content.append({"type": "text", "text": user_message})
+        messages.append({"role": "user", "content": content})
+    else:
+        messages.append({"role": "user", "content": user_message})
     return messages
 
 
@@ -65,10 +86,12 @@ async def send_message(
     user_message: str,
     model: str = "claude-sonnet-4-6",
     max_tokens: int = 1024,
+    image_base64: str | None = None,
+    image_url: str | None = None,
 ) -> str:
     """Send a message with agentic tool-use loop (web search). Fully async."""
     client = get_async_client()
-    messages = _build_messages(history, user_message)
+    messages = _build_messages(history, user_message, image_base64=image_base64, image_url=image_url)
 
     for _ in range(_MAX_TOOL_ITERATIONS):
         response = await client.messages.create(
@@ -107,6 +130,8 @@ async def stream_message(
     user_message: str,
     model: str = "claude-sonnet-4-6",
     max_tokens: int = 1024,
+    image_base64: str | None = None,
+    image_url: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream the companion's reply with tool-use support.
@@ -118,7 +143,7 @@ async def stream_message(
       {"type": "error",     "message": "..."}
     """
     client = get_async_client()
-    messages = _build_messages(history, user_message)
+    messages = _build_messages(history, user_message, image_base64=image_base64, image_url=image_url)
     full_text = ""
 
     for _ in range(_MAX_TOOL_ITERATIONS):

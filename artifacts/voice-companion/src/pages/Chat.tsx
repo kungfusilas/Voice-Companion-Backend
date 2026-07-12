@@ -163,6 +163,11 @@ export function ChatPage({
   const [usageInfo, setUsageInfo] = useState<{remaining:number,cap:number,warning:boolean,reset_date:string}|null>(null);
   const [capReached, setCapReached] = useState<{plan:string,cap:number,reset_date:string}|null>(null);
 
+  // Photo attachment — state for UI, ref to avoid stale closures in sendMessage
+  const [pendingImage, setPendingImage] = useState<{ base64: string; preview: string } | null>(null);
+  const pendingImageRef = useRef<{ base64: string; preview: string } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // ── 80% usage warning — shown once per browser session ────────────────────
   useEffect(() => {
     if (isGuest) return;
@@ -345,6 +350,37 @@ export function ChatPage({
     };
   }, []);
 
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !file.type.startsWith("image/")) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 1024;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          const scale = Math.min(MAX / width, MAX / height);
+          width = Math.round(width * scale);
+          height = Math.round(height * scale);
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, width, height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.75);
+        const next = { base64: dataUrl.split(",")[1], preview: dataUrl };
+        pendingImageRef.current = next;
+        setPendingImage(next);
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
   const sendMessage = useCallback(async (userText: string) => {
     unlockAudio(); // prime audio even when called from non-gesture paths (conv mode)
     if (busyRef.current || showUpgradeCard) return;
@@ -354,7 +390,13 @@ export function ChatPage({
     setTtsRetry(null);
     setProactiveLabel(null);
     setScoreDelta(undefined);
-    setMessages((prev) => [...prev, { role: "user", content: userText }]);
+    const attachedImage = pendingImageRef.current;
+    pendingImageRef.current = null;
+    setPendingImage(null);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: userText, ...(attachedImage ? { imageUrl: attachedImage.preview } : {}) },
+    ]);
     setStreamingText("");
 
     // Compute onboarding context for this step (guest flow only)
@@ -391,7 +433,7 @@ export function ChatPage({
     }
 
     try {
-      for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx)) {
+      for await (const event of chatStream(sessionId, persona.id, userText, userId, romanticMode, false, onboardingCtx, undefined, attachedImage?.base64)) {
         if (event.type === "token") {
           fullReply += event.text ?? "";
           // Strip any [SELFIE:...] tag so it never appears in the live streaming text
@@ -1241,8 +1283,46 @@ export function ChatPage({
         </div>
       )}
 
+      {/* ── Pending photo preview ── */}
+      {pendingImage && (
+        <div className="flex items-center gap-2 px-4 pb-2 shrink-0">
+          <img
+            src={pendingImage.preview}
+            alt="Attached photo"
+            className="w-14 h-14 rounded-lg object-cover border border-white/10"
+          />
+          <button
+            onClick={() => { pendingImageRef.current = null; setPendingImage(null); }}
+            className="text-white/40 hover:text-white text-xs transition"
+          >
+            ✕ Remove
+          </button>
+        </div>
+      )}
+
       {/* ── Input row ── */}
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
+        {!isGuest && (
+          <>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleImageSelect}
+            />
+            <motion.button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isBusy || showUpgradeCard}
+              whileTap={{ scale: 0.93 }}
+              title="Attach a photo"
+              className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center text-lg transition disabled:opacity-40 disabled:cursor-not-allowed"
+              style={{ background: "rgba(255,255,255,0.04)" }}
+            >
+              📎
+            </motion.button>
+          </>
+        )}
         <div className="flex-1">
           <TextInput
             onSend={(text) => { unlockAudio(); sendMessage(text); onMessageConsumed?.(); }}

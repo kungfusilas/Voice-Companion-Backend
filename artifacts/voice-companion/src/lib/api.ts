@@ -252,6 +252,7 @@ export async function* chatStream(
   _nsfw_mode?: boolean,
   onboarding_context?: string,
   image_url?: string,
+  image_base64?: string,
 ): AsyncGenerator<StreamEvent> {
   const res = await apiFetch(`${BASE}/chat/stream`, {
     method: "POST",
@@ -261,6 +262,7 @@ export async function* chatStream(
       romantic_mode: romantic_mode ?? false,
       onboarding_context: onboarding_context ?? undefined,
       ...(image_url ? { image_url } : {}),
+      ...(image_base64 ? { image_base64 } : {}),
     }),
   });
   if (!res.ok || !res.body) {

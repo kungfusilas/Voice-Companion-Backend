@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Archive, ScrollText, Heart, Trash2, Download, Loader, ChevronLeft } from "lucide-react";
+import { Archive, ScrollText, Heart, Trash2, Download, Loader, ChevronLeft, Image as ImageIcon } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 interface VaultPageProps {
   userId: string;
@@ -31,12 +32,21 @@ const INACTIVITY_OPTIONS = [
   { label: "2 years", value: 730 },
 ];
 
-type Tab = "conversations" | "legacy";
+interface VaultFile {
+  id: string;
+  url: string;
+  filename?: string;
+  uploaded_at?: string;
+}
+
+type Tab = "conversations" | "files" | "legacy";
 
 export function VaultPage({ userId, onBack }: VaultPageProps) {
   const [tab, setTab] = useState<Tab>("conversations");
   const [sessions, setSessions] = useState<VaultSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(true);
+  const [files, setFiles] = useState<VaultFile[]>([]);
+  const [loadingFiles, setLoadingFiles] = useState(true);
   const [recipient, setRecipient] = useState<Partial<Recipient>>({ inactivity_days: 365 });
   const [savingRecipient, setSavingRecipient] = useState(false);
   const [recipientSaved, setRecipientSaved] = useState(false);
@@ -45,20 +55,34 @@ export function VaultPage({ userId, onBack }: VaultPageProps) {
   useEffect(() => {
     fetchSessions();
     fetchRecipient();
+    fetchFiles();
   }, []);
 
   async function fetchSessions() {
     setLoadingSessions(true);
     try {
-      const r = await fetch(`/companion/api/vault/sessions?user_id=${userId}`);
+      const r = await apiFetch(`/companion/api/vault/sessions?user_id=${userId}`);
       if (r.ok) setSessions(await r.json());
     } finally {
       setLoadingSessions(false);
     }
   }
 
+  async function fetchFiles() {
+    setLoadingFiles(true);
+    try {
+      const r = await apiFetch(`/companion/api/vault/files?user_id=${userId}`);
+      if (r.ok) {
+        const data = await r.json();
+        setFiles(Array.isArray(data.files) ? data.files : []);
+      }
+    } finally {
+      setLoadingFiles(false);
+    }
+  }
+
   async function fetchRecipient() {
-    const r = await fetch(`/companion/api/vault/recipient?user_id=${userId}`);
+    const r = await apiFetch(`/companion/api/vault/recipient?user_id=${userId}`);
     if (r.ok) {
       const data = await r.json();
       if (data) setRecipient(data);
@@ -66,14 +90,14 @@ export function VaultPage({ userId, onBack }: VaultPageProps) {
   }
 
   async function deleteSession(id: string) {
-    await fetch(`/companion/api/vault/sessions/${id}?user_id=${userId}`, { method: "DELETE" });
+    await apiFetch(`/companion/api/vault/sessions/${id}?user_id=${userId}`, { method: "DELETE" });
     setSessions((s) => s.filter((x) => x.id !== id));
   }
 
   async function downloadSession(session: VaultSession) {
     setDownloading(session.id);
     try {
-      const r = await fetch(`/companion/api/vault/sessions/${session.id}?user_id=${userId}`);
+      const r = await apiFetch(`/companion/api/vault/sessions/${session.id}?user_id=${userId}`);
       if (!r.ok) return;
       const full = await r.json();
       const lines = (full.messages || []).map((m: { role: string; content: string }) =>
@@ -96,7 +120,7 @@ export function VaultPage({ userId, onBack }: VaultPageProps) {
     if (!recipient.name || !recipient.email) return;
     setSavingRecipient(true);
     try {
-      await fetch("/companion/api/vault/recipient", {
+      await apiFetch("/companion/api/vault/recipient", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...recipient, user_id: userId }),
@@ -123,6 +147,7 @@ export function VaultPage({ userId, onBack }: VaultPageProps) {
       <div className="flex border-b border-white/5 shrink-0">
         {([
           { id: "conversations" as Tab, label: "Conversations", icon: ScrollText },
+          { id: "files" as Tab, label: "Files", icon: ImageIcon },
           { id: "legacy" as Tab, label: "Legacy Settings", icon: Heart },
         ] as const).map(({ id, label, icon: Icon }) => (
           <button
@@ -184,6 +209,34 @@ export function VaultPage({ userId, onBack }: VaultPageProps) {
                     </div>
                   </div>
                 ))
+              )}
+            </motion.div>
+          ) : tab === "files" ? (
+            <motion.div key="files" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              {loadingFiles ? (
+                <div className="flex justify-center py-12">
+                  <Loader className="w-5 h-5 text-purple-400 animate-spin" />
+                </div>
+              ) : files.length === 0 ? (
+                <div className="text-center py-16">
+                  <ImageIcon className="w-10 h-10 mx-auto mb-3 text-white/10" />
+                  <p className="text-sm text-white/30">No photos shared yet.</p>
+                  <p className="text-xs text-white/20 mt-1">Photos you share in chat are saved here automatically.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2">
+                  {files.map((f) => (
+                    <a
+                      key={f.id}
+                      href={f.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block aspect-square rounded-xl overflow-hidden border border-white/10 bg-white/5"
+                    >
+                      <img src={f.url} alt={f.filename || "Vault photo"} className="w-full h-full object-cover" loading="lazy" />
+                    </a>
+                  ))}
+                </div>
               )}
             </motion.div>
           ) : (

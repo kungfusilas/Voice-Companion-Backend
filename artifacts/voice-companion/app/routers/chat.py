@@ -74,6 +74,34 @@ async def _generate_tts_audio(text: str) -> str | None:
     return None
 
 
+async def _store_photo_async(user_id: str, image_b64: str, original: str):
+    """Upload photo to Supabase Storage vault-files bucket after chat response. Fail-open."""
+    import uuid as _uuid, base64 as _b64, os
+    try:
+        image_bytes = _b64.b64decode(image_b64)
+        file_id = str(_uuid.uuid4())
+        storage_path = f"vault/{user_id}/{file_id}.jpg"
+        supabase_url = os.environ.get("SUPABASE_URL", "")
+        service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        async with httpx.AsyncClient() as c:
+            up = await c.post(
+                f"{supabase_url}/storage/v1/object/vault-files/{storage_path}",
+                content=image_bytes,
+                headers={"Authorization": f"Bearer {service_key}", "Content-Type": "image/jpeg", "x-upsert": "true"},
+                timeout=20.0,
+            )
+            if up.status_code in (200, 201):
+                public_url = f"{supabase_url}/storage/v1/object/public/vault-files/{storage_path}"
+                await c.post(
+                    f"{supabase_url}/rest/v1/vault_files",
+                    json={"id": file_id, "user_id": user_id, "storage_path": storage_path, "url": public_url, "size_bytes": len(image_bytes)},
+                    headers={"Authorization": f"Bearer {service_key}", "apikey": service_key, "Content-Type": "application/json"},
+                    timeout=10.0,
+                )
+    except Exception:
+        pass
+
+
 _FREE_MODEL    = "claude-haiku-4-5-20251001"
 _PREMIUM_MODEL = "claude-sonnet-4-6"
 _POWER_MODEL   = "claude-sonnet-4-6"
@@ -1134,6 +1162,12 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
             system_prompt = relationship_ctx + "\n\n" + system_prompt
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
+    cleaned_b64: str | None = None
+    if request.image_base64:
+        cleaned_b64 = request.image_base64.split(",", 1)[1] if "," in request.image_base64 else request.image_base64
+        if cleaned_b64 and len(cleaned_b64) > 14_000_000:  # ~10MB decoded cap
+            cleaned_b64 = None
+
     if use_venice:
         reply = await venice_client.send_message(
             system_prompt=system_prompt,
@@ -1146,10 +1180,16 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
             history=history,
             user_message=request.message,
             model=claude_model,
+            image_base64=cleaned_b64,
+            image_url=request.image_url if not cleaned_b64 else None,
         )
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
+
+    # Persist attached photo to the vault (fail-open, background)
+    if request.image_base64 and cleaned_b64 and not is_guest and user_id:
+        asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
 
     # TTS for all tiers (fail-open: audio_base64 is None if generation fails)
     audio_base64 = await _generate_tts_audio(reply)
@@ -1295,6 +1335,12 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
             system_prompt = relationship_ctx + "\n\n" + system_prompt
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
+    cleaned_b64: str | None = None
+    if request.image_base64:
+        cleaned_b64 = request.image_base64.split(",", 1)[1] if "," in request.image_base64 else request.image_base64
+        if cleaned_b64 and len(cleaned_b64) > 14_000_000:  # ~10MB decoded cap
+            cleaned_b64 = None
+
     # ── Photo message handling ────────────────────────────────────────────────
     photo_bytes: bytes | None = None
     photo_media_type: str = "image/jpeg"
@@ -1359,6 +1405,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                 claude.stream_message(
                     system_prompt=system_prompt, history=history, user_message=user_message,
                     model=claude_model,
+                    image_base64=cleaned_b64,
                 )
             )
         async for chunk in stream_iter:
@@ -1378,6 +1425,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     payload["usage"] = _usage_payload(usage)
                     # TTS for all tiers (fail-open: None if generation fails)
                     payload["audio_base64"] = await _generate_tts_audio(full_text)
+
+                    # Persist attached photo to the vault (fail-open, background)
+                    if request.image_base64 and cleaned_b64 and not is_guest and user_id:
+                        asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
 
                     if is_guest:
                         # Guests: skip all Supabase ops

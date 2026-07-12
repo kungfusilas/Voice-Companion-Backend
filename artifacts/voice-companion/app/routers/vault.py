@@ -200,3 +200,60 @@ async def get_recipient(user_id: str = Depends(verify_token)):
         raise HTTPException(500, r.text)
     data = r.json()
     return data[0] if data else None
+
+
+# ── Vault photo files ─────────────────────────────────────────────────────────
+
+@router.post("/api/vault/upload-photo")
+async def upload_photo(body: dict, token_user_id: str = Depends(verify_token)):
+    import uuid as _uuid, base64 as _b64
+    user_id = body.get("user_id", "")
+    image_base64 = body.get("image_base64", "")
+    filename = body.get("filename", "photo.jpg")
+    if not user_id or not image_base64:
+        raise HTTPException(status_code=400, detail="user_id and image_base64 required")
+    if token_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if "," in image_base64:
+        image_base64 = image_base64.split(",", 1)[1]
+    try:
+        image_bytes = _b64.b64decode(image_base64)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 data")
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image too large (max 10MB)")
+    file_id = str(_uuid.uuid4())
+    storage_path = f"vault/{user_id}/{file_id}.jpg"
+    supabase_url = os.environ.get("SUPABASE_URL", "")
+    service_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    async with httpx.AsyncClient() as client:
+        up = await client.post(
+            f"{supabase_url}/storage/v1/object/vault-files/{storage_path}",
+            content=image_bytes,
+            headers={"Authorization": f"Bearer {service_key}", "Content-Type": "image/jpeg", "x-upsert": "true"},
+            timeout=20.0,
+        )
+        if up.status_code not in (200, 201):
+            raise HTTPException(status_code=500, detail=f"Storage error: {up.text}")
+        public_url = f"{supabase_url}/storage/v1/object/public/vault-files/{storage_path}"
+        await client.post(
+            f"{supabase_url}/rest/v1/vault_files",
+            json={"id": file_id, "user_id": user_id, "storage_path": storage_path, "url": public_url, "filename": filename, "size_bytes": len(image_bytes)},
+            headers={**_sb_headers(), "Content-Type": "application/json"},
+            timeout=10.0,
+        )
+    return {"file_id": file_id, "url": public_url, "path": storage_path}
+
+
+@router.get("/api/vault/files")
+async def list_files(user_id: str, token_user_id: str = Depends(verify_token)):
+    if token_user_id != user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"{os.environ.get('SUPABASE_URL','')}/rest/v1/vault_files",
+            params={"user_id": f"eq.{user_id}", "order": "uploaded_at.desc", "limit": "200"},
+            headers=_sb_headers(),
+            timeout=10.0,
+        )
+    return {"files": resp.json() if resp.status_code == 200 else []}

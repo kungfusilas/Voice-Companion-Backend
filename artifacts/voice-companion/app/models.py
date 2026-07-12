@@ -55,6 +55,7 @@ class ChatRequest(BaseModel):
     romantic_mode: bool = False
     onboarding_context: str | None = None
     image_url: str | None = None
+    image_base64: str | None = None
 
 
 class ChatResponse(BaseModel):
