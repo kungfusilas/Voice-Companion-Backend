@@ -1,7 +1,9 @@
 import os
+import asyncio
 from datetime import datetime, timezone
 import httpx
-from fastapi import APIRouter, HTTPException
+from app.auth_middleware import verify_token
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 
@@ -125,11 +127,18 @@ class SessionEndRequest(BaseModel):
     messages: list
 
 @router.post("/api/relationship/session-end")
-async def session_end(req: SessionEndRequest):
+async def session_end(req: SessionEndRequest, token_user_id: str = Depends(verify_token)):
+    if req.user_id != token_user_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
     if len(req.messages) < 3:
         return {"updated": False, "reason": "session too short"}
     deltas = await analyze_session_signals(req.messages)
     profile = await update_profile_scores(req.user_id, deltas)
+    try:
+        from app import memory_distillation
+        asyncio.create_task(memory_distillation.distill_memories(req.user_id, req.messages))
+    except Exception:
+        pass
     return {"updated": True, "deltas": deltas, "scores": {
         "friendship": round(profile["friendship_score"], 1),
         "assistant": round(profile["assistant_score"], 1),

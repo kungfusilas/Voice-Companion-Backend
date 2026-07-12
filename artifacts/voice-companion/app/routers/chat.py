@@ -244,7 +244,7 @@ async def _check_monthly_cap(user_id: str, tier: str) -> dict:
         PLAN_CAPS as MONTHLY_PLAN_CAPS,
         check_and_increment,
         get_or_create_entitlement as _get_monthly_ent,
-        update_plan as _update_monthly_plan,
+        _update_plan_internal as _update_monthly_plan,
     )
     try:
         # Keep the entitlement plan in sync with the user's profile tier so
@@ -1529,13 +1529,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                             )
                         ))
 
-                    # ── Memory distillation (all authenticated users) ───────
-                    asyncio.create_task(_bg(
-                        memory_distillation.distill_memories(
-                            user_id,
-                            [{"role": m.role, "content": m.content} for m in _hist],
-                        )
-                    ))
+                    # Memory distillation moved to session-end (fires once per session)
 
                     # ── Power Plan background tasks ─────────────────────────
                     if tier in ("power", "elite"):

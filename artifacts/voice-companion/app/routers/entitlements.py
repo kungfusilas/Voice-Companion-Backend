@@ -1,7 +1,8 @@
 import os
 from datetime import datetime, timezone
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
+from app.auth_middleware import verify_token
 from typing import Optional
 
 router = APIRouter()
@@ -89,8 +90,34 @@ async def check_and_increment(user_id: str) -> dict:
             "remaining": remaining, "warning": remaining <= (cap * 0.2), "reset_date": reset_date}
 
 
+async def get_plan(user_id: str) -> str:
+    """Return the user's current plan name."""
+    ent = await get_or_create_entitlement(user_id)
+    return ent.get("plan", "free")
+
+
+def get_limits(plan: str) -> dict:
+    """Return per-plan feature limits."""
+    return {"max_facts": {"free": 50, "basic": 150, "premium": 500, "power": 2000}.get(plan, 50)}
+
+
+async def _update_plan_internal(user_id: str, plan: str) -> dict:
+    """Internal helper — no auth (server-side only)."""
+    if plan not in PLAN_CAPS:
+        return {"updated": False}
+    async with httpx.AsyncClient(timeout=5.0) as hx:
+        await hx.patch(
+            f"{_sb_url()}/rest/v1/user_entitlements",
+            headers=_sb_headers(),
+            params={"user_id": f"eq.{user_id}"},
+            json={"plan": plan},
+        )
+    return {"updated": True, "plan": plan}
+
+
 @router.get("/api/entitlements")
-async def get_entitlement(user_id: str):
+async def get_entitlement(token_user_id: str = Depends(verify_token)):
+    user_id = token_user_id
     ent = await get_or_create_entitlement(user_id)
     ent = await reset_period_if_expired(ent, user_id)
     plan = ent.get("plan", "free")
@@ -106,7 +133,8 @@ async def get_entitlement(user_id: str):
 
 
 @router.patch("/api/entitlements/plan")
-async def update_plan(user_id: str, plan: str):
+async def update_plan(plan: str, token_user_id: str = Depends(verify_token)):
+    user_id = token_user_id
     if plan not in PLAN_CAPS:
         raise HTTPException(400, f"Invalid plan. Must be one of: {list(PLAN_CAPS.keys())}")
     async with httpx.AsyncClient(timeout=5.0) as hx:

@@ -184,23 +184,28 @@ async def _insert_future_events(client: httpx.AsyncClient, user_id: str, events:
     if not events:
         return
 
-    now = datetime.now(timezone.utc).isoformat()
-    rows = [
-        {
-            "user_id": user_id,
-            "type": "date_based",
-            "description": e["description"].strip(),
-            "target_date": e.get("event_date") or None,
-            "created_at": now,
-        }
-        for e in events
-    ]
-
-    await client.post(
+    existing_resp = await client.get(
         f"{_sb_url()}/rest/v1/future_memories",
         headers=_sb_headers(),
-        json=rows,
+        params={"user_id": f"eq.{user_id}", "select": "description", "limit": "100"},
     )
+    existing_descs: set = set()
+    if existing_resp.status_code in (200, 206):
+        for row in (existing_resp.json() or []):
+            if isinstance(row, dict) and row.get("description"):
+                existing_descs.add(row["description"].lower().strip())
+    now = datetime.now(timezone.utc).isoformat()
+    rows = []
+    for e in events:
+        desc = e["description"].strip()
+        if desc.lower() not in existing_descs:
+            rows.append({"user_id": user_id, "type": "date_based", "description": desc,
+                         "target_date": e.get("event_date") or None, "created_at": now})
+            existing_descs.add(desc.lower())
+    if not rows:
+        logger.debug("memory_distillation: all future events already exist user=%s", user_id[:8])
+        return
+    await client.post(f"{_sb_url()}/rest/v1/future_memories", headers=_sb_headers(), json=rows)
     logger.debug("memory_distillation: inserted %d future events user=%s", len(rows), user_id[:8])
 
 

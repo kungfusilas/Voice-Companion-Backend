@@ -26,6 +26,7 @@ dependency) since this only needs to be a soft cap, not exact.
 """
 import os
 import logging
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
@@ -196,7 +197,8 @@ async def get_memory_context(user_id: str, companion_id: str) -> str:
                     _sb_get(client, "future_memories", {
                         "user_id": f"eq.{user_id}", "select": "*",
                         "target_date": f"gte.{today.isoformat()}",
-                        "and": f"(target_date.lte.{horizon})",
+                        "order": "target_date.asc",
+                        "limit": "20",
                     }),
                     _sb_get(client, "weekly_insights", {
                         "user_id": f"eq.{user_id}", "select": "*",
@@ -204,7 +206,7 @@ async def get_memory_context(user_id: str, companion_id: str) -> str:
                     }),
                 )
                 weekly_row = weekly_rows[0] if weekly_rows else None
-
+                future_rows = [r for r in future_rows if (r.get("target_date") or "9999") <= horizon]
                 tier2_sections = [
                     _fmt_debriefs(debrief_rows),
                     _fmt_future_memories(future_rows),
@@ -228,5 +230,4 @@ async def get_memory_context(user_id: str, companion_id: str) -> str:
 
 
 async def _gather(*coros):
-    import asyncio
     return await asyncio.gather(*coros)

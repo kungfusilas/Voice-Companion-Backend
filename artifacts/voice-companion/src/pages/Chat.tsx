@@ -33,6 +33,7 @@ import {
   markMilestonesSeen,
   getRitualStatus,
   getPendingQuestion,
+  apiFetch,
 } from "@/lib/api";
 import { scoring } from "@/lib/scoring";
 import type { Persona, ChatMessage, ActivityType } from "@/lib/api";
@@ -950,7 +951,7 @@ export function ChatPage({
     if (!messages || messages.length === 0 || savingToVault) return;
     setSavingToVault(true);
     try {
-      const r = await fetch("/companion/api/vault/save-session", {
+      const r = await apiFetch("/companion/api/vault/save-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId, messages }),

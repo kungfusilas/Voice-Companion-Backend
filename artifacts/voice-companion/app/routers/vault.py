@@ -1,5 +1,6 @@
 import os
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional
 import anthropic
@@ -95,9 +96,16 @@ async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(ve
         if len(messages_for_analysis) >= 3:
             deltas = await analyze_session_signals(messages_for_analysis)
             await update_profile_scores(body.user_id, deltas)
-    except Exception:
-        pass
-
+    async def _rel_bg():
+        try:
+            from app.routers.relationship_profile import analyze_session_signals, update_profile_scores
+            msgs = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in body.messages] if body.messages else []
+            if len(msgs) >= 3:
+                deltas = await analyze_session_signals(msgs)
+                await update_profile_scores(body.user_id, deltas)
+        except Exception:
+            pass
+    asyncio.create_task(_rel_bg())
     return {"id": row.get("id"), "title": title}
 
 

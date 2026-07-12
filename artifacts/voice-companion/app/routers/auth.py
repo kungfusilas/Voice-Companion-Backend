@@ -12,7 +12,7 @@ import os
 import httpx
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from app.auth_middleware import verify_token
 
