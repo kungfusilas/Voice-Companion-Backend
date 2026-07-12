@@ -14,6 +14,7 @@ import { LegacyModal } from "@/components/LegacyModal";
 import { LegacyChapters } from "./LegacyChapters";
 import { MemoryDashboard } from "./MemoryDashboard";
 import { NotificationSettings } from "@/components/NotificationSettings";
+import { MemoryImport } from "@/components/MemoryImport";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -315,6 +316,7 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
                   <p className="text-white/30 text-xs mb-4">Stay connected to your reflections — even when life gets busy.</p>
                 </div>
                 <NotificationSettings />
+                <MemoryImport userId={userId} />
               </div>
             </motion.div>
           )}

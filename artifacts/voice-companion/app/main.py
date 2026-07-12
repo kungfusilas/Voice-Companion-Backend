@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.routers import chat, personas, sessions, memories
+from app.routers import import_memories
 from app.routers import goals as goals_router
 from app.routers import bond_score as bond_score_router
 from app.routers import hearts as hearts_router
@@ -195,6 +196,7 @@ app.include_router(chat.router,               prefix="/api/chat",               
 app.include_router(personas.router,           prefix="/api/personas",           tags=["personas"])
 app.include_router(sessions.router,           prefix="/api/sessions",           tags=["sessions"])
 app.include_router(memories.router,           prefix="/api/memories",           tags=["memories"])
+app.include_router(import_memories.router)
 app.include_router(proactive_router.router,   prefix="/api/proactive-messages", tags=["proactive"])
 app.include_router(selfie_router.router,      prefix="/api/selfie",             tags=["selfie"])
 app.include_router(relationship_router.router,prefix="/api/relationship",       tags=["relationship"])

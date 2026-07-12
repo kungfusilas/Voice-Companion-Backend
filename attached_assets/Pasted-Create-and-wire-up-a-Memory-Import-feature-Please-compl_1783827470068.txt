@@ -1,0 +1,176 @@
+Create and wire up a Memory Import feature. Please complete all 4 tasks, then run npm run build in artifacts/voice-companion/, redeploy and publish the app.
+
+TASK 1 – Create new file artifacts/voice-companion/app/routers/import_memories.py with this exact content:
+
+import os
+import json
+import anthropic
+import httpx
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+router = APIRouter()
+
+_CATEGORIES = ["family", "work", "location", "health", "goals", "personality", "history"]
+
+class ImportRequest(BaseModel):
+    text: str
+    user_id: str
+
+@router.post("/api/import-memories")
+async def import_memories(body: ImportRequest):
+    if not body.text.strip():
+        raise HTTPException(status_code=400, detail="No text provided")
+    if not body.user_id:
+        raise HTTPException(status_code=400, detail="user_id required")
+
+    ai = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
+    cats = ", ".join(_CATEGORIES)
+    prompt = (
+        f"Extract key personal facts from this text. "
+        f"Categorize each into one of: {cats}.\n"
+        'Output only JSON lines, one per fact: {"category": "...", "fact": "..."}\n'
+        "Facts must be specific, 1-2 sentences max. Extract 5 to 20 facts. No other text.\n\n"
+        f"Text:\n{body.text[:8000]}"
+    )
+    msg_resp = await ai.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2000,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    raw = msg_resp.content[0].text.strip()
+
+    facts = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if obj.get("category") in _CATEGORIES and obj.get("fact"):
+                facts.append({"user_id": body.user_id, "category": obj["category"], "fact": obj["fact"]})
+        except json.JSONDecodeError:
+            continue
+
+    if not facts:
+        raise HTTPException(status_code=422, detail="Could not extract any facts from the text")
+
+    sb_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    sb_key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    headers = {
+        "apikey": sb_key,
+        "Authorization": f"Bearer {sb_key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    async with httpx.AsyncClient(timeout=10.0) as hx:
+        r = await hx.post(f"{sb_url}/rest/v1/user_core_facts", headers=headers, json=facts)
+    if r.status_code not in (200, 201):
+        raise HTTPException(status_code=500, detail=f"Storage error: {r.text}")
+
+    categories = sorted({f["category"] for f in facts})
+    return {"imported": len(facts), "categories": categories}
+
+
+TASK 2 – Create new file artifacts/voice-companion/src/components/MemoryImport.tsx with this exact content:
+
+import { useState } from "react";
+import { Upload, CheckCircle, AlertCircle, Loader } from "lucide-react";
+import { motion } from "framer-motion";
+
+interface MemoryImportProps {
+  userId: string;
+}
+
+export function MemoryImport({ userId }: MemoryImportProps) {
+  const [text, setText] = useState("");
+  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [result, setResult] = useState<{ imported: number; categories: string[] } | null>(null);
+  const [error, setError] = useState("");
+
+  async function handleSubmit() {
+    if (!text.trim() || status === "loading") return;
+    setStatus("loading");
+    setError("");
+    try {
+      const res = await fetch("/api/import-memories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, user_id: userId }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Import failed");
+      }
+      const data = await res.json();
+      setResult(data);
+      setStatus("success");
+      setText("");
+    } catch (e: any) {
+      setError(e.message || "Something went wrong");
+      setStatus("error");
+    }
+  }
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-4">
+      <div className="flex items-center gap-2">
+        <Upload className="w-4 h-4 text-purple-400" />
+        <h3 className="text-sm font-semibold text-white">Import Memories</h3>
+      </div>
+      <p className="text-xs text-white/50">
+        Paste journal entries, life details, or personal notes. Your companion learns from them.
+      </p>
+      {status === "success" && result ? (
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-start gap-3 bg-green-500/10 border border-green-500/20 rounded-xl p-4"
+        >
+          <CheckCircle className="w-4 h-4 text-green-400 mt-0.5 shrink-0" />
+          <div>
+            <p className="text-sm text-green-300 font-medium">{result.imported} memories imported</p>
+            <p className="text-xs text-white/40 mt-0.5">Topics: {result.categories.join(", ")}</p>
+            <button onClick={() => setStatus("idle")} className="text-xs text-purple-400 hover:text-purple-300 mt-2">
+              Import more
+            </button>
+          </div>
+        </motion.div>
+      ) : (
+        <>
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Paste your journal, life story, or any personal details here..."
+            className="w-full h-36 bg-white/5 border border-white/10 rounded-xl p-3 text-sm text-white placeholder:text-white/25 resize-none focus:outline-none focus:border-purple-500/50"
+            disabled={status === "loading"}
+          />
+          {status === "error" && (
+            <div className="flex items-center gap-2 text-xs text-red-400">
+              <AlertCircle className="w-3.5 h-3.5" />
+              {error}
+            </div>
+          )}
+          <button
+            onClick={handleSubmit}
+            disabled={!text.trim() || status === "loading"}
+            className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+          >
+            {status === "loading" ? "Extracting memories..." : "Import to companion memory"}
+          </button>
+        </>
+      )}
+    </div>
+  );
+}
+
+
+TASK 3 – Edit artifacts/voice-companion/app/main.py:
+- Find the block of "from app.routers import ..." lines and add this line with them: from app.routers import import_memories
+- Find the block of "app.include_router(...)" calls and add this line with them: app.include_router(import_memories.router)
+
+TASK 4 – Edit artifacts/voice-companion/src/pages/Hub.tsx:
+- Add this import at the top with the other component imports: import { MemoryImport } from "@/components/MemoryImport";
+- Find the line with <NotificationSettings /> and add immediately after it: <MemoryImport userId={userId} />
+
+After completing all 4 tasks: run npm run build inside artifacts/voice-companion/, then redeploy and publish the app.
