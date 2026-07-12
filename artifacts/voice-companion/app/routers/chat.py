@@ -1,5 +1,6 @@
 import os
 import json
+import base64
 import asyncio
 import httpx
 import urllib.parse
@@ -48,6 +49,29 @@ def _should_prompt_waitlist(text: str) -> bool:
 
 def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
     return persona_nsfw or request_nsfw
+
+
+async def _generate_tts_audio(text: str) -> str | None:
+    """Generate OpenAI TTS audio for a reply. Fail-open: returns None on any error."""
+    key = os.environ.get("OPENAI_API_KEY", "")
+    if not key or not text:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as hx:
+            r = await asyncio.wait_for(
+                hx.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={"model": "tts-1", "voice": "nova", "input": text[:4096]},
+                ),
+                timeout=20.0,
+            )
+        if r.status_code == 200:
+            return base64.b64encode(r.content).decode()
+        _chat_logger.warning("OpenAI TTS failed: status=%s body=%s", r.status_code, r.text[:200])
+    except Exception as exc:
+        _chat_logger.warning("OpenAI TTS failed: %s", exc)
+    return None
 
 
 _FREE_MODEL    = "claude-haiku-4-5-20251001"
@@ -1056,7 +1080,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
         return JSONResponse(status_code=504, content={"message": "Request timed out"})
 
 
-async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatResponse:
+async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONResponse:
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -1104,9 +1128,10 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         _fb = await _get_flashback(user_id)
         if _fb:
             system_prompt += _fb
-    relationship_ctx = await _get_relationship_context(user_id)
-    if relationship_ctx:
-        system_prompt = relationship_ctx + "\n\n" + system_prompt
+    if not is_guest:
+        relationship_ctx = await _get_relationship_context(user_id)
+        if relationship_ctx:
+            system_prompt = relationship_ctx + "\n\n" + system_prompt
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     if use_venice:
@@ -1126,16 +1151,20 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
 
+    # TTS for all tiers (fail-open: audio_base64 is None if generation fails)
+    audio_base64 = await _generate_tts_audio(reply)
+
     if is_guest:
-        return ChatResponse(
+        _guest_resp = ChatResponse(
             session_id=request.session_id,
             persona_id=request.persona_id,
             reply=reply,
             message_count=len(store.get_history(request.session_id)),
             model_backend="venice" if use_venice else "claude",
-            voice_available=False,
+            voice_available=True,
             usage=_usage_payload(usage),
         )
+        return JSONResponse({**_guest_resp.model_dump(), "audio_base64": audio_base64})
 
     stats = await relationship.get_stats(user_id, persona.id)
     rel_type = stats.get("relationship_type") or "romance"
@@ -1176,7 +1205,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
                 user_id, persona.id, request.session_id, _user_msgs[-10:], persona.name
             )
         ))
-    return ChatResponse(
+    _auth_resp = ChatResponse(
         session_id=request.session_id,
         persona_id=request.persona_id,
         reply=reply,
@@ -1189,9 +1218,10 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         stage_min=stage_min,
         stage_max=stage_max,
         stage_up_text=stage_up_text,
-        voice_available=False,
+        voice_available=True,
         usage=_usage_payload(usage),
     )
+    return JSONResponse({**_auth_resp.model_dump(), "audio_base64": audio_base64})
 
 
 @router.post("/stream")
@@ -1259,9 +1289,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         _fb = await _get_flashback(user_id)
         if _fb:
             system_prompt += _fb
-    relationship_ctx = await _get_relationship_context(user_id)
-    if relationship_ctx:
-        system_prompt = relationship_ctx + "\n\n" + system_prompt
+    if not is_guest:
+        relationship_ctx = await _get_relationship_context(user_id)
+        if relationship_ctx:
+            system_prompt = relationship_ctx + "\n\n" + system_prompt
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     # ── Photo message handling ────────────────────────────────────────────────
@@ -1343,8 +1374,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     )
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
-                    payload["voice_available"] = False if is_guest else False
+                    payload["voice_available"] = True
                     payload["usage"] = _usage_payload(usage)
+                    # TTS for all tiers (fail-open: None if generation fails)
+                    payload["audio_base64"] = await _generate_tts_audio(full_text)
 
                     if is_guest:
                         # Guests: skip all Supabase ops

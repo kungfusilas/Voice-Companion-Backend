@@ -4,8 +4,11 @@ from datetime import datetime, timezone
 from typing import Optional
 import anthropic
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+
+from app.routers.auth import verify_token
+from app.auth_middleware import verify_token_or_guest
 
 router = APIRouter()
 
@@ -31,9 +34,11 @@ class SaveSessionRequest(BaseModel):
 
 
 @router.post("/api/vault/save-session")
-async def save_session(body: SaveSessionRequest):
+async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(verify_token_or_guest)):
     if not body.user_id or not body.messages:
         raise HTTPException(400, "user_id and messages required")
+    if body.user_id != token_user_id:
+        raise HTTPException(403, "user_id does not match authenticated user")
 
     recent = body.messages[-40:]
     convo_text = "\n".join(
@@ -99,7 +104,7 @@ async def save_session(body: SaveSessionRequest):
 # ── List sessions ─────────────────────────────────────────────────────────────
 
 @router.get("/api/vault/sessions")
-async def list_sessions(user_id: str):
+async def list_sessions(user_id: str = Depends(verify_token)):
     async with httpx.AsyncClient(timeout=10.0) as hx:
         r = await hx.get(
             _sb_url("/rest/v1/vault_sessions"),
@@ -119,7 +124,7 @@ async def list_sessions(user_id: str):
 # ── Get single session (for download) ────────────────────────────────────────
 
 @router.get("/api/vault/sessions/{session_id}")
-async def get_session(session_id: str, user_id: str):
+async def get_session(session_id: str, user_id: str = Depends(verify_token)):
     async with httpx.AsyncClient(timeout=10.0) as hx:
         r = await hx.get(
             _sb_url(f"/rest/v1/vault_sessions"),
@@ -137,7 +142,7 @@ async def get_session(session_id: str, user_id: str):
 # ── Delete session ────────────────────────────────────────────────────────────
 
 @router.delete("/api/vault/sessions/{session_id}")
-async def delete_session(session_id: str, user_id: str):
+async def delete_session(session_id: str, user_id: str = Depends(verify_token)):
     async with httpx.AsyncClient(timeout=10.0) as hx:
         r = await hx.delete(
             _sb_url("/rest/v1/vault_sessions"),
@@ -184,7 +189,7 @@ async def upsert_recipient(body: RecipientRequest):
 
 
 @router.get("/api/vault/recipient")
-async def get_recipient(user_id: str):
+async def get_recipient(user_id: str = Depends(verify_token)):
     async with httpx.AsyncClient(timeout=10.0) as hx:
         r = await hx.get(
             _sb_url("/rest/v1/legacy_recipients"),
