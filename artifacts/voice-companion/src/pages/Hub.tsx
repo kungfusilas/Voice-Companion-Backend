@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard, Bell } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard, Bell, Archive } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -15,6 +15,7 @@ import { LegacyChapters } from "./LegacyChapters";
 import { MemoryDashboard } from "./MemoryDashboard";
 import { NotificationSettings } from "@/components/NotificationSettings";
 import { MemoryImport } from "@/components/MemoryImport";
+import { VaultPage } from "./VaultPage";
 import type { Persona } from "@/lib/api";
 
 interface HubProps {
@@ -34,6 +35,7 @@ const BASE_TABS = [
   { id: "goals",           label: "Connection Goals",    icon: Target        },
   { id: "roleplay",        label: "Roleplay Simulator",  icon: Drama         },
   { id: "notifications",   label: "Notifications",       icon: Bell          },
+  { id: "vault",           label: "Legacy Vault",        icon: Archive       },
 ] as const;
 
 const PREMIUM_TABS = [
@@ -318,6 +320,11 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
                 <NotificationSettings />
                 <MemoryImport userId={userId} />
               </div>
+            </motion.div>
+          )}
+          {tab === "vault" && (
+            <motion.div key="vault" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-hidden px-5 pb-6">
+              <VaultPage userId={userId} onBack={() => setTab("bond-score")} />
             </motion.div>
           )}
         </AnimatePresence>

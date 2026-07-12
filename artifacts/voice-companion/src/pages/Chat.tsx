@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useId, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon, Trophy } from "lucide-react";
+import { ArrowLeft, Volume2, VolumeX, Camera, Loader2, Moon, Trophy, Archive } from "lucide-react";
 import { JourneyPanel } from "@/components/JourneyPanel";
 import { Avatar } from "@/components/Avatar";
 import { ChatTranscript } from "@/components/ChatTranscript";
@@ -110,6 +110,8 @@ export function ChatPage({
   const nameContextSentRef = useRef(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [savingToVault, setSavingToVault] = useState(false);
+  const [vaultToast, setVaultToast] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState("");
   const [ttsEnabled, setTtsEnabled] = useState(true);
   const [ttsRetry, setTtsRetry] = useState<string | null>(null);
@@ -862,6 +864,25 @@ export function ChatPage({
     onBack();
   }, [isPower, messages, sessionId, persona.id, persona.name, onBack]);
 
+  async function addToVault() {
+    if (!messages || messages.length === 0 || savingToVault) return;
+    setSavingToVault(true);
+    try {
+      const r = await fetch("/companion/api/vault/save-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, messages }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        setVaultToast(data.title || "Saved to vault");
+        setTimeout(() => setVaultToast(null), 4000);
+      }
+    } finally {
+      setSavingToVault(false);
+    }
+  }
+
   const typeColors: Record<string, string> = {
     romance:      "border-rose-800/40 text-rose-400 hover:bg-rose-900/30",
     mentor:       "border-violet-800/40 text-violet-400 hover:bg-violet-900/30",
@@ -942,6 +963,15 @@ export function ChatPage({
           )}
 
           <button
+            onClick={addToVault}
+            disabled={savingToVault}
+            title="Save to Legacy Vault"
+            className="flex items-center justify-center w-8 h-8 rounded-full border border-white/12 bg-white/04 hover:bg-white/10 transition text-white/30 hover:text-purple-400 disabled:opacity-30"
+          >
+            {savingToVault ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Archive className="w-3.5 h-3.5" />}
+          </button>
+
+          <button
             onClick={() => { unlockAudio(); setTtsEnabled((v) => !v); }}
             className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-full border transition ${
               ttsEnabled
@@ -954,6 +984,12 @@ export function ChatPage({
           </button>
         </div>
       </div>
+
+      {vaultToast && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-purple-900/90 border border-purple-500/30 text-white text-xs px-4 py-2 rounded-full shadow-lg max-w-xs text-center">
+          ✓ Saved · {vaultToast}
+        </div>
+      )}
 
       {/* ── Avatar ── */}
       <div className="flex justify-center py-3 shrink-0">
