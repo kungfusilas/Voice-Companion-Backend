@@ -2,7 +2,7 @@
  * BondAI Service Worker — handles push notifications and offline caching.
  */
 
-const CACHE_NAME = "bondai-v1";
+const CACHE_NAME = "bondai-v2";
 const OFFLINE_URLS = ["/", "/manifest.webmanifest"];
 
 // ── Install: pre-cache shell ──────────────────────────────────────────────────
