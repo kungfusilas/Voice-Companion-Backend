@@ -252,93 +252,30 @@ async def persona_speak_stream(
             },
         )
     tier, _ = await get_user_tier(user_id)
-    if not is_premium_or_higher(tier):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "plan_required",
-                "required": "premium",
-                "message": "Two-Way Voice requires a Premium plan or higher. Upgrade in Settings → Pricing.",
-            },
-        )
     session_id = req.headers.get("X-Session-Id") or None
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     logger.info(f"[TTS] starting for user={user_id}")
 
-    # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
-    if not is_power_or_higher(tier):
-        async def openai_audio_stream():
-            try:
-                async for chunk in _stream_with_timeout(
-                    openai_tts_client.synthesize_stream(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)),
-                    _OPENAI_TIMEOUT,
-                    "OpenAI TTS",
-                ):
-                    yield chunk
-                logger.info(f"[TTS] done for user={user_id}")
-            except OpenAITTSError as e:
-                # Degrade gracefully — end the stream instead of raising so the
-                # frontend gets a clean (possibly empty) 200 and shows text.
-                logger.warning("OpenAI TTS stream failed, degrading to text-only: %s", e)
-                return
-
-        return StreamingResponse(
-            openai_audio_stream(),
-            media_type="audio/mpeg",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "Content-Disposition": 'inline; filename="speech.mp3"',
-            },
-        )
-
-    register = _detect_register(clean_text)
-    tagged_text = _inject_el_tags(clean_text, register)
-    voice_settings = build_voice_settings_for_register(request.persona_id, register)
-
-    async def audio_stream():
+    # All tiers (free, basic, premium, power) use OpenAI TTS (tts-1-hd, per-persona voice).
+    async def openai_audio_stream():
         try:
             async for chunk in _stream_with_timeout(
-                elevenlabs_client.synthesize_stream(
-                    text=tagged_text,
-                    voice_id=persona.voice_id,
-                    model_id=request.model_id,
-                    voice_settings=voice_settings,
-                    previous_text=request.previous_text or None,
-                ),
-                _ELEVEN_TIMEOUT,
-                "ElevenLabs",
+                openai_tts_client.synthesize_stream(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)),
+                _OPENAI_TIMEOUT,
+                "OpenAI TTS",
             ):
                 yield chunk
             logger.info(f"[TTS] done for user={user_id}")
-        except ElevenLabsError as e:
-            if tagged_text != clean_text:
-                # Tag may have caused the rejection — retry with plain text
-                try:
-                    async for chunk in _stream_with_timeout(
-                        elevenlabs_client.synthesize_stream(
-                            text=clean_text,
-                            voice_id=persona.voice_id,
-                            model_id=request.model_id,
-                            voice_settings=voice_settings,
-                            previous_text=request.previous_text or None,
-                        ),
-                        _ELEVEN_TIMEOUT,
-                        "ElevenLabs",
-                    ):
-                        yield chunk
-                    logger.info(f"[TTS] done for user={user_id}")
-                except ElevenLabsError as e2:
-                    logger.warning("ElevenLabs TTS stream failed, degrading to text-only: %s", e2)
-                    return
-            else:
-                logger.warning("ElevenLabs TTS stream failed, degrading to text-only: %s", e)
-                return
+        except OpenAITTSError as e:
+            # Degrade gracefully — end the stream instead of raising so the
+            # frontend gets a clean (possibly empty) 200 and shows text.
+            logger.warning("OpenAI TTS stream failed, degrading to text-only: %s", e)
+            return
 
     return StreamingResponse(
-        audio_stream(),
+        openai_audio_stream(),
         media_type="audio/mpeg",
         headers={
             "Cache-Control": "no-cache",
@@ -381,87 +318,27 @@ async def persona_speak(
             },
         )
     tier, _ = await get_user_tier(user_id)
-    if not is_premium_or_higher(tier):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "plan_required",
-                "required": "premium",
-                "message": "Two-Way Voice requires a Premium plan or higher. Upgrade in Settings → Pricing.",
-            },
-        )
     session_id = req.headers.get("X-Session-Id") or None
     estimated_secs = max(1, len(clean_text) // 13)
     await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     logger.info(f"[TTS] starting for user={user_id}")
 
-    # Premium tier uses OpenAI TTS (tts-1-hd, per-persona voice). Power+ keeps ElevenLabs unchanged.
-    if not is_power_or_higher(tier):
-        try:
-            audio = await asyncio.wait_for(
-                openai_tts_client.synthesize(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)),
-                timeout=_OPENAI_TIMEOUT,
-            )
-        except asyncio.TimeoutError:
-            logger.warning("OpenAI TTS timed out after %ss — falling back to text-only", _OPENAI_TIMEOUT)
-            return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
-        except OpenAITTSError as e:
-            # Voice synthesis failed — degrade gracefully to text-only.
-            # Return 200 with an empty body + X-Voice-Available: false so the
-            # frontend shows the chat text and never enters a broken send state.
-            logger.warning("OpenAI TTS failed, degrading to text-only: %s", e)
-            return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
-
-        logger.info(f"[TTS] done for user={user_id}")
-        return Response(
-            content=audio,
-            media_type="audio/mpeg",
-            headers={"Content-Disposition": 'inline; filename="speech.mp3"'},
-        )
-
-    register = _detect_register(clean_text)
-    tagged_text = _inject_el_tags(clean_text, register)
-    voice_settings = build_voice_settings_for_register(request.persona_id, register)
-
+    # All tiers (free, basic, premium, power) use OpenAI TTS (tts-1-hd, per-persona voice).
     try:
         audio = await asyncio.wait_for(
-            elevenlabs_client.synthesize(
-                text=tagged_text,
-                voice_id=persona.voice_id,
-                model_id=request.model_id,
-                voice_settings=voice_settings,
-                previous_text=request.previous_text or None,
-            ),
-            timeout=_ELEVEN_TIMEOUT,
+            openai_tts_client.synthesize(clean_text, voice=openai_tts_client.voice_for_persona(persona.id)),
+            timeout=_OPENAI_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        logger.warning("ElevenLabs timed out after %ss — falling back to text-only", _ELEVEN_TIMEOUT)
+        logger.warning("OpenAI TTS timed out after %ss — falling back to text-only", _OPENAI_TIMEOUT)
         return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
-    except ElevenLabsError as e:
-        if tagged_text != clean_text:
-            # Tag may have caused the rejection — retry with plain text
-            try:
-                audio = await asyncio.wait_for(
-                    elevenlabs_client.synthesize(
-                        text=clean_text,
-                        voice_id=persona.voice_id,
-                        model_id=request.model_id,
-                        voice_settings=voice_settings,
-                        previous_text=request.previous_text or None,
-                    ),
-                    timeout=_ELEVEN_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("ElevenLabs timed out after %ss — falling back to text-only", _ELEVEN_TIMEOUT)
-                return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
-            except ElevenLabsError as e2:
-                # Voice synthesis failed — degrade gracefully to text-only.
-                logger.warning("ElevenLabs TTS failed, degrading to text-only: %s", e2)
-                return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
-        else:
-            logger.warning("ElevenLabs TTS failed, degrading to text-only: %s", e)
-            return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
+    except OpenAITTSError as e:
+        # Voice synthesis failed — degrade gracefully to text-only.
+        # Return 200 with an empty body + X-Voice-Available: false so the
+        # frontend shows the chat text and never enters a broken send state.
+        logger.warning("OpenAI TTS failed, degrading to text-only: %s", e)
+        return Response(content=b"", media_type="audio/mpeg", headers=VOICE_UNAVAILABLE_HEADERS)
 
     logger.info(f"[TTS] done for user={user_id}")
     return Response(

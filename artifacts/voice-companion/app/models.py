@@ -71,6 +71,7 @@ class ChatResponse(BaseModel):
     stage_max: int = 100
     stage_up_text: str = ""
     voice_available: bool = False
+    usage: dict | None = None
 
 
 class CreatePersonaRequest(BaseModel):

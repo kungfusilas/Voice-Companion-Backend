@@ -158,6 +158,8 @@ export function ChatPage({
   const [showUpgradeCard, setShowUpgradeCard] = useState(false);
   const [wowGenerating, setWowGenerating] = useState(false);
   const [quotaErrorDetail, setQuotaErrorDetail] = useState<QuotaDetail | null>(null);
+  const [usageInfo, setUsageInfo] = useState<{remaining:number,cap:number,warning:boolean,reset_date:string}|null>(null);
+  const [capReached, setCapReached] = useState<{plan:string,cap:number,reset_date:string}|null>(null);
 
   // ── 80% usage warning — shown once per browser session ────────────────────
   useEffect(() => {
@@ -413,6 +415,7 @@ export function ChatPage({
           const ttsFullReply = fullReply;
           fullReply = event.full_text ?? fullReply;
           setStreamingText("");
+          if (event.usage) setUsageInfo(event.usage);
 
           // Detect [SELFIE] / [SELFIE: scene] trigger tag for premium users
           const selfieTagMatch = isPremium
@@ -587,7 +590,12 @@ export function ChatPage({
     } catch (e: unknown) {
       if (e instanceof ApiError) {
         if (e.status === 402) {
-          setQuotaErrorDetail(e.detail as QuotaDetail);
+          const d = e.detail as Record<string, unknown> | null;
+          if (d?.error === "message_limit_reached") {
+            setCapReached(d as unknown as {plan:string,cap:number,reset_date:string});
+          } else {
+            setQuotaErrorDetail(e.detail as QuotaDetail);
+          }
         } else if (e.status === 429) {
           setError((e.detail as Record<string, string> | null)?.message ?? "Hourly limit reached — try again soon.");
         } else {
@@ -900,7 +908,7 @@ export function ChatPage({
       initial={{ opacity: 0, x: 30 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -30 }}
-      className="flex flex-col h-full"
+      className="relative flex flex-col h-full"
     >
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-4 pt-4 pb-2 shrink-0">
@@ -1194,6 +1202,13 @@ export function ChatPage({
         </div>
       )}
 
+      {/* ── Monthly usage warning banner ── */}
+      {usageInfo?.warning && (
+        <div className="px-4 py-2 bg-amber-900/40 border-t border-amber-500/20 text-amber-300 text-xs text-center">
+          {usageInfo.remaining} messages left this month · Resets {usageInfo.reset_date} · <a href="https://legacybond.ai/#pricing" target="_blank" rel="noreferrer" className="underline">Upgrade</a>
+        </div>
+      )}
+
       {/* ── Input row ── */}
       <div className="flex items-end gap-2 px-4 pb-4 shrink-0">
         <div className="flex-1">
@@ -1327,6 +1342,39 @@ export function ChatPage({
         onClose={() => setQuotaErrorDetail(null)}
         onUpgrade={() => { setQuotaErrorDetail(null); onBack(); }}
       />
+
+      {/* ── Monthly message cap reached modal ── */}
+      {capReached && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm px-6">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#16121f] p-6 text-center shadow-2xl">
+            <div className="text-3xl mb-3">💬</div>
+            <h3 className="text-lg font-semibold text-white mb-2">Monthly message limit reached</h3>
+            <p className="text-sm text-white/60 mb-1">
+              You've used all {capReached.cap} messages on the{" "}
+              <span className="capitalize text-white/80">{capReached.plan}</span> plan.
+            </p>
+            <p className="text-sm text-white/60 mb-5">Your messages reset {capReached.reset_date}.</p>
+            <a
+              href="https://legacybond.ai/#pricing"
+              target="_blank"
+              rel="noreferrer"
+              className="block w-full py-2.5 rounded-xl text-sm font-semibold text-white transition mb-3"
+              style={{
+                background: "linear-gradient(135deg, #9f1239, #be185d)",
+                boxShadow: "0 4px 16px rgba(159,18,57,0.4)",
+              }}
+            >
+              Upgrade your plan
+            </a>
+            <button
+              onClick={() => setCapReached(null)}
+              className="w-full py-2.5 rounded-xl text-sm font-medium text-white/50 border border-white/10 hover:border-white/20 hover:text-white/70 transition"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Journey panel overlay */}
       <AnimatePresence>

@@ -1,0 +1,190 @@
+Build the usage caps / entitlements system. The user_entitlements table is already created in Supabase. Multi-file task — READ files before modifying them.
+
+STEP 1: CREATE artifacts/voice-companion/app/routers/entitlements.py with this exact content:
+
+import os
+from datetime import datetime, timezone
+import httpx
+from fastapi import APIRouter, HTTPException, Request
+from typing import Optional
+
+router = APIRouter()
+
+PLAN_CAPS = {
+    "free": 75,
+    "basic": 500,
+    "premium": 1500,
+    "power": 3500,
+}
+
+STRIPE_PRICE_MAP = {
+    os.environ.get("STRIPE_PRICE_BASIC", ""): "basic",
+    os.environ.get("STRIPE_PRICE_PREMIUM", ""): "premium",
+    os.environ.get("STRIPE_PRICE_POWER", ""): "power",
+}
+
+
+def _sb_headers():
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    return {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+
+def _sb_url(path: str) -> str:
+    return os.environ.get("SUPABASE_URL", "").rstrip("/") + path
+
+
+async def get_or_create_entitlement(user_id: str) -> dict:
+    async with httpx.AsyncClient(timeout=5.0) as hx:
+        r = await hx.get(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                         params={"user_id": f"eq.{user_id}", "limit": "1"})
+    if r.status_code == 200 and r.json():
+        return r.json()[0]
+    now = datetime.now(timezone.utc)
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m, y = (period_start.month + 1, period_start.year) if period_start.month < 12 else (1, period_start.year + 1)
+    period_end = period_start.replace(month=m, year=y)
+    row = {"user_id": user_id, "plan": "free", "message_count": 0,
+           "period_start": period_start.isoformat(), "period_end": period_end.isoformat(), "status": "active"}
+    async with httpx.AsyncClient(timeout=5.0) as hx:
+        await hx.post(_sb_url("/rest/v1/user_entitlements"),
+                      headers={**_sb_headers(), "Prefer": "return=minimal"}, json=row)
+    return row
+
+
+async def reset_period_if_expired(ent: dict, user_id: str) -> dict:
+    now = datetime.now(timezone.utc)
+    period_end = datetime.fromisoformat(ent["period_end"].replace("Z", "+00:00"))
+    if now < period_end:
+        return ent
+    new_start = period_end
+    m, y = (new_start.month + 1, new_start.year) if new_start.month < 12 else (1, new_start.year + 1)
+    new_end = new_start.replace(month=m, year=y)
+    async with httpx.AsyncClient(timeout=5.0) as hx:
+        await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                       params={"user_id": f"eq.{user_id}"},
+                       json={"message_count": 0, "period_start": new_start.isoformat(),
+                             "period_end": new_end.isoformat(), "updated_at": now.isoformat()})
+    ent.update({"message_count": 0, "period_start": new_start.isoformat(), "period_end": new_end.isoformat()})
+    return ent
+
+
+async def check_and_increment(user_id: str) -> dict:
+    ent = await get_or_create_entitlement(user_id)
+    ent = await reset_period_if_expired(ent, user_id)
+    plan = ent.get("plan", "free")
+    cap = PLAN_CAPS.get(plan, 75)
+    used = ent.get("message_count", 0)
+    try:
+        reset_dt = datetime.fromisoformat(ent["period_end"].replace("Z", "+00:00"))
+        reset_date = reset_dt.strftime("%B %-d, %Y")
+    except Exception:
+        reset_date = "next month"
+    if used >= cap:
+        return {"allowed": False, "plan": plan, "used": used, "cap": cap, "remaining": 0, "warning": False, "reset_date": reset_date}
+    async with httpx.AsyncClient(timeout=5.0) as hx:
+        await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                       params={"user_id": f"eq.{user_id}"},
+                       json={"message_count": used + 1, "updated_at": datetime.now(timezone.utc).isoformat()})
+    remaining = cap - (used + 1)
+    return {"allowed": True, "plan": plan, "used": used + 1, "cap": cap,
+            "remaining": remaining, "warning": remaining <= (cap * 0.2), "reset_date": reset_date}
+
+
+@router.get("/api/entitlements")
+async def get_entitlement(user_id: str):
+    ent = await get_or_create_entitlement(user_id)
+    ent = await reset_period_if_expired(ent, user_id)
+    plan = ent.get("plan", "free")
+    cap = PLAN_CAPS.get(plan, 75)
+    used = ent.get("message_count", 0)
+    try:
+        reset_dt = datetime.fromisoformat(ent["period_end"].replace("Z", "+00:00"))
+        reset_date = reset_dt.strftime("%B %-d, %Y")
+    except Exception:
+        reset_date = "next month"
+    return {"plan": plan, "used": used, "cap": cap, "remaining": max(0, cap - used),
+            "warning": (cap - used) <= (cap * 0.2), "reset_date": reset_date, "status": ent.get("status", "active")}
+
+
+@router.patch("/api/entitlements/plan")
+async def update_plan(user_id: str, plan: str):
+    if plan not in PLAN_CAPS:
+        raise HTTPException(400, f"Invalid plan. Must be one of: {list(PLAN_CAPS.keys())}")
+    async with httpx.AsyncClient(timeout=5.0) as hx:
+        await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                       params={"user_id": f"eq.{user_id}"},
+                       json={"plan": plan, "updated_at": datetime.now(timezone.utc).isoformat()})
+    return {"updated": True, "plan": plan}
+
+
+@router.post("/api/stripe/webhook")
+async def stripe_webhook(request: Request):
+    import json
+    body = await request.body()
+    secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+    if secret:
+        sig = request.headers.get("stripe-signature", "")
+        try:
+            import stripe as stripe_lib
+            stripe_lib.Webhook.construct_event(body, sig, secret)
+        except Exception as e:
+            raise HTTPException(400, str(e))
+    payload = json.loads(body)
+    event_type = payload.get("type", "")
+    data = payload.get("data", {}).get("object", {})
+    customer_id = data.get("customer")
+    status = data.get("status", "")
+    items = data.get("items", {}).get("data", [])
+    price_id = items[0].get("price", {}).get("id", "") if items else ""
+    plan = STRIPE_PRICE_MAP.get(price_id, "free")
+    if event_type in ("customer.subscription.created", "customer.subscription.updated") and status in ("active", "trialing"):
+        async with httpx.AsyncClient(timeout=5.0) as hx:
+            r = await hx.get(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                             params={"stripe_customer_id": f"eq.{customer_id}", "limit": "1"})
+            if r.status_code == 200 and r.json():
+                uid = r.json()[0]["user_id"]
+                await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                                params={"user_id": f"eq.{uid}"},
+                                json={"plan": plan, "status": "active", "updated_at": datetime.now(timezone.utc).isoformat()})
+    elif event_type == "customer.subscription.deleted":
+        async with httpx.AsyncClient(timeout=5.0) as hx:
+            r = await hx.get(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                             params={"stripe_customer_id": f"eq.{customer_id}", "limit": "1"})
+            if r.status_code == 200 and r.json():
+                uid = r.json()[0]["user_id"]
+                await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
+                                params={"user_id": f"eq.{uid}"},
+                                json={"plan": "free", "status": "canceled", "updated_at": datetime.now(timezone.utc).isoformat()})
+    return {"received": True}
+
+STEP 2: READ artifacts/voice-companion/app/routers/chat.py
+
+Find the main chat message endpoint. Add BEFORE the Claude API call:
+  from app.routers.entitlements import check_and_increment
+  usage = await check_and_increment(user_id)
+  if not usage["allowed"]:
+      from fastapi import HTTPException
+      raise HTTPException(status_code=402, detail={"error": "message_limit_reached", "plan": usage["plan"], "cap": usage["cap"], "reset_date": usage["reset_date"], "upgrade_url": "https://legacybond.ai/#pricing"})
+
+Add to the return value:
+  "usage": {"remaining": usage["remaining"], "cap": usage["cap"], "warning": usage["warning"], "reset_date": usage["reset_date"]}
+
+STEP 3: READ the TTS routing code (in chat.py or a separate file). Change ALL tiers to use OpenAI TTS — remove the ElevenLabs branch entirely. Free, basic, premium, power all get OpenAI voice replies.
+
+STEP 4: EDIT artifacts/voice-companion/app/main.py — add after the vault router import:
+  from app.routers import entitlements as entitlements_router
+  app.include_router(entitlements_router.router)
+
+STEP 5: READ artifacts/voice-companion/src/pages/ChatPage.tsx
+
+Add these changes:
+1. State: const [usageInfo, setUsageInfo] = useState<{remaining:number,cap:number,warning:boolean,reset_date:string}|null>(null);
+2. State: const [capReached, setCapReached] = useState<{plan:string,cap:number,reset_date:string}|null>(null);
+3. In the chat fetch response handler, extract usage: if (data.usage) setUsageInfo(data.usage);
+4. Handle 402 status: if (response.status === 402) { const err = await response.json(); if (err.detail?.error === "message_limit_reached") { setCapReached(err.detail); return; } }
+5. Warning banner above chat input when usageInfo?.warning is true:
+   <div className="px-4 py-2 bg-amber-900/40 border-t border-amber-500/20 text-amber-300 text-xs text-center">
+     Warning: {usageInfo.remaining} messages left this month · Resets {usageInfo.reset_date} · <a href="https://legacybond.ai/#pricing" target="_blank" className="underline">Upgrade</a>
+   </div>
+6. Cap modal when capReached is not null — positioned absolute inset-0 z-50 with backdrop, showing plan name, cap number, reset date, and upgrade link button.
+
+STEP 6: Build (cd artifacts/voice-companion && npm run build), fix any TypeScript errors, republish.

@@ -182,6 +182,53 @@ async def _enforce_message_cap(user_id: str) -> None:
             },
         )
 
+async def _check_monthly_cap(user_id: str, tier: str) -> dict:
+    """Monthly message cap backed by the user_entitlements table.
+
+    Raises HTTPException 402 when the monthly cap is reached. Fails open on
+    backend errors (Supabase unreachable / table missing) — never crashes chat.
+    """
+    from app.routers.entitlements import (
+        PLAN_CAPS as MONTHLY_PLAN_CAPS,
+        check_and_increment,
+        get_or_create_entitlement as _get_monthly_ent,
+        update_plan as _update_monthly_plan,
+    )
+    try:
+        # Keep the entitlement plan in sync with the user's profile tier so
+        # paying users are never held to the free cap and downgraded users
+        # don't keep a stale higher cap ("elite" gets power caps).
+        plan = tier if tier in MONTHLY_PLAN_CAPS else ("power" if tier == "elite" else "free")
+        ent = await _get_monthly_ent(user_id)
+        if ent.get("plan", "free") != plan:
+            await _update_monthly_plan(user_id, plan)
+        usage = await check_and_increment(user_id)
+    except Exception as e:
+        _chat_logger.warning("monthly cap check failed (allowing) user=%.8s: %s", user_id, e)
+        return {"allowed": True, "plan": tier, "used": 0, "cap": 0, "remaining": 0, "warning": False, "reset_date": ""}
+    if not usage["allowed"]:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "error": "message_limit_reached",
+                "plan": usage["plan"],
+                "cap": usage["cap"],
+                "reset_date": usage["reset_date"],
+                "upgrade_url": "https://legacybond.ai/#pricing",
+            },
+        )
+    return usage
+
+
+def _usage_payload(usage: dict) -> dict:
+    return {
+        "remaining": usage.get("remaining", 0),
+        "cap": usage.get("cap", 0),
+        "warning": usage.get("warning", False),
+        "reset_date": usage.get("reset_date", ""),
+    }
+
+
 def _is_elite(tier: str) -> bool:
     return tier == "elite"
 
@@ -1008,6 +1055,9 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
         await _enforce_entitlements(user_id, tier, request.session_id)
 
+    # Monthly message cap (user_entitlements) — raises 402 when the cap is hit
+    usage = await _check_monthly_cap(user_id, tier)
+
     persona = store.get_persona(request.persona_id)
     if not persona:
         raise HTTPException(status_code=404, detail=f"Persona '{request.persona_id}' not found")
@@ -1062,6 +1112,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
             message_count=len(store.get_history(request.session_id)),
             model_backend="venice" if use_venice else "claude",
             voice_available=False,
+            usage=_usage_payload(usage),
         )
 
     stats = await relationship.get_stats(user_id, persona.id)
@@ -1117,6 +1168,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         stage_max=stage_max,
         stage_up_text=stage_up_text,
         voice_available=False,
+        usage=_usage_payload(usage),
     )
 
 
@@ -1151,6 +1203,9 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     if not is_guest:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
         await _enforce_entitlements(user_id, tier, request.session_id)
+
+    # Monthly message cap (user_entitlements) — raises 402 when the cap is hit
+    usage = await _check_monthly_cap(user_id, tier)
 
     persona = store.get_persona(request.persona_id)
     if not persona:
@@ -1264,6 +1319,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
                     payload["voice_available"] = False if is_guest else False
+                    payload["usage"] = _usage_payload(usage)
 
                     if is_guest:
                         # Guests: skip all Supabase ops

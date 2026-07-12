@@ -227,6 +227,7 @@ export interface StreamEvent {
   stage_max?: number;
   stage_up_text?: string;
   companion_id?: string;
+  usage?: { remaining: number; cap: number; warning: boolean; reset_date: string };
 }
 
 export async function uploadPhoto(
