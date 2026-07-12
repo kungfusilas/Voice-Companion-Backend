@@ -1081,7 +1081,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         stage_min=stage_min,
         stage_max=stage_max,
         stage_up_text=stage_up_text,
-        voice_available=_voice_available_for_tier(tier),
+        voice_available=False,
     )
 
 
@@ -1224,7 +1224,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     )
                     payload["message_count"] = len(store.get_history(request.session_id))
                     payload["model_backend"] = "venice" if use_venice else "claude"
-                    payload["voice_available"] = False if is_guest else _voice_available_for_tier(tier)
+                    payload["voice_available"] = False if is_guest else False
 
                     if is_guest:
                         # Guests: skip all Supabase ops

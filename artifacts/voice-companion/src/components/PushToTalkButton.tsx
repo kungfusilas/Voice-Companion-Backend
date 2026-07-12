@@ -56,7 +56,7 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
     ? "from-red-900/60 to-red-800/60 shadow-red-900/30"
     : "from-violet-900/60 to-violet-800/60 shadow-violet-900/30";
 
-  if (!isPremium) {
+  if (true) { // Voice coming soon — re-enable when backend rebuilt
     return (
       <div className="flex flex-col items-center gap-2">
         <div
@@ -65,7 +65,7 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
             background: "rgba(255,255,255,0.04)",
             border: "1px solid rgba(255,255,255,0.08)",
           }}
-          title="Two-Way Voice requires Premium"
+          title="Voice is coming soon"
         >
           <Mic className="w-5 h-5 text-white/20" />
           <div
@@ -75,7 +75,7 @@ export function PushToTalkButton({ state, onStart, onStop, disabled, nsfw, isPre
             <Lock className="w-2.5 h-2.5 text-white" />
           </div>
         </div>
-        <span className="text-[10px] font-medium text-violet-400/60">Premium</span>
+        <span className="text-[10px] font-medium text-violet-400/60">Coming Soon</span>
       </div>
     );
   }
