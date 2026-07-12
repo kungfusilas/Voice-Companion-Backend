@@ -5,7 +5,7 @@ import httpx
 import urllib.parse
 import logging as _logging
 _chat_logger = _logging.getLogger(__name__)
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
@@ -808,6 +808,37 @@ async def _build_core_facts_block(user_id: str) -> str:
         return ""
 
 
+
+async def _get_flashback(user_id: str) -> str:
+    url = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+    if not url or not key:
+        return ""
+    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    today = datetime.now(timezone.utc).date()
+    async with httpx.AsyncClient(timeout=6.0) as client:
+        for days in [365, 180, 90, 30]:
+            target = today - timedelta(days=days)
+            ws = datetime(target.year, target.month, target.day).isoformat()
+            we = (datetime(target.year, target.month, target.day) + timedelta(days=2)).isoformat()
+            try:
+                r = await client.get(f"{url}/rest/v1/messages", headers=headers, params=[
+                    ("select","content"),("user_id",f"eq.{user_id}"),("role","eq.user"),
+                    ("created_at",f"gte.{ws}"),("created_at",f"lt.{we}"),
+                    ("order","created_at.asc"),("limit","3")])
+                if r.status_code == 200:
+                    snips = [x["content"][:150].strip() for x in r.json() if x.get("content","").strip()]
+                    if snips:
+                        lbl = "1 year ago" if days == 365 else f"{days} days ago"
+                        return (f"\n\n[MEMORY FLASHBACK: {lbl} today this user wrote: "
+                                f'"{" ... ".join(snips)}". If emotionally resonant, weave '
+                                f"a warm brief reference into your reply (e.g. 'I remember "
+                                f"{lbl} you mentioned...'). At most once. Never force it.]\n")
+            except Exception:
+                pass
+    return ""
+
+
 async def _build_system_prompt(
     persona,
     user_id: str,
@@ -1000,6 +1031,10 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         is_guest=is_guest,
         session_id=request.session_id,
     )
+    if not is_guest:
+        _fb = await _get_flashback(user_id)
+        if _fb:
+            system_prompt += _fb
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     if use_venice:
@@ -1143,6 +1178,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         is_guest=is_guest,
         session_id=request.session_id,
     )
+    if not is_guest:
+        _fb = await _get_flashback(user_id)
+        if _fb:
+            system_prompt += _fb
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     # ── Photo message handling ────────────────────────────────────────────────
