@@ -155,6 +155,8 @@ export function ChatPage({
   // Start at 1 because Q1 ("What's your name?") is already in the opener message
   const guestMsgCountRef = useRef(isGuest ? 1 : 0);
   const wowDoneRef = useRef(false);
+  const inactivityTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionMessagesRef = useRef<Array<{ role: string; content: string }>>([]);
   const [showUpgradeCard, setShowUpgradeCard] = useState(false);
   const [wowGenerating, setWowGenerating] = useState(false);
   const [quotaErrorDetail, setQuotaErrorDetail] = useState<QuotaDetail | null>(null);
@@ -321,6 +323,28 @@ export function ChatPage({
     return () => { cancelled = true; };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const triggerSessionEnd = async () => {
+    if (sessionMessagesRef.current.length < 3) return;
+    try {
+      await fetch(`/companion/api/relationship/session-end`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, messages: sessionMessagesRef.current.slice(-30) }),
+      });
+    } catch (e) {}
+  };
+
+  const resetInactivityTimer = () => {
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    inactivityTimerRef.current = setTimeout(triggerSessionEnd, 20 * 60 * 1000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    };
+  }, []);
+
   const sendMessage = useCallback(async (userText: string) => {
     unlockAudio(); // prime audio even when called from non-gesture paths (conv mode)
     if (busyRef.current || showUpgradeCard) return;
@@ -428,6 +452,14 @@ export function ChatPage({
           const newMsgs: ChatMessage[] = [{ role: "assistant", content: displayReply }];
           if (event.stage_up_text) newMsgs.push({ role: "assistant", content: event.stage_up_text });
           setMessages((prev) => [...prev, ...newMsgs]);
+
+          // Track this exchange for the relationship session-end analysis
+          sessionMessagesRef.current = [
+            ...sessionMessagesRef.current,
+            { role: "user", content: userText },
+            { role: "assistant", content: displayReply },
+          ];
+          resetInactivityTimer();
 
           // Auto-trigger selfie when companion included the tag
           if (selfieTagMatch) {

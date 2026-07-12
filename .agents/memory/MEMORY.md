@@ -6,3 +6,4 @@
 - [Prompt-build turn hang](prompt-build-hang.md) — stuck record button = server stream stall; time-box every per-turn external dep (_guard); cap all-rows queries
 - [Entitlements caps](entitlements.md) — session/message/fact limits; Supabase DDL is manual SQL Editor only; RPC grant + fail-open rules
 - [Tiered memory context](tiered-memory.md) — memory_manager/memory_distillation: Supabase reads must be best-effort per-table since onboarding_answers table doesn't exist yet
+- [Exact-content spec tasks](exact-spec-tasks.md) — check file-name collisions first; standing deviations (Chat.tsx, AsyncAnthropic, both endpoints, fail-open)

@@ -79,6 +79,20 @@ async def save_session(body: SaveSessionRequest):
 
     saved = r.json()
     row = saved[0] if isinstance(saved, list) else saved
+
+    # Update the adaptive relationship profile from this session (best-effort).
+    try:
+        from app.routers.relationship_profile import analyze_session_signals, update_profile_scores
+        messages_for_analysis = [
+            {"role": m.get("role", "user"), "content": m.get("content", "")}
+            for m in body.messages
+        ] if body.messages else []
+        if len(messages_for_analysis) >= 3:
+            deltas = await analyze_session_signals(messages_for_analysis)
+            await update_profile_scores(body.user_id, deltas)
+    except Exception:
+        pass
+
     return {"id": row.get("id"), "title": title}
 
 

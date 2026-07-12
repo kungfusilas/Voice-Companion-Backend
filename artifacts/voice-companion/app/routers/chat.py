@@ -220,6 +220,25 @@ async def _check_monthly_cap(user_id: str, tier: str) -> dict:
     return usage
 
 
+async def _get_relationship_context(user_id: str) -> str:
+    """Adaptive relationship profile context for the system prompt.
+
+    Fail-open: returns "" on any backend error — never crashes chat.
+    """
+    try:
+        from app.routers.relationship_profile import (
+            get_or_create_profile,
+            apply_decay,
+            build_relationship_context,
+        )
+        rel_profile = await get_or_create_profile(user_id)
+        rel_profile = await apply_decay(rel_profile, user_id)
+        return build_relationship_context(rel_profile)
+    except Exception as e:
+        _chat_logger.warning("relationship context failed (skipping) user=%.8s: %s", user_id, e)
+        return ""
+
+
 def _usage_payload(usage: dict) -> dict:
     return {
         "remaining": usage.get("remaining", 0),
@@ -1085,6 +1104,9 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> ChatRe
         _fb = await _get_flashback(user_id)
         if _fb:
             system_prompt += _fb
+    relationship_ctx = await _get_relationship_context(user_id)
+    if relationship_ctx:
+        system_prompt = relationship_ctx + "\n\n" + system_prompt
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     if use_venice:
@@ -1237,6 +1259,9 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         _fb = await _get_flashback(user_id)
         if _fb:
             system_prompt += _fb
+    relationship_ctx = await _get_relationship_context(user_id)
+    if relationship_ctx:
+        system_prompt = relationship_ctx + "\n\n" + system_prompt
     use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     # ── Photo message handling ────────────────────────────────────────────────
