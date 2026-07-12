@@ -330,9 +330,9 @@ export function ChatPage({
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const triggerSessionEnd = async () => {
-    if (sessionMessagesRef.current.length < 3) return;
+    if (isGuest || sessionMessagesRef.current.length < 3) return;
     try {
-      await fetch(`/companion/api/relationship/session-end`, {
+      await apiFetch(`/companion/api/relationship/session-end`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ user_id: userId, messages: sessionMessagesRef.current.slice(-30) }),
@@ -925,6 +925,14 @@ export function ChatPage({
   });
 
   const handleBack = useCallback(() => {
+    if (inactivityTimerRef.current) clearTimeout(inactivityTimerRef.current);
+    if (!isGuest && sessionMessagesRef.current.length >= 3) {
+      void apiFetch(`/companion/api/relationship/session-end`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, messages: sessionMessagesRef.current.slice(-30) }),
+      }).catch(() => {});
+    }
     if (isPower) {
       const userMsgCount = messages.filter(m => m.role === "user").length;
       if (userMsgCount >= 3) {
@@ -945,7 +953,7 @@ export function ChatPage({
       }
     }
     onBack();
-  }, [isPower, messages, sessionId, persona.id, persona.name, onBack]);
+  }, [isGuest, userId, isPower, messages, sessionId, persona.id, persona.name, onBack]);
 
   async function addToVault() {
     if (!messages || messages.length === 0 || savingToVault) return;

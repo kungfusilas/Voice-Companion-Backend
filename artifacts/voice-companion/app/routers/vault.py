@@ -86,16 +86,6 @@ async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(ve
     saved = r.json()
     row = saved[0] if isinstance(saved, list) else saved
 
-    # Update the adaptive relationship profile from this session (best-effort).
-    try:
-        from app.routers.relationship_profile import analyze_session_signals, update_profile_scores
-        messages_for_analysis = [
-            {"role": m.get("role", "user"), "content": m.get("content", "")}
-            for m in body.messages
-        ] if body.messages else []
-        if len(messages_for_analysis) >= 3:
-            deltas = await analyze_session_signals(messages_for_analysis)
-            await update_profile_scores(body.user_id, deltas)
     async def _rel_bg():
         try:
             from app.routers.relationship_profile import analyze_session_signals, update_profile_scores
@@ -174,7 +164,9 @@ class RecipientRequest(BaseModel):
 
 
 @router.post("/api/vault/recipient")
-async def upsert_recipient(body: RecipientRequest):
+async def upsert_recipient(body: RecipientRequest, token_user_id: str = Depends(verify_token)):
+    if body.user_id != token_user_id:
+        raise HTTPException(403, "Forbidden")
     async with httpx.AsyncClient(timeout=10.0) as hx:
         r = await hx.post(
             _sb_url("/rest/v1/legacy_recipients"),

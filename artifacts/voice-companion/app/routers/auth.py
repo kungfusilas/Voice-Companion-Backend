@@ -163,7 +163,7 @@ async def oauth_verify(req: OAuthVerifyRequest):
     from app.auth_middleware import _get_public_keys
     import jwt as _jwt
 
-    keys = _get_public_keys()
+    keys = await _get_public_keys()
     if not keys:
         raise HTTPException(500, "No public keys available for token verification")
 

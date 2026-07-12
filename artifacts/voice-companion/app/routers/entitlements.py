@@ -107,7 +107,7 @@ async def _update_plan_internal(user_id: str, plan: str) -> dict:
         return {"updated": False}
     async with httpx.AsyncClient(timeout=5.0) as hx:
         await hx.patch(
-            f"{_sb_url()}/rest/v1/user_entitlements",
+            _sb_url("/rest/v1/user_entitlements"),
             headers=_sb_headers(),
             params={"user_id": f"eq.{user_id}"},
             json={"plan": plan},
