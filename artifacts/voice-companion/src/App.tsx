@@ -6,12 +6,13 @@ import { AuthPage } from "@/pages/Auth";
 import { AuthCallback } from "@/pages/AuthCallback";
 import { PricingPage } from "@/pages/Pricing";
 import { Hub } from "@/pages/Hub";
+import { OnboardingFlow } from "./pages/OnboardingFlow";
 import { getSubscriptionStatus } from "@/lib/api";
 import { supabase, SUPABASE_CONFIGURED } from "@/lib/supabase";
 import type { Persona } from "@/lib/api";
 import type { Session } from "@supabase/supabase-js";
 
-type Screen = "loading" | "companion-select" | "chat" | "auth" | "pricing" | "hub" | "callback";
+type Screen = "loading" | "companion-select" | "onboarding" | "chat" | "auth" | "pricing" | "hub" | "callback";
 
 const CARD_STYLE: React.CSSProperties = {
   background: "rgba(255,255,255,0.03)",
@@ -181,6 +182,7 @@ export default function App() {
   const handleCompanionSelect = (p: Persona) => {
     setPersona(p);
     // Ensure a guest ID exists for unauthenticated users
+    let uid = userId;
     if (!session) {
       let gid = localStorage.getItem("bondai_guest_id");
       if (!gid) {
@@ -188,8 +190,14 @@ export default function App() {
         localStorage.setItem("bondai_guest_id", gid);
       }
       setGuestId(gid);
+      uid = `guest_${gid}`;
     }
-    setScreen("chat");
+    // Show onboarding once per user, before the first chat
+    if (uid && !localStorage.getItem("onboarding_done_" + uid)) {
+      setScreen("onboarding");
+    } else {
+      setScreen("chat");
+    }
   };
 
   const handleBack = () => {
@@ -335,6 +343,15 @@ export default function App() {
               onBack={() => setScreen("companion-select")}
               isGuest={isGuest}
               onSignIn={() => setScreen("auth")}
+            />
+          )}
+
+          {effectiveScreen === "onboarding" && persona && userId && (
+            <OnboardingFlow
+              key="onboarding"
+              userId={userId}
+              companionName={persona.name}
+              onComplete={() => setScreen("chat")}
             />
           )}
 
