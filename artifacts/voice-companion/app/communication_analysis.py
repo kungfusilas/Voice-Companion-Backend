@@ -165,7 +165,7 @@ async def maybe_analyze_communication(
     Args:
         user_id:        Supabase auth user ID
         session_id:     Unique ID for this chat session
-        companion_name: Companion name ("Kai", "Aeva", etc.)
+        companion_name: Companion name ("Ben", "Aeva", etc.)
         transcript:     Full message list [{"role": "user"|"assistant", "content": str}, ...]
 
     Returns:

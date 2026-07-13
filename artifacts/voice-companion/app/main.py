@@ -9,6 +9,8 @@ from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from app import selfie_pool
+
 from app.routers import chat, personas, sessions, memories
 from app.routers import import_memories
 from app.routers import vault as vault_router
@@ -130,6 +132,19 @@ async def lifespan(app: FastAPI):
         id="push_reengagement",
         replace_existing=True,
     )
+    # Selfie pool: keep a warm set of HeyGen looks so a selfie serves instantly.
+    # Both jobs no-op if HEYGEN_API_KEY is unset.
+    scheduler.add_job(
+        selfie_pool.top_up_pool,
+        "cron", hour=4, minute=0,
+        id="selfie_pool_top_up", replace_existing=True,
+    )
+    scheduler.add_job(
+        selfie_pool.sync_pool,
+        "interval", minutes=10,
+        id="selfie_pool_sync", replace_existing=True,
+    )
+
     scheduler.start()
     logger.info("Schedulers started: proactive + daily activity + morning check-in + push notifications")
 

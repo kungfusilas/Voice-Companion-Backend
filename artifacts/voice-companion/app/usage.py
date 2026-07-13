@@ -99,6 +99,7 @@ async def _call_consume_quota(
     """
     url = _supa_url()
     if not url:
+        logger.error("QUOTA FAIL-OPEN: SUPABASE_URL not configured - quota NOT enforced user=%s kind=%s", user_id, kind)
         return {"ok": True}
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -116,9 +117,13 @@ async def _call_consume_quota(
                 },
             )
         if resp.status_code != 200:
+            logger.error("QUOTA FAIL-OPEN: consume_quota RPC returned %s user=%s kind=%s - quota NOT enforced. Body: %s",
+                         resp.status_code, user_id, kind, resp.text[:200])
             return {"ok": True, "_rpc_err": resp.text[:200]}
         return resp.json()
-    except Exception:
+    except Exception as exc:
+        logger.error("QUOTA FAIL-OPEN: consume_quota RPC unreachable user=%s kind=%s - quota NOT enforced. Error: %r",
+                     user_id, kind, exc)
         return {"ok": True, "_rpc_err": "timeout"}
 
 

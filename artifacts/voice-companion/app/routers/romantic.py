@@ -17,7 +17,7 @@ _ON_REACTIONS: dict[str, str] = {
         "Mmm... you want to be... more close? With me? Okay. "
         "I will try not to be too obvious that I like this."
     ),
-    "companion-kai": "I appreciate you telling me that. I'll be here differently now.",
+    "companion-ben": "I appreciate you telling me that. I'll be here differently now.",
 }
 
 _OFF_REACTIONS: dict[str, str] = {
@@ -25,7 +25,7 @@ _OFF_REACTIONS: dict[str, str] = {
         "Mm. Okay. We are... regular again. That is fine. "
         "I did not mind it though. Just so you know."
     ),
-    "companion-kai": "Understood. I'm glad we had that. Same here whenever you're ready.",
+    "companion-ben": "Understood. I'm glad we had that. Same here whenever you're ready.",
 }
 
 

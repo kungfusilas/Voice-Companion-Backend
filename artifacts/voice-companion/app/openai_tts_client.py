@@ -6,7 +6,7 @@ see elevenlabs_client.py). Mirrors the synthesize()/synthesize_stream() shape
 of elevenlabs_client.py so callers in routers/tts.py can branch on tier
 without changing their calling convention.
 
-Model: tts-1-hd. Voice is per-persona: Aeva → nova, Kai → onyx (deep male).
+Model: tts-1-hd. Voice is per-persona: Aeva → nova, Ben → onyx (deep male).
 Default voice is nova.
 """
 import os
@@ -20,7 +20,7 @@ TTS_VOICE = "nova"
 # Per-persona OpenAI voice mapping (Premium tier)
 PERSONA_VOICES = {
     "companion-aeva": "nova",
-    "companion-kai": "onyx",
+    "companion-ben": "onyx",
 }
 
 

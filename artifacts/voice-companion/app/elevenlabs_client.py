@@ -19,7 +19,7 @@ COMPANION_VOICE_SETTINGS: dict[str, VoiceSettings] = {
         style=0.50,
         use_speaker_boost=True,
     ),
-    "companion-kai": VoiceSettings(
+    "companion-ben": VoiceSettings(
         stability=0.60,
         similarity_boost=0.85,
         style=0.40,

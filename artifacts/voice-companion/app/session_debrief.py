@@ -157,7 +157,7 @@ async def generate_session_debrief(
     Args:
         user_id:        Supabase auth user ID
         session_id:     Unique ID for this chat session (use your existing session ID)
-        companion_name: "Kai", "Aeva", etc.
+        companion_name: "Ben", "Aeva", etc.
         transcript:     Full message list [{"role": "user"|"assistant", "content": str}, ...]
         memory_context: Optional string of relevant memories to enrich the analysis
 

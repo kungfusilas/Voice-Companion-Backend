@@ -274,7 +274,7 @@
     <div class="page-header">
       <h1>Privacy Policy</h1>
       <div class="page-meta">
-        <span>📅 Effective Date: June 9, 2026</span>
+        <span>📅 Effective Date: July 12, 2026</span>
         <span>🏢 LegacyBond AI LLC</span>
       </div>
     </div>
@@ -390,9 +390,29 @@
             <td>Conversation messages and system context needed to generate responses; Anthropic does not use this data to train its models under our enterprise agreement</td>
           </tr>
           <tr>
+            <td><strong style="color:var(--text);">OpenAI</strong></td>
+            <td>Text-to-speech voice synthesis for your companion's spoken replies</td>
+            <td>The text of your companion's reply, which is sent to OpenAI to be converted into audio. Because your companion's replies respond to what you have told it, this text can contain personal information about you.</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Voyage AI</strong></td>
+            <td>Generating the vector embeddings that make long-term memory searchable</td>
+            <td>The text of memories extracted from your conversations — including names, goals, events, and personal context. This is among the most personal data we process.</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">Tavily</strong></td>
+            <td>Web search, when your companion needs current information to answer you</td>
+            <td>The search query your companion generates. That query is derived from your conversation and may contain details you shared.</td>
+          </tr>
+          <tr>
+            <td><strong style="color:var(--text);">HeyGen</strong></td>
+            <td>Hosts the avatar likeness of your companion and generates the photos she can share with you (Premium and above)</td>
+            <td><strong style="color:var(--text);">No user data of any kind is sent to HeyGen.</strong> Your companion's photos are created ahead of time from her own avatar and stored by us. Nothing about you, your conversations, or your memories leaves our systems for this feature.</td>
+          </tr>
+          <tr>
             <td><strong style="color:var(--text);">ElevenLabs</strong></td>
-            <td>Text-to-speech voice synthesis for companion audio output</td>
-            <td>AI-generated companion text to be converted to audio; no personal user data is shared</td>
+            <td>Voice catalogue only — retrieving the list of available companion voices</td>
+            <td>No user data and no conversation content is sent to ElevenLabs.</td>
           </tr>
           <tr>
             <td><strong style="color:var(--text);">Deepgram</strong></td>
@@ -412,7 +432,7 @@
         </tbody>
       </table>
 
-      <p>Each of these processors maintains their own privacy practices and security standards. We encourage you to review their policies. Links: <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase</a> · <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe</a> · <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener">Anthropic</a> · <a href="https://elevenlabs.io/privacy" target="_blank" rel="noopener">ElevenLabs</a> · <a href="https://deepgram.com/privacy" target="_blank" rel="noopener">Deepgram</a> · <a href="https://resend.com/privacy" target="_blank" rel="noopener">Resend</a>.</p>
+      <p>Each of these processors maintains their own privacy practices and security standards. We encourage you to review their policies. Links: <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase</a> · <a href="https://stripe.com/privacy" target="_blank" rel="noopener">Stripe</a> · <a href="https://www.anthropic.com/privacy" target="_blank" rel="noopener">Anthropic</a> · <a href="https://openai.com/policies/privacy-policy" target="_blank" rel="noopener">OpenAI</a> · <a href="https://www.voyageai.com/privacy" target="_blank" rel="noopener">Voyage AI</a> · <a href="https://tavily.com/privacy" target="_blank" rel="noopener">Tavily</a> · <a href="https://www.heygen.com/policy" target="_blank" rel="noopener">HeyGen</a> · <a href="https://elevenlabs.io/privacy" target="_blank" rel="noopener">ElevenLabs</a> · <a href="https://deepgram.com/privacy" target="_blank" rel="noopener">Deepgram</a> · <a href="https://resend.com/privacy" target="_blank" rel="noopener">Resend</a>.</p>
     </div>
     <div class="section-divider"></div>
 
@@ -450,7 +470,9 @@
 
       <p><strong style="color:var(--text);">Voice Input (Speech-to-Text).</strong> When you use voice input, your audio recording is transmitted in real time to Deepgram for transcription. The resulting text transcript is stored in our systems as part of your conversation history. We do not retain the raw audio recordings on our servers — audio is sent directly to Deepgram and the transcript is returned to us.</p>
 
-      <p><strong style="color:var(--text);">Voice Output (Text-to-Speech).</strong> When your companion speaks, the companion's text response is sent to ElevenLabs to generate an audio file. The audio is streamed to your device and is not permanently stored in your account. No personal data about you is included in the TTS request — only the companion's text.</p>
+      <p><strong style="color:var(--text);">Voice Output (Text-to-Speech).</strong> When your companion speaks, the text of its reply is sent to <strong style="color:var(--text);">OpenAI</strong> to be synthesised into audio. The audio is streamed to your device and is not permanently stored in your account. We want to be precise about what this means: the request contains your companion's words, not your account details — but because your companion is replying to you, its words can reflect personal things you have shared. We do not send your profile, your stored memories, or your conversation history to OpenAI.</p>
+
+      <p><strong style="color:var(--text);">Web Search.</strong> Your companion can search the web when it needs current information to answer you. In that case it generates a search query and sends it to <strong style="color:var(--text);">Tavily</strong>. That query is derived from your conversation and may contain details you shared. Only the query is sent — never your memories, your profile, or your conversation history.</p>
 
       <p><strong style="color:var(--text);">Consent.</strong> Voice features require explicit browser permission to access your microphone. You may revoke microphone permission at any time through your browser settings. Revoking permission disables voice input but does not affect text-based features.</p>
     </div>

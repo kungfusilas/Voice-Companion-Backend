@@ -27,7 +27,6 @@ export function PersonaSetup({ onCreated }: PersonaSetupProps) {
   const [traits, setTraits] = useState<string[]>([]);
   const [customTrait, setCustomTrait] = useState("");
   const [backstory, setBackstory] = useState("");
-  const [nsfw, setNsfw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,7 +52,7 @@ export function PersonaSetup({ onCreated }: PersonaSetupProps) {
         personality_traits: traits,
         backstory,
         custom_relationship: relationship === "custom" ? customRelationship : undefined,
-        nsfw_mode: nsfw,
+        nsfw_mode: false,
       });
       onCreated(persona);
     } catch (e: unknown) {
@@ -80,7 +79,7 @@ export function PersonaSetup({ onCreated }: PersonaSetupProps) {
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="e.g. Luna, Aeva, Kai…"
+          placeholder="e.g. Luna, Aeva, Ben…"
           className="bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-2 focus:ring-violet-500/50"
         />
       </div>
@@ -171,32 +170,6 @@ export function PersonaSetup({ onCreated }: PersonaSetupProps) {
           rows={2}
           className="resize-none bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none focus:ring-2 focus:ring-violet-500/50"
         />
-      </div>
-
-      {/* NSFW toggle */}
-      <div
-        onClick={() => setNsfw((v) => !v)}
-        className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition select-none ${
-          nsfw
-            ? "bg-red-950/40 border-red-800/50"
-            : "bg-white/5 border-white/10 hover:bg-white/8"
-        }`}
-      >
-        <div
-          className={`w-9 h-5 rounded-full relative transition-colors ${nsfw ? "bg-red-600" : "bg-white/20"}`}
-        >
-          <motion.div
-            className="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow"
-            animate={{ left: nsfw ? "calc(100% - 18px)" : "2px" }}
-            transition={{ type: "spring", stiffness: 500, damping: 30 }}
-          />
-        </div>
-        <div>
-          <p className={`text-sm font-medium ${nsfw ? "text-red-300" : "text-white/70"}`}>
-            Adult mode (18+)
-          </p>
-          <p className="text-xs text-white/35">Uses advanced AI for uncensored conversations</p>
-        </div>
       </div>
 
       {error && <p className="text-xs text-red-400 text-center">{error}</p>}

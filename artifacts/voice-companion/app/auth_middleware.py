@@ -25,6 +25,7 @@ _security = HTTPBearer(auto_error=False)
 
 _JWKS_CACHE: dict = {"entries": [], "fetched_at": 0.0}
 _CACHE_TTL = 3600.0  # re-fetch keys at most once per hour
+_ALLOWED_ALGS = ["ES256", "RS256"]
 _jwks_lock = asyncio.Lock()
 
 
@@ -118,7 +119,14 @@ async def verify_token(
         )
 
     kid = header.get("kid")
+    # SECURITY: never trust the alg in the unverified token header.
     alg = header.get("alg", "ES256")
+    if alg not in _ALLOWED_ALGS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
     keys = await _get_public_keys()
     if not keys:
@@ -134,7 +142,7 @@ async def verify_token(
             payload = jwt.decode(
                 token,
                 public_key,
-                algorithms=[alg],
+                algorithms=_ALLOWED_ALGS,
                 audience="authenticated",
             )
             user_id: str | None = payload.get("sub")
