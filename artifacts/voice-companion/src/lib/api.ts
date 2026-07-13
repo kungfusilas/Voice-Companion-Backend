@@ -437,7 +437,10 @@ export async function requestSelfie(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ companion_id, user_id, ...(scene ? { scene } : {}) }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const { code, detail } = await _parseErrorBody(res);
+    throw new ApiError(res.status, code, detail);
+  }
   return URL.createObjectURL(await res.blob());
 }
 

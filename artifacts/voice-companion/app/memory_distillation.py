@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 import httpx
 import anthropic
 
-from app import entitlements
+from app.routers import entitlements
 
 logger = logging.getLogger(__name__)
 

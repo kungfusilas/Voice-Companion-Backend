@@ -96,31 +96,7 @@ export function JourneyPanel({ companionId, companionName, onClose }: JourneyPan
           </div>
         ) : (
           <>
-            {/* Bond level card */}
-            <div
-              className="rounded-2xl border border-white/08 p-4 space-y-3"
-              style={{ background: "rgba(255,255,255,0.03)" }}
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-white/40 text-[11px] uppercase tracking-wider mb-0.5">Bond with {companionName}</div>
-                  <div className={`text-lg font-bold ${colors.label}`}>{bondLevel}</div>
-                </div>
-                <div
-                  className="text-2xl font-bold tabular-nums"
-                  style={{ color: "rgba(255,255,255,0.85)" }}
-                >
-                  {bondScore}
-                </div>
-              </div>
-              <ProgressBar value={scoreBarPct} max={100} colorClass={colors.bar} />
-              <div className="flex justify-between text-[10px] text-white/25">
-                <span>Warming</span>
-                <span>Warm · 25</span>
-                <span>Close · 65</span>
-                <span>Closest · 85</span>
-              </div>
-            </div>
+
 
             {/* Progress summary */}
             <div className="text-center">

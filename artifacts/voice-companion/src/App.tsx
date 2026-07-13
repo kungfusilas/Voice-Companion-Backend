@@ -359,7 +359,7 @@ export default function App() {
             <ChatPage
               key={`chat-${persona.id}`}
               persona={persona}
-              relType="friendship"
+              relType={persona.relationship_type}
               userId={userId}
               onBack={handleBack}
               onChangeRelType={handleBack}
