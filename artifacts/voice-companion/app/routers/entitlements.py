@@ -8,8 +8,11 @@ from typing import Optional
 router = APIRouter()
 
 PLAN_CAPS = {
+    # Must be >= usage_config.ALLOWANCES[tier]["msgs"] (what the usage meter
+    # shows) so this secondary cap never blocks a user below their displayed
+    # allowance. Basic was 500 while the meter showed 600 — bug fixed here.
     "free": 75,
-    "basic": 500,
+    "basic": 600,
     "premium": 1500,
     "power": 3500,
 }

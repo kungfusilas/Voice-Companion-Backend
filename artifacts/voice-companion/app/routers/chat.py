@@ -34,6 +34,43 @@ from app.usage import check_message_quota
 
 router = APIRouter()
 
+# ── Chat rate limiting (IP-keyed) ─────────────────────────────────────────────
+# /api/chat is guest-accessible and calls Claude on every request, so without a
+# throttle a single client (or a guest rotating X-Guest-ID) can drive unbounded
+# API cost. Per-process fixed-window limiter keyed on the real client IP
+# (X-Forwarded-For behind the Replit proxy). First line of defense — pair with a
+# CDN/Turnstile challenge for stronger protection. Tune via CHAT_RATE_LIMIT_PER_MIN.
+import time as _time
+_CHAT_RL: dict[str, tuple[int, float]] = {}
+_CHAT_RL_MAX = int(os.environ.get("CHAT_RATE_LIMIT_PER_MIN", "40"))
+_CHAT_RL_WINDOW = 60.0
+
+
+def _client_ip(req: Request) -> str:
+    xff = req.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return req.client.host if req.client else "unknown"
+
+
+def _check_chat_rate_limit(req: Request) -> None:
+    ip = _client_ip(req)
+    now = _time.monotonic()
+    count, start = _CHAT_RL.get(ip, (0, now))
+    if now - start >= _CHAT_RL_WINDOW:
+        count, start = 0, now
+    count += 1
+    _CHAT_RL[ip] = (count, start)
+    if len(_CHAT_RL) > 20000:  # bound memory: drop expired buckets
+        for k in [k for k, (_, s) in list(_CHAT_RL.items()) if now - s >= _CHAT_RL_WINDOW]:
+            _CHAT_RL.pop(k, None)
+    if count > _CHAT_RL_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "rate_limited", "message": "Too many requests — please slow down and try again in a moment."},
+        )
+
+
 _WAITLIST_TRIGGERS = [
     "being unlocked",
     "door between us",
@@ -212,7 +249,12 @@ async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) 
                         # Fail open: log and continue.
                         _chat_logger.warning("entitlements increment_session failed (continuing) user=%.8s: %s", user_id, e)
 
-    await _enforce_message_cap(user_id)
+    # NOTE: the per-session message cap is intentionally NOT enforced. The
+    # frontend session_id is a stable useId() for the page's lifetime, so a
+    # per-session counter would block an engaged user mid-conversation (e.g.
+    # Power at 100 msgs) far below their advertised monthly allowance, with no
+    # obvious recovery. The monthly caps (check_message_quota / _check_monthly_cap)
+    # are the real, advertised limits and remain enforced.
 
 
 async def _enforce_message_cap(user_id: str) -> None:
@@ -1109,6 +1151,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
 
 
 async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONResponse:
+    _check_chat_rate_limit(req)
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -1278,6 +1321,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         {"type": "error",     "message": "..."}
     """
     _chat_logger.info(f"[REQUEST] user={user_id} endpoint=chat_stream method=POST")
+    _check_chat_rate_limit(req)
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
