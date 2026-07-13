@@ -21,8 +21,8 @@ import jwt as pyjwt
 import websockets
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-from app.auth_middleware import _get_public_keys
-from app.usage import check_voice_quota, get_user_tier
+from app.auth_middleware import _get_public_keys, _ALLOWED_ALGS
+from app.usage import check_voice_quota, get_user_tier, get_usage_status
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -57,14 +57,14 @@ async def _verify_ws_token(token: str) -> str:
         raise ValueError("invalid token")
 
     kid = header.get("kid")
-    alg = header.get("alg", "ES256")
+    # Pin accepted algorithms — never trust the token header's `alg` (alg-confusion).
     keys = await _get_public_keys()
     candidates = [k for kid2, k in keys if kid2 == kid] or [k for _, k in keys]
 
     for pub_key in candidates:
         try:
             payload = pyjwt.decode(
-                token, pub_key, algorithms=[alg], audience="authenticated"
+                token, pub_key, algorithms=list(_ALLOWED_ALGS), audience="authenticated"
             )
             user_id: str | None = payload.get("sub")
             if not user_id:
@@ -80,11 +80,37 @@ async def _verify_ws_token(token: str) -> str:
 
 # ── Quota deduction (fire-and-forget, non-fatal) ──────────────────────────────
 
-async def _deduct(user_id: str, tier: str, secs: int, session_id: str) -> None:
+async def _deduct(user_id: str, tier: str, secs: int, session_id: str) -> bool:
+    """Deduct voice seconds. Returns False when the user is out of quota
+    (HTTP 402 from check_voice_quota) so the caller can close the stream.
+    Any other error fails open (returns True) — never bill-block on a transient
+    backend hiccup."""
+    from fastapi import HTTPException as _HTTPException
     try:
         await check_voice_quota(user_id, tier, secs, session_id or None)
+        return True
+    except _HTTPException as exc:
+        if exc.status_code == 402:
+            return False
+        return True
     except Exception:
-        pass
+        return True
+
+
+async def _has_voice_quota(user_id: str, tier: str) -> bool:
+    """Best-effort pre-flight check: does the user have any voice seconds left?
+    Fails open (returns True) on any read error so a backend blip never blocks
+    a paying user."""
+    try:
+        status = await get_usage_status(user_id, tier)
+        remaining = (
+            (status.get("voice_allowance") or 0)
+            + (status.get("topup_voice_seconds") or 0)
+            - (status.get("voice_seconds_used") or 0)
+        )
+        return remaining > 0
+    except Exception:
+        return True
 
 
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
@@ -118,6 +144,17 @@ async def stt_stream(
     if tier not in PAID_TIERS:
         logger.warning("WS tier rejected: uid=%s tier=%s", user_id[:8], tier)
         await websocket.close(code=4003, reason="paid account required")
+        return
+
+    # Pre-flight quota gate: don't even open the Deepgram session if the user
+    # has already exhausted their voice seconds for the period.
+    if not await _has_voice_quota(user_id, tier):
+        logger.info("WS quota exhausted at connect: uid=%s", user_id[:8])
+        await websocket.send_json({
+            "type": "quota_exceeded",
+            "message": "You've used all your voice minutes for this period.",
+        })
+        await websocket.close(code=4029, reason="voice quota exhausted")
         return
 
     await websocket.send_json({
@@ -241,9 +278,19 @@ async def stt_stream(
                                         ))
                                     else:
                                         dur = 1
-                                    asyncio.create_task(
-                                        _deduct(user_id, tier, dur, session_id)
-                                    )
+                                    # Enforce quota inline: if this deduction
+                                    # exhausts the balance, notify the client and
+                                    # break so the whole session tears down.
+                                    ok = await _deduct(user_id, tier, dur, session_id)
+                                    if not ok:
+                                        try:
+                                            await websocket.send_json({
+                                                "type": "quota_exceeded",
+                                                "message": "You've used all your voice minutes for this period.",
+                                            })
+                                        except Exception:
+                                            pass
+                                        break
                         except Exception:
                             pass
                 except Exception:

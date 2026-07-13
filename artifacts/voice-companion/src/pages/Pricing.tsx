@@ -21,7 +21,7 @@ const PLANS = [
     key: "basic",
     name: "Basic",
     description: "Perfect for getting started",
-    features: ["Both companions", "Voice & text chat", "Long-term memory", "Daily check-ins", "Companion-initiated check-ins", "Activity games", "Bond Score"],
+    features: ["Both companions", "Voice & text chat", "60 voice-minutes / month", "Long-term memory", "Daily check-ins", "Companion-initiated check-ins", "Activity games", "Bond Score"],
     accent: "violet",
     gradient: "from-violet-600/20 to-violet-900/10",
     border: "border-violet-500/30",
@@ -95,7 +95,7 @@ const TIER_COLORS: Record<string, string> = {
 // ── Feature tooltip info ──────────────────────────────────────────────────────
 
 const FEATURE_INFO: Record<string, string> = {
-  "Both companions":        "Choose from Aeva or Kai. Each companion has a unique personality, voice, and way of connecting. Find the one that feels right.",
+  "Both companions":        "Choose from Aeva or Ben. Each companion has a unique personality, voice, and way of connecting. Find the one that feels right.",
   "Voice & text chat":      "Your companion speaks to you in her own voice. Talk back by text — she listens, responds, and remembers.",
   "Long-term memory":       "Your companion remembers what you share across sessions. You never have to repeat yourself.",
   "Daily check-ins":        "Your companion reaches out each day — a simple moment of connection to start or end your day.",

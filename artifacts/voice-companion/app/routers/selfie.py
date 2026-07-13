@@ -1,42 +1,40 @@
-import os
-import base64
+"""
+Companion selfies - served instantly from a HeyGen-generated warm pool.
+
+The original implementation asked Venice's /image/generate for a photo from a
+prose description of the companion. That API takes no reference image, so it
+could not reproduce a specific face - it invented a new person on every call.
+
+Aeva and Ben are HeyGen avatars and HeyGen holds a trained LoRA of each, so it
+is the only system that can render their real faces in new settings. Look
+generation is async, so we generate ahead into a pool (selfie_pool.py) and serve
+from it here - instant, and always the real face.
+
+Gating unchanged: Premium+, 2 message credits, and the companion-initiated offer
+still runs off the casual-mood + cooldown logic in routers/chat.py.
+"""
+from __future__ import annotations
+
+import logging
+import random
+
 import httpx
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
+
+from app import selfie_pool
 from app.auth_middleware import verify_token
 from app.routers.tier_check import require_premium
 from app.usage import check_message_quota, get_user_tier
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-_VENICE_IMAGE_URL = "https://api.venice.ai/api/v1/image/generate"
-_VENICE_IMAGE_MODEL = "flux-2-max"
+_recent: dict[str, list[str]] = {}
+_RECENT_KEEP = 5
 
-# Prompts are written from the actual companion avatar images — descriptions must
-# match what the user sees on the companion-select screen exactly.
-_COMPANION_BASE_PROMPTS: dict[str, str] = {
-    # Aeva: East Asian woman, long sleek straight black hair with middle part, NO bangs,
-    # light brown eyes, defined arched brows, cat-eye liner, small stud earrings, polished glamorous editorial style
-    "companion-aeva": (
-        "photorealistic selfie portrait of an East Asian woman in her mid-twenties, "
-        "long sleek straight jet-black hair with a clean center middle part, no bangs, "
-        "light brown almond-shaped eyes, defined arched dark brows, subtle cat-eye liner, "
-        "small diamond stud earrings, porcelain light skin, polished editorial makeup, "
-        "glamorous confident composed expression, sophisticated high-fashion style, "
-        "black turtleneck, soft even studio-quality lighting, "
-        "looking directly at camera, sharp focus, ultra-detailed, editorial selfie"
-    ),
-    # Kai: white man, short brown hair, chiseled jaw, brown eyes, confident smile
-    "companion-kai": (
-        "photorealistic selfie portrait of a white man in his early thirties, "
-        "short neatly styled brown hair with slight texture, brown eyes, "
-        "strong defined chiseled jawline, clean-shaven, light complexion with slight tan, "
-        "confident charming subtle smile, athletic build, dark black v-neck t-shirt, "
-        "natural studio lighting, looking directly at camera, "
-        "sharp focus, ultra-detailed, natural selfie"
-    ),
-}
+_DECLINE = "I'd love to send one, but I can't right now - ask me again in a bit?"
 
 
 class SelfieRequest(BaseModel):
@@ -45,20 +43,32 @@ class SelfieRequest(BaseModel):
     scene: str | None = None
 
 
+def _pick(entries: list[dict], scene: str, user_id: str) -> dict | None:
+    """Choose the pool entry whose tags best fit the moment, avoiding repeats."""
+    if not entries:
+        return None
+
+    seen = _recent.get(user_id, [])
+    fresh = [e for e in entries if e.get("storage_path") not in seen] or entries
+
+    words = {w.strip(".,!?'\"") for w in scene.lower().split() if len(w) > 2}
+    if words:
+        scored = [(len(words & {t.lower() for t in (e.get("tags") or [])}), e) for e in fresh]
+        best = max(s for s, _ in scored)
+        if best > 0:
+            fresh = [e for s, e in scored if s == best]
+
+    return random.choice(fresh)
+
+
 @router.post("")
 async def generate_selfie(
     request: SelfieRequest,
     auth_user_id: str = Depends(verify_token),
 ):
-    """
-    Generate an AI selfie for a companion using Venice image generation. Premium+.
-    Accepts an optional `scene` string to blend context into the image prompt.
-    Returns raw image bytes as image/jpeg. Costs 2 message credits.
-    POST /api/selfie
-    """
+    """Serve a companion selfie from the warm pool. Premium+. Costs 2 message credits."""
     await require_premium(auth_user_id)
 
-    # Selfie generation costs 2 message credits
     tier, _ = await get_user_tier(auth_user_id)
     try:
         await check_message_quota(auth_user_id, tier, None)
@@ -70,77 +80,50 @@ async def generate_selfie(
             detail={
                 **base_detail,
                 "code": "selfie_quota",
-                "decline_message": "I'd love to, but I've hit my limit for this month — catch me next time? 📸",
+                "decline_message": "I'd love to, but I've hit my limit for this month - catch me next time?",
             },
         ) from quota_exc
 
-    base_prompt = _COMPANION_BASE_PROMPTS.get(request.companion_id)
-    if not base_prompt:
+    entries = await selfie_pool.ready_for(request.companion_id)
+    if not entries:
+        logger.error(
+            "selfie: pool is empty for %r - is HEYGEN_GROUP_* set and has top_up/sync run?",
+            request.companion_id,
+        )
         raise HTTPException(
-            status_code=404,
-            detail=f"No selfie prompt for companion '{request.companion_id}'",
+            status_code=503,
+            detail={"code": "selfie_unavailable", "decline_message": _DECLINE},
         )
 
-    # Blend optional scene context into the base identity prompt
-    scene = (request.scene or "").strip()
-    prompt = f"{base_prompt}, {scene}" if scene else base_prompt
+    chosen = _pick(entries, (request.scene or "").strip(), auth_user_id)
+    if not chosen:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "selfie_unavailable", "decline_message": _DECLINE},
+        )
 
-    api_key = os.environ.get("VENICE_API_KEY", "").strip()
-    if not api_key:
-        raise HTTPException(status_code=503, detail="Image generation not configured")
-
+    path = chosen["storage_path"]
     try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            resp = await client.post(
-                _VENICE_IMAGE_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model":          _VENICE_IMAGE_MODEL,
-                    "prompt":         prompt,
-                    "width":          1024,
-                    "height":         1024,
-                    "steps":          20,
-                    "safe_mode":      False,
-                    "hide_watermark": True,
-                    "return_binary":  False,
-                },
-            )
-
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(selfie_pool.public_url(path))
         if resp.status_code != 200:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Image generation failed ({resp.status_code}): {resp.text[:200]}",
-            )
-
-        data = resp.json()
-        images = data.get("images", [])
-        if not images:
-            raise HTTPException(status_code=502, detail="No image returned from generation service")
-
-        # Venice returns images as a list of base64 strings or dicts with url/b64_json
-        first = images[0]
-        if isinstance(first, str):
-            img_bytes = base64.b64decode(first)
-        elif isinstance(first, dict):
-            b64 = first.get("b64_json") or first.get("url", "")
-            if b64.startswith("data:"):
-                b64 = b64.split(",", 1)[1]
-            img_bytes = base64.b64decode(b64)
-        else:
-            raise HTTPException(status_code=502, detail="Unexpected image format from generation service")
-
-        return Response(
-            content=img_bytes,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "no-store"},
+            raise RuntimeError(f"storage fetch {resp.status_code}")
+        img = resp.content
+    except Exception as exc:
+        logger.error("selfie: fetch failed for %r: %r", path, exc)
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "selfie_unavailable", "decline_message": _DECLINE},
         )
 
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Image generation timed out — try again")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+    hist = _recent.setdefault(auth_user_id, [])
+    hist.append(path)
+    del hist[:-_RECENT_KEEP]
+
+    logger.info("selfie: served %s to user=%s (scene=%r)", path, auth_user_id, request.scene)
+
+    return Response(
+        content=img,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )

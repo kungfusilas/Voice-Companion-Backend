@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse, JSONResponse
 from app.models import ChatMessage, ChatRequest, ChatResponse
-from app import store, claude, venice_client
+from app import store, claude
 from app import memory as mem_store
 from app import memory_extractor
 from app import bond_analyzer
@@ -45,10 +45,6 @@ _WAITLIST_TRIGGERS = [
 def _should_prompt_waitlist(text: str) -> bool:
     lower = text.lower()
     return any(phrase in lower for phrase in _WAITLIST_TRIGGERS)
-
-
-def _use_venice(persona_nsfw: bool, request_nsfw: bool) -> bool:
-    return persona_nsfw or request_nsfw
 
 
 async def _generate_tts_audio(text: str) -> str | None:
@@ -138,10 +134,14 @@ def _entitlement_lock(user_id: str) -> asyncio.Lock:
 async def _bg(coro, timeout: float = 20.0) -> None:
     """Guard fire-and-forget tasks: 20s timeout, swallow errors.
     Prevents task accumulation from starving the event loop."""
+    name = getattr(coro, "cr_code", None)
+    name = getattr(name, "co_name", None) or repr(coro)
     try:
         await asyncio.wait_for(coro, timeout=timeout)
-    except Exception:
-        pass
+    except asyncio.TimeoutError:
+        _chat_logger.warning("background task timed out after %.0fs: %s", timeout, name)
+    except Exception as exc:
+        _chat_logger.warning("background task failed: %s - %r", name, exc, exc_info=True)
 
 
 async def _guard(coro, timeout: float, default):
@@ -1137,6 +1137,13 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     # Try the exact session first; fall back to recent cross-session messages if it's new.
     if not store.get_history(request.session_id) and not is_guest:
         _info = await conversation_store.get_session_info(request.session_id)
+        # SECURITY: session_id is client-supplied. Only restore history from a
+        # session this caller actually owns.
+        if _info and _info.get("user_id") != user_id:
+            _chat_logger.warning(
+                "session ownership mismatch: user=%s requested session owned by=%s - ignoring",
+                user_id, _info.get("user_id"))
+            _info = None
         _recent = _info["messages"] if _info else await conversation_store.get_recent_messages(user_id, persona.id, limit=10)
         for _m in _recent:
             store.append_message(request.session_id, ChatMessage(role=_m["role"], content=_m["content"]))
@@ -1160,7 +1167,6 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
         relationship_ctx = await _get_relationship_context(user_id)
         if relationship_ctx:
             system_prompt = relationship_ctx + "\n\n" + system_prompt
-    use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     cleaned_b64: str | None = None
     if request.image_base64:
@@ -1168,21 +1174,14 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
         if cleaned_b64 and len(cleaned_b64) > 14_000_000:  # ~10MB decoded cap
             cleaned_b64 = None
 
-    if use_venice:
-        reply = await venice_client.send_message(
-            system_prompt=system_prompt,
-            history=history,
-            user_message=request.message,
-        )
-    else:
-        reply = await claude.send_message(
-            system_prompt=system_prompt,
-            history=history,
-            user_message=request.message,
-            model=claude_model,
-            image_base64=cleaned_b64,
-            image_url=request.image_url if not cleaned_b64 else None,
-        )
+    reply = await claude.send_message(
+        system_prompt=system_prompt,
+        history=history,
+        user_message=request.message,
+        model=claude_model,
+        image_base64=cleaned_b64,
+        image_url=request.image_url if not cleaned_b64 else None,
+    )
 
     store.append_message(request.session_id, ChatMessage(role="user", content=request.message))
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
@@ -1200,7 +1199,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
             persona_id=request.persona_id,
             reply=reply,
             message_count=len(store.get_history(request.session_id)),
-            model_backend="venice" if use_venice else "claude",
+            model_backend="claude",
             voice_available=True,
             usage=_usage_payload(usage),
         )
@@ -1250,7 +1249,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
         persona_id=request.persona_id,
         reply=reply,
         message_count=len(store.get_history(request.session_id)),
-        model_backend="venice" if use_venice else "claude",
+        model_backend="claude",
         connection_score=new_score,
         score_delta=delta,
         relationship_type=rel_type,
@@ -1307,6 +1306,13 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     # Try the exact session first; fall back to recent cross-session messages if it's new.
     if not store.get_history(request.session_id) and not is_guest:
         _info = await conversation_store.get_session_info(request.session_id)
+        # SECURITY: session_id is client-supplied. Only restore history from a
+        # session this caller actually owns.
+        if _info and _info.get("user_id") != user_id:
+            _chat_logger.warning(
+                "session ownership mismatch: user=%s requested session owned by=%s - ignoring",
+                user_id, _info.get("user_id"))
+            _info = None
         _recent = _info["messages"] if _info else await conversation_store.get_recent_messages(user_id, persona.id, limit=10)
         for _m in _recent:
             store.append_message(
@@ -1333,7 +1339,6 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         relationship_ctx = await _get_relationship_context(user_id)
         if relationship_ctx:
             system_prompt = relationship_ctx + "\n\n" + system_prompt
-    use_venice = _use_venice(persona.nsfw_mode, request.nsfw_mode)
 
     cleaned_b64: str | None = None
     if request.image_base64:
@@ -1398,15 +1403,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                 model=claude_model,
             )
         else:
-            stream_iter = (
-                venice_client.stream_message(
-                    system_prompt=system_prompt, history=history, user_message=user_message,
-                ) if use_venice else
-                claude.stream_message(
-                    system_prompt=system_prompt, history=history, user_message=user_message,
-                    model=claude_model,
-                    image_base64=cleaned_b64,
-                )
+            stream_iter = claude.stream_message(
+                system_prompt=system_prompt, history=history, user_message=user_message,
+                model=claude_model,
+                image_base64=cleaned_b64,
             )
         async for chunk in stream_iter:
             try:
@@ -1420,7 +1420,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         ChatMessage(role="assistant", content=full_text),
                     )
                     payload["message_count"] = len(store.get_history(request.session_id))
-                    payload["model_backend"] = "venice" if use_venice else "claude"
+                    payload["model_backend"] = "claude"
                     payload["voice_available"] = True
                     payload["usage"] = _usage_payload(usage)
                     # TTS for all tiers (fail-open: None if generation fails)

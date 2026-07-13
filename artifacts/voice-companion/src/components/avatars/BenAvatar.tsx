@@ -1,26 +1,26 @@
-export function KaiAvatar({ size = 120 }: { size?: number }) {
+export function BenAvatar({ size = 120 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
       <defs>
-        <radialGradient id="kai-bg" cx="50%" cy="50%" r="50%">
+        <radialGradient id="ben-bg" cx="50%" cy="50%" r="50%">
           <stop offset="0%" stopColor="#38bdf8" stopOpacity="0.3" />
           <stop offset="100%" stopColor="#0c4a6e" stopOpacity="0.15" />
         </radialGradient>
-        <radialGradient id="kai-skin" cx="50%" cy="40%" r="60%">
+        <radialGradient id="ben-skin" cx="50%" cy="40%" r="60%">
           <stop offset="0%" stopColor="#fde8d0" />
           <stop offset="100%" stopColor="#f4c8a0" />
         </radialGradient>
-        <clipPath id="kai-circle">
+        <clipPath id="ben-circle">
           <circle cx="60" cy="60" r="58" />
         </clipPath>
       </defs>
 
-      <circle cx="60" cy="60" r="58" fill="url(#kai-bg)" />
+      <circle cx="60" cy="60" r="58" fill="url(#ben-bg)" />
       <circle cx="60" cy="60" r="58" stroke="#38bdf8" strokeWidth="1.5" strokeOpacity="0.4" />
 
-      <g clipPath="url(#kai-circle)">
+      <g clipPath="url(#ben-circle)">
         {/* Neck — wider/stronger for male */}
-        <rect x="47" y="90" width="26" height="20" rx="5" fill="url(#kai-skin)" />
+        <rect x="47" y="90" width="26" height="20" rx="5" fill="url(#ben-skin)" />
 
         {/* Shoulders — broader */}
         <ellipse cx="60" cy="118" rx="44" ry="18" fill="#0a1a2e" />
@@ -32,7 +32,7 @@ export function KaiAvatar({ size = 120 }: { size?: number }) {
         <rect x="80" y="52" width="10" height="22" rx="3" fill="#3a2010" />
 
         {/* Head — more angular/square jaw for male */}
-        <path d="M34 64 Q34 90 40 94 Q50 100 60 100 Q70 100 80 94 Q86 90 86 64 Q86 40 60 38 Q34 40 34 64Z" fill="url(#kai-skin)" />
+        <path d="M34 64 Q34 90 40 94 Q50 100 60 100 Q70 100 80 94 Q86 90 86 64 Q86 40 60 38 Q34 40 34 64Z" fill="url(#ben-skin)" />
 
         {/* Jaw line — stronger */}
         <path d="M40 88 Q50 96 60 97 Q70 96 80 88" stroke="#e8c090" strokeWidth="1" fill="none" opacity="0.3" />

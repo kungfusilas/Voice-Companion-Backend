@@ -8,6 +8,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from app.rate_limit import limiter
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from app import selfie_pool
 
 from app.routers import chat, personas, sessions, memories
 from app.routers import import_memories
@@ -74,7 +79,12 @@ async def lifespan(app: FastAPI):
         companion.system_prompt_override = build_system_prompt(companion)
         store.create_persona(companion)
 
-    scheduler = AsyncIOScheduler()
+    # Only ONE instance may run cron jobs; on autoscale set ENABLE_SCHEDULER=0
+    # on all but one instance to avoid duplicate notifications.
+    _scheduler_enabled = os.environ.get("ENABLE_SCHEDULER", "1") == "1"
+    scheduler = AsyncIOScheduler(
+        job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 300},
+    )
     scheduler.add_job(
         proactive.check_and_send_proactive_messages,
         "interval",
@@ -130,12 +140,29 @@ async def lifespan(app: FastAPI):
         id="push_reengagement",
         replace_existing=True,
     )
-    scheduler.start()
-    logger.info("Schedulers started: proactive + daily activity + morning check-in + push notifications")
+    # Selfie pool: keep a warm set of HeyGen looks so a selfie serves instantly.
+    # Both jobs no-op if HEYGEN_API_KEY is unset.
+    scheduler.add_job(
+        selfie_pool.top_up_pool,
+        "cron", hour=4, minute=0,
+        id="selfie_pool_top_up", replace_existing=True,
+    )
+    scheduler.add_job(
+        selfie_pool.sync_pool,
+        "interval", minutes=10,
+        id="selfie_pool_sync", replace_existing=True,
+    )
+
+    if _scheduler_enabled:
+        scheduler.start()
+        logger.info("Schedulers started: proactive + daily activity + morning check-in + push notifications")
+    else:
+        logger.info("Scheduler disabled (ENABLE_SCHEDULER=0) -- another instance owns cron jobs")
 
     yield
 
-    scheduler.shutdown(wait=False)
+    if _scheduler_enabled:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(
@@ -143,6 +170,10 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Rate limiting (slowapi): routes opt in via @limiter.limit(...).
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Explicit origin allowlist — wildcard + credentials is invalid per Fetch spec
 # and exposes the service to cross-origin abuse.

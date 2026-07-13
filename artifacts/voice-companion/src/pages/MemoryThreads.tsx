@@ -5,7 +5,7 @@ import type { Persona } from "@/lib/api";
 
 const PERSONA_IDS = [
   { id: "companion-aeva",  name: "Aeva",  color: "rgba(167,139,250,0.6)" },
-  { id: "companion-kai",   name: "Kai",   color: "rgba(56,189,248,0.5)"  },
+  { id: "companion-ben",   name: "Ben",   color: "rgba(56,189,248,0.5)"  },
 ];
 
 interface MemoryRow {

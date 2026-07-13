@@ -11,10 +11,11 @@ Endpoints:
 import os
 import httpx
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.auth_middleware import verify_token
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -61,7 +62,8 @@ class OAuthVerifyRequest(BaseModel):
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/signup")
-async def signup(req: SignupRequest):
+@limiter.limit("5/minute")
+async def signup(request: Request, req: SignupRequest):
     """
     Create a new user via the standard Supabase signup endpoint.
     Supabase sends a branded verification email; the user must click the link
@@ -97,7 +99,8 @@ async def signup(req: SignupRequest):
 
 
 @router.post("/login")
-async def login(req: LoginRequest):
+@limiter.limit("10/minute")
+async def login(request: Request, req: LoginRequest):
     """
     Sign in with email + password.
     Returns access_token, refresh_token, expires_in, and basic user info.
@@ -128,7 +131,8 @@ async def login(req: LoginRequest):
 
 
 @router.post("/refresh")
-async def refresh(req: RefreshRequest):
+@limiter.limit("30/minute")
+async def refresh(request: Request, req: RefreshRequest):
     """
     Exchange a refresh_token for a new access_token.
     """
@@ -154,13 +158,14 @@ async def refresh(req: RefreshRequest):
 
 
 @router.post("/oauth")
-async def oauth_verify(req: OAuthVerifyRequest):
+@limiter.limit("20/minute")
+async def oauth_verify(request: Request, req: OAuthVerifyRequest):
     """
     Verify a Supabase OAuth access_token (issued after Google / Apple sign-in
     handled client-side by @supabase/supabase-js). Validates the JWT signature
     via the JWKS endpoint and returns the user's id and email.
     """
-    from app.auth_middleware import _get_public_keys
+    from app.auth_middleware import _get_public_keys, _ALLOWED_ALGS
     import jwt as _jwt
 
     keys = await _get_public_keys()
@@ -173,7 +178,7 @@ async def oauth_verify(req: OAuthVerifyRequest):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid token")
 
     kid = header.get("kid")
-    alg = header.get("alg", "ES256")
+    # Pin accepted algorithms — never trust the token header's `alg` (alg-confusion).
     candidates = [k for k_id, k in keys if k_id == kid] or [k for _, k in keys]
 
     for public_key in candidates:
@@ -181,7 +186,7 @@ async def oauth_verify(req: OAuthVerifyRequest):
             payload = _jwt.decode(
                 req.access_token,
                 public_key,
-                algorithms=[alg],
+                algorithms=list(_ALLOWED_ALGS),
                 audience="authenticated",
             )
             return {

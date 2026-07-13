@@ -7,23 +7,18 @@ from pydantic import BaseModel
 from app import store
 from app import elevenlabs_client
 from app import openai_tts_client
-from app.elevenlabs_client import (
-    DEFAULT_MODEL_ID,
-    ElevenLabsError,
-    build_voice_settings_for_register,
-)
+from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError
 from app.openai_tts_client import OpenAITTSError
-from app.auth_middleware import verify_token_or_guest
+from app.auth_middleware import verify_token, verify_token_or_guest
 from app.usage import check_voice_quota, get_user_tier
 from app.routers.tier_check import is_premium_or_higher, is_power_or_higher
 
 router = APIRouter()
 logger = logging.getLogger("tts")
 
-# Hard timeouts for TTS providers. A stalled provider call can hang without ever
-# raising an exception, which freezes the client. These caps guarantee we fall
-# back to text-only (voice_available: false) instead of waiting forever.
-_ELEVEN_TIMEOUT = 12.0
+# Hard timeout for the TTS provider. A stalled provider call can hang without
+# ever raising an exception, which freezes the client. This cap guarantees we
+# fall back to text-only (voice_available: false) instead of waiting forever.
 _OPENAI_TIMEOUT = 10.0
 
 
@@ -77,8 +72,6 @@ def sanitize_for_tts(text: str) -> str:
     """Strip LLM action descriptors that TTS would vocalise literally.
 
     Removes patterns like *laughs*, [sighs softly], (chuckles), etc.
-    Intentional ElevenLabs audio tags injected later by _inject_el_tags()
-    are unaffected — they are added after this step.
     """
     cleaned = _ACTION_DESCRIPTOR_RE.sub("", text)
     cleaned = re.sub(r" {2,}", " ", cleaned)
@@ -115,86 +108,6 @@ def _strip_non_speakable(text: str) -> str:
     return cleaned.strip()
 
 
-# ── Emotional register detection ───────────────────────────────────────────────
-
-_HEAVY_SIGNALS = [
-    "that's hard", "that must be", "i'm so sorry", "that hurts", "must be tough",
-    "sounds like a lot", "struggling", "grief", "loss", "afraid", "worried",
-    "scared", "exhausted", "drained", "can't stop", "breaking", "overwhelmed",
-    "rough day", "hard day", "hard time", "been hard", "really hard",
-    "miss you", "missed you", "missing you", "i hear you", "i see you",
-    "makes sense you'd feel", "that's a lot to carry", "not easy",
-]
-
-_PLAYFUL_SIGNALS = [
-    "haha", "lol", "lmao", "omg", "wait what", "no way", "seriously?",
-    "that's hilarious", "that's amazing", "genius", "finally", "love that",
-    "i love that", "oh wow", "oh my", "get out of here", "stop it",
-]
-
-_INTIMATE_SIGNALS = [
-    "just between", "i've been thinking", "honestly,", "can i tell you",
-    "between you and me", "i have to admit", "truth is,", "to be honest,",
-]
-
-
-def _detect_register(text: str) -> str:
-    """
-    Classify a TTS text snippet into one of four emotional registers for voice delivery.
-    Returns: "heavy" | "playful" | "intimate" | "warm" (default).
-
-    Detection is heuristic — lightweight, zero-latency, and deterministic.
-    Only the CLEAN spoken text arrives here (tags/markdown already stripped by frontend).
-    """
-    lower = text.lower()
-    char_len = len(text.strip())
-    exclamation_count = text.count("!")
-
-    heavy_hits = sum(1 for s in _HEAVY_SIGNALS if s in lower)
-    playful_hits = sum(1 for s in _PLAYFUL_SIGNALS if s in lower)
-    intimate_hit = (
-        char_len < 130
-        and any(p in lower for p in _INTIMATE_SIGNALS)
-    )
-
-    if heavy_hits >= 2 or (heavy_hits >= 1 and exclamation_count == 0 and char_len > 40):
-        return "heavy"
-    if playful_hits >= 1 or exclamation_count >= 3:
-        return "playful"
-    if intimate_hit:
-        return "intimate"
-    return "warm"
-
-
-def _inject_el_tags(text: str, register: str) -> str:
-    """
-    Insert at most one ElevenLabs audio tag at a natural break point.
-
-    Rules:
-      heavy   → prepend [sighs] — voice sighs before the empathetic reply
-      playful → append [laughs] after the first exclamatory moment
-      intimate/warm → no tag; VoiceSettings carry the register instead
-
-    Falls back to plain text for very short inputs or when no natural
-    insertion point exists. Tags are silent to the chat UI — they only reach
-    ElevenLabs because they're injected after the frontend's display-strip pass.
-    """
-    if not text or len(text.strip()) < 20:
-        return text
-
-    if register == "heavy":
-        return f"[sighs] {text}"
-
-    if register == "playful":
-        m = re.search(r"([^.!?]*!)", text)
-        if m:
-            end = m.end()
-            return text[:end] + " [laughs]" + text[end:]
-        return text
-
-    return text
-
-
 def _elevenlabs_http_error(e: ElevenLabsError) -> HTTPException:
     status = e.status_code if e.status_code in (400, 401, 402, 404, 422) else 502
     return HTTPException(status_code=status, detail=str(e))
@@ -208,8 +121,8 @@ class PersonaSpeakRequest(BaseModel):
 
 
 @router.get("/voices")
-async def get_voices():
-    """List all ElevenLabs voices on your account."""
+async def get_voices(user_id: str = Depends(verify_token)):
+    """List all ElevenLabs voices on your account (auth required)."""
     try:
         voices = await elevenlabs_client.list_voices()
         return {"voices": voices, "total": len(voices)}

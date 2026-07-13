@@ -5,7 +5,7 @@ const AVATAR_PHOTOS: Record<string, string> = {
   "companion-aria":  "/companion/avatars/aria.jpg",
   "companion-aeva":  "/companion/avatars/aeva.jpg",
   "companion-ember": "/companion/avatars/ember.jpg",
-  "companion-kai":   "/companion/avatars/kai.jpg",
+  "companion-ben":   "/companion/avatars/ben.jpg",
 };
 
 interface AvatarProps {

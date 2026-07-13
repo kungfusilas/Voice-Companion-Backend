@@ -18,9 +18,10 @@ Endpoints:
 """
 import os
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from app.auth_middleware import verify_token
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -101,7 +102,8 @@ async def get_hearts(user_id: str = Depends(verify_token)):
 
 
 @router.post("", status_code=201)
-async def post_hearts(body: AwardRequest, user_id: str = Depends(verify_token)):
+@limiter.limit("20/minute")
+async def post_hearts(request: Request, body: AwardRequest, user_id: str = Depends(verify_token)):
     if body.amount <= 0 or body.amount > 5:
         raise HTTPException(400, "Amount must be 1-5")
     await award_hearts(user_id, body.amount, body.reason)

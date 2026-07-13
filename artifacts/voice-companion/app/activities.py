@@ -19,8 +19,8 @@ _INTRO_STYLE: dict[str, str] = {
         "\"Okay okay, I have a game. You have to guess the word I am thinking of. I will give "
         "you... how do you say... the little hints? Clues! Yes, clues.\""
     ),
-    "companion-kai": (
-        "Kai is calm, confident, a little mysterious — he suggests the activity like it's "
+    "companion-ben": (
+        "Ben is calm, confident, a little mysterious — he suggests the activity like it's "
         "something he's been quietly looking forward to."
     ),
 }

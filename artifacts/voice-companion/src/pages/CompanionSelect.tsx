@@ -24,13 +24,13 @@ const COMPANIONS: CompanionConfig[] = [
     avatar: "/companion/avatars/aeva.jpg",
   },
   {
-    id: "companion-kai",
-    name: "Kai",
+    id: "companion-ben",
+    name: "Ben",
     tagline: "Confident & charming",
     traits: ["direct", "witty", "grounded"],
     glow: "rgba(56,189,248,0.2)",
     border: "rgba(56,189,248,0.3)",
-    avatar: "/companion/avatars/kai.jpg",
+    avatar: "/companion/avatars/ben.jpg",
   },
 ];
 
