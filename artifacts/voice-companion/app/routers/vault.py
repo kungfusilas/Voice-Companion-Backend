@@ -8,8 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.routers.auth import verify_token
-from app.auth_middleware import verify_token_or_guest
+from app.auth_middleware import verify_token
 
 router = APIRouter()
 
@@ -35,7 +34,7 @@ class SaveSessionRequest(BaseModel):
 
 
 @router.post("/api/vault/save-session")
-async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(verify_token_or_guest)):
+async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(verify_token)):
     if not body.user_id or not body.messages:
         raise HTTPException(400, "user_id and messages required")
     if body.user_id != token_user_id:

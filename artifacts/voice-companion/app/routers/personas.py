@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.models import Persona, CreatePersonaRequest
 from app import store
-from app.auth_middleware import verify_token, verify_token_or_guest
+from app.auth_middleware import verify_token
 
 router = APIRouter()
 
@@ -24,14 +24,14 @@ async def create_persona(
 
 
 @router.get("", response_model=list[Persona])
-async def list_personas(user_id: str = Depends(verify_token_or_guest)):
+async def list_personas(user_id: str = Depends(verify_token)):
     return store.list_personas()
 
 
 @router.get("/{persona_id}", response_model=Persona)
 async def get_persona(
     persona_id: str,
-    user_id: str = Depends(verify_token_or_guest),
+    user_id: str = Depends(verify_token),
 ):
     persona = store.get_persona(persona_id)
     if not persona:
