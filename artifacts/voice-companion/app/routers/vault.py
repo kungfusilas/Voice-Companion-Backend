@@ -257,3 +257,48 @@ async def list_files(user_id: str, token_user_id: str = Depends(verify_token)):
             timeout=10.0,
         )
     return {"files": resp.json() if resp.status_code == 200 else []}
+
+
+# ── Signed vault-file access (secure replacement for the public bucket URL) ────
+#
+# The Legacy Vault is meant to be private, but photos are currently written to a
+# PUBLIC Supabase bucket (see _store_photo_async / upload_photo) — anyone with
+# the URL can read them. This endpoint returns a short-lived signed URL only to
+# the authenticated owner. To fully close the exposure, two out-of-band steps
+# are still required and CANNOT be done from backend code alone:
+#   1. Set the `vault-files` bucket to PRIVATE in the Supabase Storage dashboard.
+#   2. Update the frontend to load vault images via GET /api/vault/file/{id}
+#      instead of the stored public `url`.
+@router.get("/api/vault/file/{file_id}")
+async def get_vault_file(file_id: str, user_id: str = Depends(verify_token)):
+    async with httpx.AsyncClient(timeout=10.0) as hx:
+        r = await hx.get(
+            _sb_url("/rest/v1/vault_files"),
+            headers=_sb_headers(),
+            params={
+                "id": f"eq.{file_id}",
+                "user_id": f"eq.{user_id}",
+                "select": "storage_path",
+                "limit": "1",
+            },
+        )
+    if r.status_code != 200 or not r.json():
+        raise HTTPException(404, "File not found")
+    storage_path = r.json()[0].get("storage_path")
+    if not storage_path:
+        raise HTTPException(404, "File not found")
+
+    async with httpx.AsyncClient(timeout=10.0) as hx:
+        s = await hx.post(
+            _sb_url(f"/storage/v1/object/sign/vault-files/{storage_path}"),
+            headers=_sb_headers(),
+            json={"expiresIn": 3600},
+        )
+    if s.status_code != 200:
+        raise HTTPException(500, "Could not sign file URL")
+    body = s.json()
+    signed = body.get("signedURL") or body.get("signedUrl")
+    if not signed:
+        raise HTTPException(500, "Could not sign file URL")
+    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    return {"url": f"{base}/storage/v1{signed}"}

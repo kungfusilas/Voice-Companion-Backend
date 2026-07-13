@@ -14,3 +14,4 @@ stripe>=7.0.0
 graphiti-core>=0.29.0
 pywebpush>=2.0.0
 py-vapid>=1.8.2
+slowapi>=0.1.9

@@ -2,8 +2,11 @@ import os
 import json
 import anthropic
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+
+from app.auth_middleware import verify_token
+from app.rate_limit import limiter
 
 router = APIRouter()
 
@@ -11,14 +14,15 @@ _CATEGORIES = ["family", "work", "location", "health", "goals", "personality", "
 
 class ImportRequest(BaseModel):
     text: str
-    user_id: str
 
 @router.post("/api/import-memories")
-async def import_memories(body: ImportRequest):
+@limiter.limit("10/hour")
+async def import_memories(request: Request, body: ImportRequest, user_id: str = Depends(verify_token)):
+    # user_id is taken exclusively from the verified JWT — never from the body.
+    # (Previously this endpoint had no auth and trusted a client-supplied
+    # user_id, letting anyone write core facts into any user's memory.)
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="No text provided")
-    if not body.user_id:
-        raise HTTPException(status_code=400, detail="user_id required")
 
     ai = anthropic.AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", ""))
     cats = ", ".join(_CATEGORIES)
@@ -44,7 +48,7 @@ async def import_memories(body: ImportRequest):
         try:
             obj = json.loads(line)
             if obj.get("category") in _CATEGORIES and obj.get("fact"):
-                facts.append({"user_id": body.user_id, "category": obj["category"], "fact": obj["fact"]})
+                facts.append({"user_id": user_id, "category": obj["category"], "fact": obj["fact"]})
         except json.JSONDecodeError:
             continue
 
