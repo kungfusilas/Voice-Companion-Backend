@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard, Bell, Archive } from "lucide-react";
+import { ArrowLeft, Sparkles, BookOpen, Target, Activity, CalendarHeart, Lock, Drama, BarChart2, Brain, MessageSquare, ScrollText, LayoutDashboard, Bell, Archive, ShieldCheck } from "lucide-react";
 import { MemoryThreads } from "./MemoryThreads";
 import { BondJournal } from "./BondJournal";
 import { ConnectionGoals } from "./ConnectionGoals";
@@ -13,6 +13,7 @@ import { ConversationDebrief } from "./ConversationDebrief";
 import { LegacyModal } from "@/components/LegacyModal";
 import { LegacyChapters } from "./LegacyChapters";
 import { MemoryDashboard } from "./MemoryDashboard";
+import { MemoryPrivacyPanel } from "./MemoryPrivacyPanel";
 import { NotificationSettings } from "@/components/NotificationSettings";
 import { MemoryImport } from "@/components/MemoryImport";
 import { VaultPage } from "./VaultPage";
@@ -36,6 +37,7 @@ const BASE_TABS = [
   { id: "roleplay",        label: "Roleplay Simulator",  icon: Drama         },
   { id: "notifications",   label: "Notifications",       icon: Bell          },
   { id: "vault",           label: "Legacy Vault",        icon: Archive       },
+  { id: "memory-privacy",  label: "Memory & Privacy",    icon: ShieldCheck   },
 ] as const;
 
 const PREMIUM_TABS = [
@@ -308,6 +310,11 @@ export function Hub({ onBack, userId, currentPersona, onStartChat, subscriptionT
                 currentPersona={currentPersona}
                 isPremium={isPremiumHub}
               />
+            </motion.div>
+          )}
+          {tab === "memory-privacy" && (
+            <motion.div key="memory-privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="h-full overflow-y-auto px-5 pb-6">
+              <MemoryPrivacyPanel />
             </motion.div>
           )}
           {tab === "notifications" && (
