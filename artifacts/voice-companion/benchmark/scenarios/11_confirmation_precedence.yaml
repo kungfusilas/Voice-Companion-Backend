@@ -1,0 +1,17 @@
+scenario: confirmation_precedence
+description: a low-authority inferred candidate cannot override a user-confirmed fact
+events:
+  - time: "2027-01-01"
+    companion: aeva
+    user: "I definitely live in Easton."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Easton}, confirmation_status: user_confirmed, valid_from: "2027-01-01"}
+  - time: "2027-02-01"
+    companion: aeva
+    user: "(model guesses from an offhand remark)"
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Reading}, confirmation_status: inferred, valid_from: "2027-02-01"}
+  - checkpoint: after
+    expected_active:
+      - {key: user.home_city, value: {city: Easton}}
+    expected_counts: {user.home_city: 1}

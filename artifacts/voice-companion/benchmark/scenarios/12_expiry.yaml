@@ -1,0 +1,18 @@
+scenario: expiry
+description: a temporary fact is active within its window and gone afterward
+events:
+  - time: "2026-06-01"
+    companion: aeva
+    user: "I'm visiting Denver this week."
+    extraction:
+      - {subject_type: user, predicate: current_trip, value_json: {city: Denver}, confirmation_status: explicitly_stated, valid_from: "2026-06-01", valid_until: "2026-06-08"}
+  - checkpoint: during_trip
+    at: "2026-06-03"
+    expected_active:
+      - {key: user.current_trip, value: {city: Denver}}
+    expected_counts: {user.current_trip: 1}
+  - checkpoint: after_trip
+    at: "2026-06-20"
+    expected_absent:
+      - {key: user.current_trip}
+    expected_counts: {user.current_trip: 0}

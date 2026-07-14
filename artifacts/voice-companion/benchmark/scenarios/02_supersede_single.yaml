@@ -1,0 +1,19 @@
+scenario: supersede_single
+description: a new value for a single-valued predicate supersedes the old
+events:
+  - time: "2026-01-10"
+    companion: aeva
+    user: "I live in Bethlehem, Pennsylvania."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Bethlehem}, confirmation_status: explicitly_stated, valid_from: "2026-01-10"}
+  - time: "2027-04-15"
+    companion: aeva
+    user: "I moved to Easton."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Easton}, confirmation_status: user_corrected, valid_from: "2027-03-15"}
+  - checkpoint: after_move
+    expected_active:
+      - {key: user.home_city, value: {city: Easton}}
+    expected_superseded:
+      - {key: user.home_city, value: {city: Bethlehem}}
+    expected_counts: {user.home_city: 1}

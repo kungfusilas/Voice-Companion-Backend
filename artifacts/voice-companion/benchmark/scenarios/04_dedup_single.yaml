@@ -1,0 +1,22 @@
+scenario: dedup_single
+description: repeated identical mentions collapse to one canonical fact
+events:
+  - time: "2026-01-01"
+    companion: aeva
+    user: "I live in Bethlehem."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Bethlehem}, confirmation_status: explicitly_stated, valid_from: "2026-01-01"}
+  - time: "2026-01-02"
+    companion: aeva
+    user: "Yeah, Bethlehem."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Bethlehem}, confirmation_status: explicitly_stated, valid_from: "2026-01-02"}
+  - time: "2026-01-03"
+    companion: aeva
+    user: "Still Bethlehem."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Bethlehem}, confirmation_status: explicitly_stated, valid_from: "2026-01-03"}
+  - checkpoint: after_repeats
+    expected_active:
+      - {key: user.home_city, value: {city: Bethlehem}}
+    expected_counts: {user.home_city: 1}

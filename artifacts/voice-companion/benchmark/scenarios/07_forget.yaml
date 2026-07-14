@@ -1,0 +1,16 @@
+scenario: forget
+description: an explicit forget removes the fact from active state
+events:
+  - time: "2026-01-10"
+    companion: aeva
+    user: "I live in Bethlehem."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Bethlehem}, confirmation_status: explicitly_stated, valid_from: "2026-01-10"}
+  - time: "2026-05-01"
+    companion: aeva
+    user: "Forget where I live."
+    control: {op: forget, key: user.home_city}
+  - checkpoint: after_forget
+    expected_absent:
+      - {key: user.home_city}
+    expected_counts: {user.home_city: 0}

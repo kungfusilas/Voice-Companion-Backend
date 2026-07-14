@@ -30,8 +30,8 @@ def run_scenario(scenario) -> Result:
             if ev.get("time"):
                 last_time = ev["time"]
             continue
-        # checkpoint: assert against current state at the most recent event time
-        at = last_time if last_time != date.min else date.max
+        # checkpoint: assert at an explicit `at:` time, else the most recent event time
+        at = date.fromisoformat(ev["at"]) if ev.get("at") else (last_time if last_time != date.min else date.max)
         active = adapter.active_facts(at)
         active_by_key = {}
         for f in active:
@@ -53,6 +53,11 @@ def run_scenario(scenario) -> Result:
             if not supers:
                 res.assertion_failures.append(
                     f"[{ev['name']}] expected superseded {exp['key']}={exp['value']}, not found")
+        for key, want in ev.get("expected_counts", {}).items():
+            got = len(active_by_key.get(key, []))
+            if got != want:
+                res.assertion_failures.append(
+                    f"[{ev['name']}] expected {want} active '{key}', got {got}")
 
         # HARD GATE: a forbidden key must not appear in another companion's active set
         other = ev.get("gate_no_leak_to")

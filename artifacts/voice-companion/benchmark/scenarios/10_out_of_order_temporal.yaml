@@ -1,0 +1,17 @@
+scenario: out_of_order_temporal
+description: a historical (older valid_from) fact arriving later must not become current
+events:
+  - time: "2027-04-01"
+    companion: aeva
+    user: "I live in Easton now."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Easton}, confirmation_status: explicitly_stated, valid_from: "2027-03-15"}
+  - time: "2027-04-02"
+    companion: aeva
+    user: "Back in 2026 I was living in Bethlehem."
+    extraction:
+      - {subject_type: user, predicate: home_city, value_json: {city: Bethlehem}, confirmation_status: explicitly_stated, valid_from: "2026-01-10"}
+  - checkpoint: after
+    expected_active:
+      - {key: user.home_city, value: {city: Easton}}
+    expected_counts: {user.home_city: 1}
