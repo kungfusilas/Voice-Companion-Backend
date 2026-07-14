@@ -153,9 +153,19 @@ def _voice_available_for_tier(tier: str) -> bool:
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
 
 
+# In-flight post-response background tasks, tracked so a graceful shutdown can
+# drain them instead of dropping memory writes / photo storage on a redeploy.
+_BG_TASKS: set[asyncio.Task] = set()
+
+
 async def _bg(coro, timeout: float = 20.0) -> None:
     """Guard fire-and-forget tasks: 20s timeout, swallow errors.
-    Prevents task accumulation from starving the event loop."""
+    Prevents task accumulation from starving the event loop.
+    Registers the running task in _BG_TASKS so drain_background_tasks() can await
+    it during a graceful shutdown instead of it being dropped."""
+    task = asyncio.current_task()
+    if task is not None:
+        _BG_TASKS.add(task)
     name = getattr(coro, "cr_code", None)
     name = getattr(name, "co_name", None) or repr(coro)
     try:
@@ -164,6 +174,22 @@ async def _bg(coro, timeout: float = 20.0) -> None:
         _chat_logger.warning("background task timed out after %.0fs: %s", timeout, name)
     except Exception as exc:
         _chat_logger.warning("background task failed: %s - %r", name, exc, exc_info=True)
+    finally:
+        if task is not None:
+            _BG_TASKS.discard(task)
+
+
+async def drain_background_tasks(timeout: float = 10.0) -> None:
+    """Await in-flight background tasks (bounded) so a graceful shutdown / redeploy
+    doesn't drop post-response work (memory extraction, photo storage, etc.)."""
+    pending = {t for t in _BG_TASKS if not t.done()}
+    if not pending:
+        return
+    _chat_logger.info("draining %d background task(s) before shutdown", len(pending))
+    try:
+        await asyncio.wait(pending, timeout=timeout)
+    except Exception as exc:
+        _chat_logger.warning("background task drain error: %s", exc)
 
 
 async def _guard(coro, timeout: float, default):
@@ -1123,7 +1149,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
 
     # Persist attached photo to the vault (fail-open, background)
     if request.image_base64 and cleaned_b64 and user_id:
-        asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
+        asyncio.create_task(_bg(_store_photo_async(user_id, cleaned_b64, request.image_base64)))
 
     # TTS for all tiers (fail-open: audio_base64 is None if generation fails)
     audio_base64 = await _generate_tts_audio(reply)
@@ -1164,11 +1190,15 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
         memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
     ))
     asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
-    asyncio.create_task(_bg(
-        conversation_store.save_exchange(
-            user_id, persona.id, request.session_id, request.message, reply
+    # Awaited inline (not fire-and-forget): the conversation archive is the durable
+    # source of truth, so it must complete before we return rather than risk being
+    # dropped on a redeploy/crash. save_exchange is an idempotent atomic upsert.
+    if not await conversation_store.save_exchange(
+        user_id, persona.id, request.session_id, request.message, reply
+    ):
+        _chat_logger.warning(
+            "conversation not archived: session=%s user=%.8s", request.session_id, user_id
         )
-    ))
 
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
@@ -1357,7 +1387,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
 
                     # Persist attached photo to the vault (fail-open, background)
                     if request.image_base64 and cleaned_b64 and user_id:
-                        asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
+                        asyncio.create_task(_bg(_store_photo_async(user_id, cleaned_b64, request.image_base64)))
 
                     if is_free:
                         # Free tier: skip persistence/scoring (cheap path)
@@ -1417,11 +1447,16 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     asyncio.create_task(_bg(
                         future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
                     ))
-                    asyncio.create_task(_bg(
-                        conversation_store.save_exchange(
-                            user_id, persona.id, request.session_id, user_message, full_text
+                    # Awaited inline (after the reply has streamed): guarantees the
+                    # durable conversation archive completes before the stream closes
+                    # rather than being dropped on a redeploy/crash.
+                    if not await conversation_store.save_exchange(
+                        user_id, persona.id, request.session_id, user_message, full_text
+                    ):
+                        _chat_logger.warning(
+                            "conversation not archived: session=%s user=%.8s",
+                            request.session_id, user_id,
                         )
-                    ))
 
                     # ── Personality mapping (power tier only) ──────────────
                     if tier in ("power", "elite"):

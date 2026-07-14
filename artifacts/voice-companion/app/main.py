@@ -163,6 +163,13 @@ async def lifespan(app: FastAPI):
 
     if _scheduler_enabled:
         scheduler.shutdown(wait=False)
+    # Drain in-flight post-response background tasks (memory writes, photo storage,
+    # etc.) so a graceful shutdown / redeploy doesn't drop them mid-flight.
+    try:
+        from app.routers.chat import drain_background_tasks
+        await drain_background_tasks(timeout=10.0)
+    except Exception as exc:
+        logger.warning("background task drain failed: %s", exc)
 
 
 app = FastAPI(

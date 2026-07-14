@@ -132,13 +132,17 @@ async def save_exchange(
     session_id: str,
     user_message: str,
     assistant_reply: str,
-) -> None:
+) -> bool:
     """
-    Fire-and-forget: append this exchange to the permanent conversation archive.
+    Append this exchange to the permanent conversation archive.
 
-    Attempts atomic append via the append_conversation_exchange Postgres function
-    (requires one-time SQL migration above).  Falls back to fetch+patch if the
-    function is not installed.
+    Awaited inline by the caller (not fire-and-forget) so the durable record is
+    written before the response cycle ends. Returns True on success, False on any
+    failure (the caller logs). The write is idempotent, so it is safe to retry.
+
+    Prefers the atomic append_conversation_exchange Postgres function (INSERT ...
+    ON CONFLICT DO UPDATE, race-free). Falls back to fetch+patch if the function
+    is not installed.
     """
     try:
         ts = _now_iso()
@@ -151,7 +155,7 @@ async def save_exchange(
             # Preferred path: atomic DB-level append via stored function
             if await _save_via_rpc(client, user_id, companion_id, session_id, new_msgs):
                 logger.debug("Conversation archived (atomic RPC): session=%s", session_id[:8])
-                return
+                return True
 
             # Fallback: fetch+patch (TOCTOU risk on concurrent writes to same session)
             existing = await _fetch_session(client, session_id)
@@ -169,7 +173,7 @@ async def save_exchange(
                         "conversation_store: PATCH failed status=%d session=%s body=%s",
                         patch_resp.status_code, session_id[:8], patch_resp.text[:300],
                     )
-                    return
+                    return False
             else:
                 post_resp = await client.post(
                     f"{_sb_url()}/rest/v1/conversations",
@@ -186,12 +190,14 @@ async def save_exchange(
                         "conversation_store: POST failed status=%d session=%s body=%s",
                         post_resp.status_code, session_id[:8], post_resp.text[:300],
                     )
-                    return
+                    return False
 
         logger.debug("Conversation archived (fetch+patch fallback): session=%s", session_id[:8])
+        return True
 
     except Exception as exc:
-        logger.error("conversation_store: save_exchange failed (non-fatal): %s", exc, exc_info=True)
+        logger.error("conversation_store: save_exchange failed: %s", exc, exc_info=True)
+        return False
 
 
 async def get_session_info(session_id: str) -> dict | None:
