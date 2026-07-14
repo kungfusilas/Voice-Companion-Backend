@@ -167,31 +167,18 @@ export default function App() {
   // check covers them without any special-casing here.
   const effectiveScreen: Screen = (() => {
     if (screen === "loading") return "loading";
-    if (screen === "callback") return "callback";  // OAuth callback — always bypass paywall
+    if (screen === "callback") return "callback";  // OAuth callback
     if (screen === "auth") return "auth";          // always reachable
-    if (screen === "pricing") return "pricing";    // always reachable
-    if (session) {
-      if (!subCheckDone) return "loading";         // waiting for sub check
-      const isPaid = subscriptionTier !== "free" && subscriptionStatus === "active";
-      if (!isPaid) return "pricing";               // gate unpaid authenticated users
-    }
-    return screen;
+    if (screen === "pricing") return "pricing";    // public pricing page
+    if (!session) return "auth";                   // no guest access — sign-in required
+    if (!subCheckDone) return "loading";           // waiting for sub check
+    return screen;                                 // free AND paid reach the app
   })();
 
   // ── Companion selection ──────────────────────────────────────────────────
   const handleCompanionSelect = (p: Persona) => {
     setPersona(p);
-    // Ensure a guest ID exists for unauthenticated users
-    let uid = userId;
-    if (!session) {
-      let gid = localStorage.getItem("bondai_guest_id");
-      if (!gid) {
-        gid = crypto.randomUUID();
-        localStorage.setItem("bondai_guest_id", gid);
-      }
-      setGuestId(gid);
-      uid = `guest_${gid}`;
-    }
+    const uid = userId;
     // Show onboarding once per user, before the first chat
     if (uid && !localStorage.getItem("onboarding_done_" + uid)) {
       setScreen("onboarding");

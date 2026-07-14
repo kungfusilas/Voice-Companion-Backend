@@ -8,8 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from app.routers.auth import verify_token
-from app.auth_middleware import verify_token_or_guest
+from app.auth_middleware import verify_token
 
 router = APIRouter()
 
@@ -35,7 +34,7 @@ class SaveSessionRequest(BaseModel):
 
 
 @router.post("/api/vault/save-session")
-async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(verify_token_or_guest)):
+async def save_session(body: SaveSessionRequest, token_user_id: str = Depends(verify_token)):
     if not body.user_id or not body.messages:
         raise HTTPException(400, "user_id and messages required")
     if body.user_id != token_user_id:
@@ -256,7 +255,42 @@ async def list_files(user_id: str, token_user_id: str = Depends(verify_token)):
             headers=_sb_headers(),
             timeout=10.0,
         )
-    return {"files": resp.json() if resp.status_code == 200 else []}
+    files = resp.json() if resp.status_code == 200 else []
+    # Replace each file's stored (public) URL with a short-lived SIGNED URL so
+    # the vault-files bucket can be made PRIVATE. VaultPage.tsx uses `url`
+    # directly for the <img> and download link, so this keeps the gallery
+    # working with no frontend change. Falls back to the stored url on error.
+    await _attach_signed_urls(files)
+    return {"files": files}
+
+
+async def _attach_signed_urls(files: list[dict]) -> None:
+    """Sign every file's storage_path in one bulk call and overwrite `url`."""
+    paths = [f.get("storage_path") for f in files if f.get("storage_path")]
+    if not paths:
+        return
+    base = os.environ.get("SUPABASE_URL", "").rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as hx:
+            s = await hx.post(
+                _sb_url("/storage/v1/object/sign/vault-files"),
+                headers=_sb_headers(),
+                json={"expiresIn": 3600, "paths": paths},
+            )
+        if s.status_code != 200:
+            return
+        signed_by_path: dict[str, str] = {}
+        for item in s.json():
+            p = item.get("path")
+            url = item.get("signedURL") or item.get("signedUrl")
+            if p and url:
+                signed_by_path[p] = f"{base}/storage/v1{url}"
+        for f in files:
+            sp = f.get("storage_path")
+            if sp and sp in signed_by_path:
+                f["url"] = signed_by_path[sp]
+    except Exception:
+        return
 
 
 # ── Signed vault-file access (secure replacement for the public bucket URL) ────

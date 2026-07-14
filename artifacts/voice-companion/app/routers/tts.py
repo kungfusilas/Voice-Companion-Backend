@@ -9,7 +9,7 @@ from app import elevenlabs_client
 from app import openai_tts_client
 from app.elevenlabs_client import DEFAULT_MODEL_ID, ElevenLabsError
 from app.openai_tts_client import OpenAITTSError
-from app.auth_middleware import verify_token, verify_token_or_guest
+from app.auth_middleware import verify_token
 from app.usage import check_voice_quota, get_user_tier
 from app.routers.tier_check import is_premium_or_higher, is_power_or_higher
 
@@ -134,7 +134,7 @@ async def get_voices(user_id: str = Depends(verify_token)):
 async def persona_speak_stream(
     request: PersonaSpeakRequest,
     req: Request,
-    user_id: str = Depends(verify_token_or_guest),
+    user_id: str = Depends(verify_token),
 ):
     """
     Stream speech using the voice assigned to a persona.
@@ -202,7 +202,7 @@ async def persona_speak_stream(
 async def persona_speak(
     request: PersonaSpeakRequest,
     req: Request,
-    user_id: str = Depends(verify_token_or_guest),
+    user_id: str = Depends(verify_token),
 ):
     """
     Speak text using the voice assigned to a persona, with per-companion

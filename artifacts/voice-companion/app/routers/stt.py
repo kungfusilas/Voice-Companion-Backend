@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, UploadFile, File, Query, Depends, Request
 from app import deepgram_client
 from app.deepgram_client import DeepgramTranscriptError
-from app.auth_middleware import verify_token_or_guest
+from app.auth_middleware import verify_token
 from app.usage import check_voice_quota, get_user_tier
 
 router = APIRouter()
@@ -29,7 +29,7 @@ async def speech_to_text(
     audio: UploadFile = File(..., description="Audio file to transcribe"),
     model: str = Query("nova-2", description="Deepgram model — nova-2 recommended"),
     diarize: bool = Query(False, description="Identify multiple speakers"),
-    user_id: str = Depends(verify_token_or_guest),
+    user_id: str = Depends(verify_token),
 ):
     """
     Transcribe speech from an uploaded audio file (English only).

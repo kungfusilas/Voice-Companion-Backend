@@ -29,10 +29,47 @@ from app.personality_map import update_personality_map, get_personality_map
 from app.communication_analysis import maybe_analyze_communication
 
 from app.companions import ROMANTIC_MODE_PROMPTS, build_system_prompt as companions_build_system_prompt
-from app.auth_middleware import verify_token_or_guest, verify_token
+from app.auth_middleware import verify_token
 from app.usage import check_message_quota
 
 router = APIRouter()
+
+# ── Chat rate limiting (IP-keyed) ─────────────────────────────────────────────
+# /api/chat is guest-accessible and calls Claude on every request, so without a
+# throttle a single client (or a guest rotating X-Guest-ID) can drive unbounded
+# API cost. Per-process fixed-window limiter keyed on the real client IP
+# (X-Forwarded-For behind the Replit proxy). First line of defense — pair with a
+# CDN/Turnstile challenge for stronger protection. Tune via CHAT_RATE_LIMIT_PER_MIN.
+import time as _time
+_CHAT_RL: dict[str, tuple[int, float]] = {}
+_CHAT_RL_MAX = int(os.environ.get("CHAT_RATE_LIMIT_PER_MIN", "40"))
+_CHAT_RL_WINDOW = 60.0
+
+
+def _client_ip(req: Request) -> str:
+    xff = req.headers.get("x-forwarded-for", "")
+    if xff:
+        return xff.split(",")[0].strip()
+    return req.client.host if req.client else "unknown"
+
+
+def _check_chat_rate_limit(req: Request) -> None:
+    ip = _client_ip(req)
+    now = _time.monotonic()
+    count, start = _CHAT_RL.get(ip, (0, now))
+    if now - start >= _CHAT_RL_WINDOW:
+        count, start = 0, now
+    count += 1
+    _CHAT_RL[ip] = (count, start)
+    if len(_CHAT_RL) > 20000:  # bound memory: drop expired buckets
+        for k in [k for k, (_, s) in list(_CHAT_RL.items()) if now - s >= _CHAT_RL_WINDOW]:
+            _CHAT_RL.pop(k, None)
+    if count > _CHAT_RL_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail={"code": "rate_limited", "message": "Too many requests — please slow down and try again in a moment."},
+        )
+
 
 _WAITLIST_TRIGGERS = [
     "being unlocked",
@@ -212,7 +249,12 @@ async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) 
                         # Fail open: log and continue.
                         _chat_logger.warning("entitlements increment_session failed (continuing) user=%.8s: %s", user_id, e)
 
-    await _enforce_message_cap(user_id)
+    # NOTE: the per-session message cap is intentionally NOT enforced. The
+    # frontend session_id is a stable useId() for the page's lifetime, so a
+    # per-session counter would block an engaged user mid-conversation (e.g.
+    # Power at 100 msgs) far below their advertised monthly allowance, with no
+    # obvious recovery. The monthly caps (check_message_quota / _check_monthly_cap)
+    # are the real, advertised limits and remain enforced.
 
 
 async def _enforce_message_cap(user_id: str) -> None:
@@ -1099,7 +1141,7 @@ async def _build_system_prompt(
 
 
 @router.post("", response_model=ChatResponse)
-async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify_token_or_guest)):
+async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify_token)):
     _chat_logger.info(f"[REQUEST] user={user_id} endpoint=chat method=POST")
     try:
         return await asyncio.wait_for(_chat_impl(request, req, user_id), timeout=45.0)
@@ -1109,6 +1151,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
 
 
 async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONResponse:
+    _check_chat_rate_limit(req)
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -1117,12 +1160,16 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
 
-    # Paywall: authenticated users must have an active paid subscription
-    if not is_guest and (tier == "free" or sub_status != "active"):
-        raise HTTPException(status_code=402, detail="Subscription required")
+    # Lapsed/canceled paid tiers fall back to the free tier (no hard paywall).
+    if tier != "free" and sub_status != "active":
+        tier = "free"
+        is_premium = _is_premium_or_above(tier)
+        claude_model = _select_model(tier)
+    is_free = (tier == "free")
 
-    # Usage quota check (authenticated users only)
-    if not is_guest:
+    # Usage quota checks run for paid users only; free users are bounded by
+    # the monthly cap below and skip the per-session/entitlement systems.
+    if not is_free:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
         await _enforce_entitlements(user_id, tier, request.session_id)
 
@@ -1193,7 +1240,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     # TTS for all tiers (fail-open: audio_base64 is None if generation fails)
     audio_base64 = await _generate_tts_audio(reply)
 
-    if is_guest:
+    if is_free:
         _guest_resp = ChatResponse(
             session_id=request.session_id,
             persona_id=request.persona_id,
@@ -1264,7 +1311,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends(verify_token_or_guest)):
+async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends(verify_token)):
     """
     Stream the companion reply as SSE.
 
@@ -1278,6 +1325,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
         {"type": "error",     "message": "..."}
     """
     _chat_logger.info(f"[REQUEST] user={user_id} endpoint=chat_stream method=POST")
+    _check_chat_rate_limit(req)
     is_guest = user_id.startswith("guest_")
     if is_guest:
         tier, sub_status = "free", "guest"
@@ -1286,12 +1334,16 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
 
-    # Paywall: authenticated users must have an active paid subscription
-    if not is_guest and (tier == "free" or sub_status != "active"):
-        raise HTTPException(status_code=402, detail="Subscription required")
+    # Lapsed/canceled paid tiers fall back to the free tier (no hard paywall).
+    if tier != "free" and sub_status != "active":
+        tier = "free"
+        is_premium = _is_premium_or_above(tier)
+        claude_model = _select_model(tier)
+    is_free = (tier == "free")
 
-    # Usage quota check (authenticated users only)
-    if not is_guest:
+    # Usage quota checks run for paid users only; free users are bounded by
+    # the monthly cap below and skip the per-session/entitlement systems.
+    if not is_free:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
         await _enforce_entitlements(user_id, tier, request.session_id)
 
@@ -1430,8 +1482,8 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     if request.image_base64 and cleaned_b64 and not is_guest and user_id:
                         asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
 
-                    if is_guest:
-                        # Guests: skip all Supabase ops
+                    if is_free:
+                        # Free tier: skip persistence/scoring (cheap path)
                         yield f"data: {json.dumps(payload)}\n\n"
                         return
 
