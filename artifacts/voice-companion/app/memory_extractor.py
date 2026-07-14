@@ -169,12 +169,14 @@ _CORE_FACTS_SYSTEM = (
     "Extract permanent facts about the user from this conversation turn. "
     "Focus on: family members (names, ages, relationships), job/occupation, "
     "location/city, health conditions, important life events, goals, and personality traits.\n"
-    "Return ONLY a JSON array of objects with 'category' and 'fact' keys. "
+    "Return ONLY a JSON array of objects with 'category', 'fact', and 'sensitivity' keys.\n"
     "Valid categories: family, work, location, health, goals, personality, history.\n"
+    "Valid sensitivity: health, mental-health, location, financial, sexual, family, "
+    "religion-beliefs, political-views, none. Use 'none' if the fact is not sensitive.\n"
     "Include only specific, concrete facts — not opinions or inferences. "
     "If nothing new is revealed, return [].\n"
-    'Example: [{"category": "family", "fact": "Daughter named Emma, age 8"}, '
-    '{"category": "work", "fact": "Works as a nurse on night shifts"}]'
+    'Example: [{"category": "family", "fact": "Daughter named Emma, age 8", "sensitivity": "family"}, '
+    '{"category": "work", "fact": "Works as a nurse on night shifts", "sensitivity": "none"}]'
 )
 
 _CORE_FACTS_VALID_CATEGORIES = frozenset(
@@ -215,8 +217,13 @@ async def extract_and_save_core_facts(
         if not isinstance(facts, list) or not facts:
             return
 
+        from app import memory_settings
         facts = [
-            f for f in facts
+            {**f, "sensitivity": (
+                f.get("sensitivity")
+                if f.get("sensitivity") in memory_settings.SENSITIVITY_TAGS else "none"
+            )}
+            for f in facts
             if isinstance(f, dict)
             and isinstance(f.get("category"), str)
             and f["category"] in _CORE_FACTS_VALID_CATEGORIES
@@ -225,6 +232,8 @@ async def extract_and_save_core_facts(
         ]
         if not facts:
             return
+
+        settings = await memory_settings.get_settings(user_id)
 
         supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
         service_key  = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -262,16 +271,20 @@ async def extract_and_save_core_facts(
             for item in facts:
                 cat       = item["category"]
                 fact_text = item["fact"].strip()
+                sens      = item.get("sensitivity", "none")
+                if not memory_settings.should_collect(settings, sens):
+                    continue  # user disabled this sensitivity class or paused collection
                 key       = (cat, fact_text.lower())
                 if key in existing_set:
                     continue
                 to_insert.append({
-                    "user_id":    user_id,
-                    "category":   cat,
-                    "fact":       fact_text,
-                    "confidence": 1.0,
-                    "created_at": now,
-                    "updated_at": now,
+                    "user_id":     user_id,
+                    "category":    cat,
+                    "fact":        fact_text,
+                    "sensitivity": sens,
+                    "confidence":  1.0,
+                    "created_at":  now,
+                    "updated_at":  now,
                 })
                 existing_set.add(key)
 
