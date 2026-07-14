@@ -1,0 +1,16 @@
+scenario: scope_isolation
+description: a companion-private fact is not globally visible and never leaks to another companion
+events:
+  - time: "2026-01-10"
+    companion: aeva
+    user: "Just between us — I'm seeing a therapist."
+    extraction:
+      - {subject_type: user, predicate: therapy_note, value_json: {v: "sees a therapist"}, scope: companion, companion_id: aeva, sensitivity: mental-health, confirmation_status: explicitly_stated, valid_from: "2026-01-10"}
+  - checkpoint: after
+    # companion-scoped facts must NOT appear in the global view
+    expected_absent:
+      - {key: user.therapy_note}
+    expected_counts: {user.therapy_note: 0}
+    # HARD GATE: must not be visible to a different companion
+    gate_no_leak_to: aria
+    forbidden_keys: [user.therapy_note]

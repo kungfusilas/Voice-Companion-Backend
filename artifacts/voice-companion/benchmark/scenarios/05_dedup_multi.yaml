@@ -1,0 +1,17 @@
+scenario: dedup_multi
+description: the same multi-valued entry (case-insensitive) dedupes to one
+events:
+  - time: "2026-01-01"
+    companion: aeva
+    user: "My daughter Emmie."
+    extraction:
+      - {subject_type: user, predicate: children, value_json: {name: Emmie}, confirmation_status: explicitly_stated, valid_from: "2026-01-01"}
+  - time: "2026-01-05"
+    companion: aeva
+    user: "emmie again"
+    extraction:
+      - {subject_type: user, predicate: children, value_json: {name: emmie}, confirmation_status: explicitly_stated, valid_from: "2026-01-05"}
+  - checkpoint: after_repeat
+    expected_active:
+      - {key: user.children, value: {name: Emmie}}
+    expected_counts: {user.children: 1}

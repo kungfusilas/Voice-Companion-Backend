@@ -1,0 +1,18 @@
+scenario: accumulate_multi
+description: distinct multi-valued entries accumulate, neither supersedes the other
+events:
+  - time: "2026-01-01"
+    companion: aeva
+    user: "My daughter is named Emmie."
+    extraction:
+      - {subject_type: user, predicate: children, value_json: {name: Emmie}, confirmation_status: explicitly_stated, valid_from: "2026-01-01"}
+  - time: "2026-02-01"
+    companion: aeva
+    user: "I also have a son, Sam."
+    extraction:
+      - {subject_type: user, predicate: children, value_json: {name: Sam}, confirmation_status: explicitly_stated, valid_from: "2026-02-01"}
+  - checkpoint: after_both
+    expected_active:
+      - {key: user.children, value: {name: Emmie}}
+      - {key: user.children, value: {name: Sam}}
+    expected_counts: {user.children: 2}

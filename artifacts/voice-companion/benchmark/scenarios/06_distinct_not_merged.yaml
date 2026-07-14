@@ -1,0 +1,18 @@
+scenario: distinct_not_merged
+description: two similar-but-distinct multi-valued entries must NOT be merged
+events:
+  - time: "2026-01-01"
+    companion: aeva
+    user: "My daughter Emmie."
+    extraction:
+      - {subject_type: user, predicate: children, value_json: {name: Emmie}, confirmation_status: explicitly_stated, valid_from: "2026-01-01"}
+  - time: "2026-01-02"
+    companion: aeva
+    user: "And my niece Emma."
+    extraction:
+      - {subject_type: user, predicate: children, value_json: {name: Emma}, confirmation_status: explicitly_stated, valid_from: "2026-01-02"}
+  - checkpoint: after_both
+    expected_active:
+      - {key: user.children, value: {name: Emmie}}
+      - {key: user.children, value: {name: Emma}}
+    expected_counts: {user.children: 2}
