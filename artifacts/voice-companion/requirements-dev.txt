@@ -1,0 +1,4 @@
+# Dev/test-only dependencies (not installed in production).
+# Run tests:  python -m pytest tests/ -q
+pytest>=8.0
+httpx>=0.27
