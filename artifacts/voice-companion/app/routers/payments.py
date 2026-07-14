@@ -167,28 +167,31 @@ def _supa_headers() -> dict[str, str]:
 
 
 async def _upsert_profile(user_id: str, **fields: object) -> None:
+    """Upsert a user's profile row.
+
+    Raises on failure (network error or non-2xx) so the webhook can return 5xx and
+    let Stripe retry. Safe to retry: this upsert is idempotent (keyed on user_id).
+    """
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:
-        return
+        raise RuntimeError("SUPABASE_URL not configured")
     payload = {
         "id": user_id,
         "updated_at": datetime.datetime.utcnow().isoformat(),
         **fields,
     }
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{url}/rest/v1/profiles",
-                headers={
-                    **_supa_headers(),
-                    "Prefer": "resolution=merge-duplicates,return=minimal",
-                },
-                json=payload,
-            )
-        if resp.status_code >= 400:
-            logger.error("Profile upsert failed user=%s status=%s body=%s", user_id, resp.status_code, resp.text[:200])
-    except Exception as exc:
-        logger.error("Profile upsert error user=%s: %s", user_id, exc)
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{url}/rest/v1/profiles",
+            headers={
+                **_supa_headers(),
+                "Prefer": "resolution=merge-duplicates,return=minimal",
+            },
+            json=payload,
+        )
+    if resp.status_code >= 400:
+        logger.error("Profile upsert failed user=%s status=%s body=%s", user_id, resp.status_code, resp.text[:200])
+        raise RuntimeError(f"Profile upsert failed (status {resp.status_code})")
 
 
 async def _user_id_by_customer(customer_id: str) -> str | None:
@@ -322,26 +325,24 @@ async def _apply_topup_credits(
     """
     url = os.environ.get("SUPABASE_URL", "").rstrip("/")
     if not url:
-        return
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{url}/rest/v1/rpc/apply_topup_credits",
-                headers=_supa_headers(),
-                json={
-                    "p_user_id": user_id,
-                    "p_kind": kind,
-                    "p_credits": credits,
-                    "p_event_id": event_id,
-                },
-            )
-        if resp.status_code not in (200, 204):
-            logger.error(
-                "apply_topup_credits failed user=%s kind=%s credits=%s status=%s: %s",
-                user_id, kind, credits, resp.status_code, resp.text[:200],
-            )
-    except Exception as exc:
-        logger.error("apply_topup_credits error user=%s: %s", user_id, exc)
+        raise RuntimeError("SUPABASE_URL not configured")
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{url}/rest/v1/rpc/apply_topup_credits",
+            headers=_supa_headers(),
+            json={
+                "p_user_id": user_id,
+                "p_kind": kind,
+                "p_credits": credits,
+                "p_event_id": event_id,
+            },
+        )
+    if resp.status_code not in (200, 204):
+        logger.error(
+            "apply_topup_credits failed user=%s kind=%s credits=%s status=%s: %s",
+            user_id, kind, credits, resp.status_code, resp.text[:200],
+        )
+        raise RuntimeError(f"apply_topup_credits failed (status {resp.status_code})")
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -595,9 +596,14 @@ async def stripe_webhook(request: Request):
                     logger.warning("Invoice payment failed — user=%s marked past_due", user_id)
 
     except Exception as exc:
-        # Log but always return 200 — Stripe retries on any non-2xx, which would
-        # flood the server. The event can be replayed from the Stripe dashboard.
-        logger.error("Webhook handler error event=%s: %s", event["type"], exc)
+        # Fail closed: a handled event whose critical write failed returns 5xx so
+        # Stripe retries with exponential backoff. Safe because processing is
+        # idempotent — the profile upsert is keyed on user_id, and the topup RPC
+        # dedupes on the Stripe event/session id — so a retry re-runs without
+        # double-applying. Unhandled event types never enter a branch above, so
+        # they skip this except and fall through to the 200 below.
+        logger.error("Webhook handler error event=%s: %s — returning 500 so Stripe retries", event["type"], exc)
+        raise HTTPException(status_code=500, detail="Webhook processing failed; Stripe will retry") from exc
 
     return {"received": True}
 
