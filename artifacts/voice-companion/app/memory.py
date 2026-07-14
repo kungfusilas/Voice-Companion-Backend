@@ -35,7 +35,8 @@ _SHOULD_REMEMBER_PROMPT_BASE = (
     '"person_mentioned": "first name of person this memory is about, or null if about the user themselves", '
     '"emotional_theme": "one of: joy|grief|growth|conflict|love|pride|fear|hope|loneliness|gratitude — or null", '
     '"life_event": true or false (true only for significant milestones: births, deaths, marriages, divorces, moves, diagnoses, major career changes), '
-    '"topic": "one of: relationship|career|family|health|personal_growth|friendship|loss|identity|spirituality — or null"}\n\n'
+    '"topic": "one of: relationship|career|family|health|personal_growth|friendship|loss|identity|spirituality — or null", '
+    '"sensitivity": "one of: health|mental-health|location|financial|sexual|family|religion-beliefs|political-views|none (use none if not sensitive)"}\n\n'
     'If nothing worth saving, return {"should_save": false}.\n'
     "Return ONLY valid JSON, no other text."
 )
@@ -114,6 +115,7 @@ async def save_memory(
     emotional_theme: str | None = None,
     life_event: bool = False,
     topic: str | None = None,
+    sensitivity: str = "none",
 ) -> dict:
     """
     Embed content and POST directly to /rest/v1/memories via httpx.
@@ -143,6 +145,7 @@ async def save_memory(
             "memory_type": memory_type,
             "embedding": vec_str,
             "importance": max(1, min(10, int(importance))),
+            "sensitivity": sensitivity,
         }
         if person_mentioned:
             payload["person_mentioned"] = person_mentioned

@@ -143,6 +143,14 @@ async def extract_and_save(
                 logger.debug("[memory_extractor] sanitized content is empty, skipping save")
                 return
 
+            from app import memory_settings
+            sens = (result.get("sensitivity")
+                    if result.get("sensitivity") in memory_settings.SENSITIVITY_TAGS else "none")
+            settings = await memory_settings.get_settings(user_id)
+            if not memory_settings.should_collect(settings, sens):
+                logger.debug("[memory_extractor] gated by settings (sens=%s) user=%.8s", sens, user_id[:8])
+                return
+
             saved = await memory.save_memory(
                 user_id=user_id,
                 companion_id=persona_id,
@@ -153,6 +161,7 @@ async def extract_and_save(
                 emotional_theme=result.get("emotional_theme") or None,
                 life_event=bool(result.get("life_event", False)),
                 topic=result.get("topic") or None,
+                sensitivity=sens,
             )
             memory_id = saved.get("id") if saved else None
             if memory_id:
