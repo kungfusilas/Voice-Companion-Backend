@@ -1,7 +1,7 @@
 import os
 from datetime import datetime, timezone
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from app.auth_middleware import verify_token
 from typing import Optional
 
@@ -16,17 +16,6 @@ PLAN_CAPS = {
     "premium": 1500,
     "power": 3500,
 }
-
-STRIPE_PRICE_MAP = {
-    price_id: plan
-    for price_id, plan in (
-        (os.environ.get("STRIPE_PRICE_BASIC", ""), "basic"),
-        (os.environ.get("STRIPE_PRICE_PREMIUM", ""), "premium"),
-        (os.environ.get("STRIPE_PRICE_POWER", ""), "power"),
-    )
-    if price_id
-}
-
 
 def _sb_headers():
     key = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -147,44 +136,3 @@ async def update_plan(plan: str, token_user_id: str = Depends(verify_token)):
     return {"updated": True, "plan": plan}
 
 
-@router.post("/api/stripe/webhook")
-async def stripe_webhook(request: Request):
-    import json
-    body = await request.body()
-    secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-    if not secret:
-        # Fail closed: never accept unsigned webhooks that mutate plans.
-        raise HTTPException(503, "Stripe webhook secret not configured")
-    sig = request.headers.get("stripe-signature", "")
-    try:
-        import stripe as stripe_lib
-        stripe_lib.Webhook.construct_event(body, sig, secret)
-    except Exception as e:
-        raise HTTPException(400, str(e))
-    payload = json.loads(body)
-    event_type = payload.get("type", "")
-    data = payload.get("data", {}).get("object", {})
-    customer_id = data.get("customer")
-    status = data.get("status", "")
-    items = data.get("items", {}).get("data", [])
-    price_id = items[0].get("price", {}).get("id", "") if items else ""
-    plan = STRIPE_PRICE_MAP.get(price_id, "free")
-    if event_type in ("customer.subscription.created", "customer.subscription.updated") and status in ("active", "trialing"):
-        async with httpx.AsyncClient(timeout=5.0) as hx:
-            r = await hx.get(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
-                             params={"stripe_customer_id": f"eq.{customer_id}", "limit": "1"})
-            if r.status_code == 200 and r.json():
-                uid = r.json()[0]["user_id"]
-                await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
-                                params={"user_id": f"eq.{uid}"},
-                                json={"plan": plan, "status": "active", "updated_at": datetime.now(timezone.utc).isoformat()})
-    elif event_type == "customer.subscription.deleted":
-        async with httpx.AsyncClient(timeout=5.0) as hx:
-            r = await hx.get(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
-                             params={"stripe_customer_id": f"eq.{customer_id}", "limit": "1"})
-            if r.status_code == 200 and r.json():
-                uid = r.json()[0]["user_id"]
-                await hx.patch(_sb_url("/rest/v1/user_entitlements"), headers=_sb_headers(),
-                                params={"user_id": f"eq.{uid}"},
-                                json={"plan": "free", "status": "canceled", "updated_at": datetime.now(timezone.utc).isoformat()})
-    return {"received": True}

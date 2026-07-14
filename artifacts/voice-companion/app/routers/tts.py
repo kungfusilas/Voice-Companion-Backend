@@ -154,16 +154,6 @@ async def persona_speak_stream(
     if not clean_text:
         raise HTTPException(status_code=422, detail="text must not be empty")
 
-    is_guest = user_id.startswith("guest_")
-    if is_guest:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "plan_required",
-                "required": "premium",
-                "message": "Two-Way Voice requires a Premium plan. Sign in and upgrade in Settings → Pricing.",
-            },
-        )
     tier, _ = await get_user_tier(user_id)
     session_id = req.headers.get("X-Session-Id") or None
     estimated_secs = max(1, len(clean_text) // 13)
@@ -220,16 +210,6 @@ async def persona_speak(
     if not clean_text:
         raise HTTPException(status_code=422, detail="text must not be empty")
 
-    is_guest = user_id.startswith("guest_")
-    if is_guest:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "plan_required",
-                "required": "premium",
-                "message": "Two-Way Voice requires a Premium plan. Sign in and upgrade in Settings → Pricing.",
-            },
-        )
     tier, _ = await get_user_tier(user_id)
     session_id = req.headers.get("X-Session-Id") or None
     estimated_secs = max(1, len(clean_text) // 13)

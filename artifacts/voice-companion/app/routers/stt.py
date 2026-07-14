@@ -43,13 +43,10 @@ async def speech_to_text(
     if len(audio_bytes) > 25 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Audio file too large (max 25 MB)")
 
-    is_guest = user_id.startswith("guest_")
-
-    if not is_guest:
-        tier, _ = await get_user_tier(user_id)
-        session_id = req.headers.get("X-Session-Id") or None
-        estimated_secs = max(1, len(audio_bytes) // 4000)
-        await check_voice_quota(user_id, tier, estimated_secs, session_id)
+    tier, _ = await get_user_tier(user_id)
+    session_id = req.headers.get("X-Session-Id") or None
+    estimated_secs = max(1, len(audio_bytes) // 4000)
+    await check_voice_quota(user_id, tier, estimated_secs, session_id)
 
     try:
         result = await deepgram_client.transcribe(

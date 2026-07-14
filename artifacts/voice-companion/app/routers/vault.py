@@ -234,14 +234,30 @@ async def upload_photo(body: dict, token_user_id: str = Depends(verify_token)):
         )
         if up.status_code not in (200, 201):
             raise HTTPException(status_code=500, detail=f"Storage error: {up.text}")
-        public_url = f"{supabase_url}/storage/v1/object/public/vault-files/{storage_path}"
+        # Bucket is private: store no public URL. The gallery re-signs on read.
         await client.post(
             f"{supabase_url}/rest/v1/vault_files",
-            json={"id": file_id, "user_id": user_id, "storage_path": storage_path, "url": public_url, "filename": filename, "size_bytes": len(image_bytes)},
+            json={"id": file_id, "user_id": user_id, "storage_path": storage_path, "url": "", "filename": filename, "size_bytes": len(image_bytes)},
             headers={**_sb_headers(), "Content-Type": "application/json"},
             timeout=10.0,
         )
-    return {"file_id": file_id, "url": public_url, "path": storage_path}
+        # Return a short-lived signed URL so the just-uploaded photo previews now.
+        display_url = ""
+        try:
+            sign = await client.post(
+                f"{supabase_url}/storage/v1/object/sign/vault-files/{storage_path}",
+                headers={**_sb_headers(), "Content-Type": "application/json"},
+                json={"expiresIn": 3600},
+                timeout=10.0,
+            )
+            if sign.status_code == 200:
+                _body = sign.json()
+                _signed = _body.get("signedURL") or _body.get("signedUrl") or ""
+                if _signed:
+                    display_url = f"{supabase_url}/storage/v1{_signed}"
+        except Exception:
+            pass
+    return {"file_id": file_id, "url": display_url, "path": storage_path}
 
 
 @router.get("/api/vault/files")
