@@ -22,7 +22,7 @@ from app import relationship
 from app import scoring
 from app import graphiti_memory
 from app import memory_manager
-from app import entitlements, memory_distillation
+from app import memory_distillation
 from app.session_debrief import generate_session_debrief
 from app.weekly_insight import maybe_generate_weekly_insight
 from app.personality_map import update_personality_map, get_personality_map
@@ -35,9 +35,9 @@ from app.usage import check_message_quota
 router = APIRouter()
 
 # ── Chat rate limiting (IP-keyed) ─────────────────────────────────────────────
-# /api/chat is guest-accessible and calls Claude on every request, so without a
-# throttle a single client (or a guest rotating X-Guest-ID) can drive unbounded
-# API cost. Per-process fixed-window limiter keyed on the real client IP
+# /api/chat requires sign-in but calls Claude on every request, so without a
+# throttle a single client can drive unbounded API cost. Keyed on the real IP
+# (a per-process fixed-window limiter)
 # (X-Forwarded-For behind the Replit proxy). First line of defense — pair with a
 # CDN/Turnstile challenge for stronger protection. Tune via CHAT_RATE_LIMIT_PER_MIN.
 import time as _time
@@ -124,10 +124,10 @@ async def _store_photo_async(user_id: str, image_b64: str, original: str):
                 timeout=20.0,
             )
             if up.status_code in (200, 201):
-                public_url = f"{supabase_url}/storage/v1/object/public/vault-files/{storage_path}"
+                # Bucket is private; list_files re-signs on read. Store no public URL.
                 await c.post(
                     f"{supabase_url}/rest/v1/vault_files",
-                    json={"id": file_id, "user_id": user_id, "storage_path": storage_path, "url": public_url, "size_bytes": len(image_bytes)},
+                    json={"id": file_id, "user_id": user_id, "storage_path": storage_path, "url": "", "size_bytes": len(image_bytes)},
                     headers={"Authorization": f"Bearer {service_key}", "apikey": service_key, "Content-Type": "application/json"},
                     timeout=10.0,
                 )
@@ -151,21 +151,6 @@ def _is_power_or_above(tier: str) -> bool:
 def _voice_available_for_tier(tier: str) -> bool:
     """True only for premium and above; free/basic get no TTS voice output."""
     return _TIER_RANK.get(tier, 0) >= _TIER_RANK["premium"]
-
-
-# ── Session/message cap enforcement (entitlements) ───────────────────────────
-# Sessions already counted this process lifetime, keyed "user_id:session_id".
-_COUNTED_SESSIONS: set[str] = set()
-# Per-user locks so concurrent requests for the same new session can't
-# double-count it (TOCTOU guard within this process).
-_ENTITLEMENT_LOCKS: dict[str, asyncio.Lock] = {}
-
-
-def _entitlement_lock(user_id: str) -> asyncio.Lock:
-    lock = _ENTITLEMENT_LOCKS.get(user_id)
-    if lock is None:
-        lock = _ENTITLEMENT_LOCKS.setdefault(user_id, asyncio.Lock())
-    return lock
 
 
 async def _bg(coro, timeout: float = 20.0) -> None:
@@ -196,85 +181,6 @@ async def _guard(coro, timeout: float, default):
         _chat_logger.warning("prompt dependency degraded (timeout/error), using default: %r", exc)
         return default
 
-
-async def _enforce_entitlements(user_id: str, tier: str, session_id: str) -> None:
-    """Enforce per-tier session and per-session message caps.
-
-    Raises HTTPException 429 when a cap is hit. Fails open on backend errors
-    (entitlements module returns allowed=True when Supabase is unreachable or
-    the user_entitlements table doesn't exist yet).
-    """
-    try:
-        await _enforce_entitlements_inner(user_id, tier, session_id)
-    except HTTPException:
-        raise  # intentional 429 cap responses
-    except Exception as e:
-        # Entitlement errors must NEVER crash the chat/voice pipeline — fail open.
-        _chat_logger.warning("entitlements enforcement failed (non-fatal) user=%.8s: %s", user_id, e)
-
-
-async def _enforce_entitlements_inner(user_id: str, tier: str, session_id: str) -> None:
-    key = f"{user_id}:{session_id}"
-    if key not in _COUNTED_SESSIONS:
-        async with _entitlement_lock(user_id):
-            if key not in _COUNTED_SESSIONS:
-                # Durable new-session check: a session persisted in Supabase and
-                # owned by this user was already counted before (survives
-                # server restarts, unlike the in-process set).
-                _existing = await conversation_store.get_session_info(session_id)
-                if _existing is not None and _existing.get("user_id") == user_id:
-                    _COUNTED_SESSIONS.add(key)
-                else:
-                    try:
-                        gate = await entitlements.check_session_allowed(user_id, tier)
-                    except Exception as e:
-                        # Fail open: allow the request, never 429 on error.
-                        _chat_logger.warning("entitlements check_session_allowed failed (allowing) user=%.8s: %s", user_id, e)
-                        gate = {"allowed": True}
-                    if not gate.get("allowed", True):
-                        raise HTTPException(
-                            status_code=429,
-                            detail={
-                                "error": "session_limit_reached",
-                                "sessions_used": gate.get("used", 0),
-                                "sessions_limit": gate.get("limit", 0),
-                                "plan": tier,
-                                "message": "You've used all your sessions for this period. Upgrade or wait for reset.",
-                            },
-                        )
-                    _COUNTED_SESSIONS.add(key)
-                    try:
-                        await entitlements.increment_session(user_id)
-                    except Exception as e:
-                        # Fail open: log and continue.
-                        _chat_logger.warning("entitlements increment_session failed (continuing) user=%.8s: %s", user_id, e)
-
-    # NOTE: the per-session message cap is intentionally NOT enforced. The
-    # frontend session_id is a stable useId() for the page's lifetime, so a
-    # per-session counter would block an engaged user mid-conversation (e.g.
-    # Power at 100 msgs) far below their advertised monthly allowance, with no
-    # obvious recovery. The monthly caps (check_message_quota / _check_monthly_cap)
-    # are the real, advertised limits and remain enforced.
-
-
-async def _enforce_message_cap(user_id: str) -> None:
-    """Increment the per-session message counter and raise 429 past the cap."""
-    try:
-        msg = await entitlements.increment_message(user_id)
-    except Exception as e:
-        # Fail open: log and continue.
-        _chat_logger.warning("entitlements increment_message failed (continuing) user=%.8s: %s", user_id, e)
-        msg = {"allowed": True}
-    if not msg.get("allowed", True):
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "error": "message_limit_reached",
-                "messages_used": msg.get("messages_used", 0),
-                "messages_limit": msg.get("limit", 0),
-                "message": "You've reached the message limit for this session.",
-            },
-        )
 
 async def _check_monthly_cap(user_id: str, tier: str) -> dict:
     """Monthly message cap backed by the user_entitlements table.
@@ -1006,12 +912,10 @@ async def _build_system_prompt(
     tier: str = "free",
     romantic_mode: bool = False,
     onboarding_context: str | None = None,
-    is_guest: bool = False,
     session_id: str = "",
 ) -> str:
     """
     Build the full system prompt.
-    For guests, skip Supabase calls and just use the base persona prompt.
     For authenticated users, include memories, relationship context, and drift.
     English-only instruction is injected for ALL tiers.
     Power users get the inline roleplay capability block.
@@ -1019,13 +923,6 @@ async def _build_system_prompt(
     is detected and the weekly cooldown has elapsed.
     """
     base_prompt = companions_build_system_prompt(persona)
-
-    if is_guest:
-        prompt = _inject_date(base_prompt)
-        if onboarding_context:
-            prompt += f"\n\n{onboarding_context}"
-        prompt += _ENGLISH_INSTRUCTION
-        return prompt
 
     try:
         # Each dependency is time-boxed via _guard so the concurrent gather can
@@ -1152,11 +1049,7 @@ async def chat(request: ChatRequest, req: Request, user_id: str = Depends(verify
 
 async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONResponse:
     _check_chat_rate_limit(req)
-    is_guest = user_id.startswith("guest_")
-    if is_guest:
-        tier, sub_status = "free", "guest"
-    else:
-        tier, sub_status = await _get_user_profile(user_id)
+    tier, sub_status = await _get_user_profile(user_id)
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
 
@@ -1171,7 +1064,6 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     # the monthly cap below and skip the per-session/entitlement systems.
     if not is_free:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
-        await _enforce_entitlements(user_id, tier, request.session_id)
 
     # Monthly message cap (user_entitlements) — raises 402 when the cap is hit
     usage = await _check_monthly_cap(user_id, tier)
@@ -1182,7 +1074,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
 
     # Warm-boot: restore this session's history from Supabase after a server restart.
     # Try the exact session first; fall back to recent cross-session messages if it's new.
-    if not store.get_history(request.session_id) and not is_guest:
+    if not store.get_history(request.session_id):
         _info = await conversation_store.get_session_info(request.session_id)
         # SECURITY: session_id is client-supplied. Only restore history from a
         # session this caller actually owns.
@@ -1196,24 +1088,20 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
             store.append_message(request.session_id, ChatMessage(role=_m["role"], content=_m["content"]))
 
     history = list(store.get_or_create_session(request.session_id, request.persona_id))[-40:]
-    if not is_guest:
-        store.set_session_owner(request.session_id, user_id)
+    store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
         tier=tier,
         romantic_mode=request.romantic_mode,
         onboarding_context=request.onboarding_context,
-        is_guest=is_guest,
         session_id=request.session_id,
     )
-    if not is_guest:
-        _fb = await _get_flashback(user_id)
-        if _fb:
-            system_prompt += _fb
-    if not is_guest:
-        relationship_ctx = await _get_relationship_context(user_id)
-        if relationship_ctx:
-            system_prompt = relationship_ctx + "\n\n" + system_prompt
+    _fb = await _get_flashback(user_id)
+    if _fb:
+        system_prompt += _fb
+    relationship_ctx = await _get_relationship_context(user_id)
+    if relationship_ctx:
+        system_prompt = relationship_ctx + "\n\n" + system_prompt
 
     cleaned_b64: str | None = None
     if request.image_base64:
@@ -1234,14 +1122,14 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     store.append_message(request.session_id, ChatMessage(role="assistant", content=reply))
 
     # Persist attached photo to the vault (fail-open, background)
-    if request.image_base64 and cleaned_b64 and not is_guest and user_id:
+    if request.image_base64 and cleaned_b64 and user_id:
         asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
 
     # TTS for all tiers (fail-open: audio_base64 is None if generation fails)
     audio_base64 = await _generate_tts_audio(reply)
 
     if is_free:
-        _guest_resp = ChatResponse(
+        _free_resp = ChatResponse(
             session_id=request.session_id,
             persona_id=request.persona_id,
             reply=reply,
@@ -1250,7 +1138,7 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
             voice_available=True,
             usage=_usage_payload(usage),
         )
-        return JSONResponse({**_guest_resp.model_dump(), "audio_base64": audio_base64})
+        return JSONResponse({**_free_resp.model_dump(), "audio_base64": audio_base64})
 
     stats = await relationship.get_stats(user_id, persona.id)
     rel_type = stats.get("relationship_type") or "romance"
@@ -1271,17 +1159,16 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
         )
     ))
     asyncio.create_task(_bg(relationship.increment_message_count(user_id, persona.id)))
-    if not is_guest:
-        asyncio.create_task(_bg(_extract_session_facts(user_id, request.session_id, request.message)))
-        asyncio.create_task(_bg(
-            memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
-        ))
-        asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
-        asyncio.create_task(_bg(
-            conversation_store.save_exchange(
-                user_id, persona.id, request.session_id, request.message, reply
-            )
-        ))
+    asyncio.create_task(_bg(_extract_session_facts(user_id, request.session_id, request.message)))
+    asyncio.create_task(_bg(
+        memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
+    ))
+    asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
+    asyncio.create_task(_bg(
+        conversation_store.save_exchange(
+            user_id, persona.id, request.session_id, request.message, reply
+        )
+    ))
 
     _hist = store.get_history(request.session_id)
     _user_msgs = [m.content for m in _hist if m.role == "user"]
@@ -1326,11 +1213,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     """
     _chat_logger.info(f"[REQUEST] user={user_id} endpoint=chat_stream method=POST")
     _check_chat_rate_limit(req)
-    is_guest = user_id.startswith("guest_")
-    if is_guest:
-        tier, sub_status = "free", "guest"
-    else:
-        tier, sub_status = await _get_user_profile(user_id)
+    tier, sub_status = await _get_user_profile(user_id)
     is_premium = _is_premium_or_above(tier)
     claude_model = _select_model(tier)
 
@@ -1345,7 +1228,6 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     # the monthly cap below and skip the per-session/entitlement systems.
     if not is_free:
         await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
-        await _enforce_entitlements(user_id, tier, request.session_id)
 
     # Monthly message cap (user_entitlements) — raises 402 when the cap is hit
     usage = await _check_monthly_cap(user_id, tier)
@@ -1356,7 +1238,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
 
     # Warm-boot: restore this session's history from Supabase after a server restart.
     # Try the exact session first; fall back to recent cross-session messages if it's new.
-    if not store.get_history(request.session_id) and not is_guest:
+    if not store.get_history(request.session_id):
         _info = await conversation_store.get_session_info(request.session_id)
         # SECURITY: session_id is client-supplied. Only restore history from a
         # session this caller actually owns.
@@ -1373,24 +1255,20 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
             )
 
     history = list(store.get_or_create_session(request.session_id, request.persona_id))[-40:]
-    if not is_guest:
-        store.set_session_owner(request.session_id, user_id)
+    store.set_session_owner(request.session_id, user_id)
     system_prompt = await _build_system_prompt(
         persona, user_id, request.message,
         tier=tier,
         romantic_mode=request.romantic_mode,
         onboarding_context=request.onboarding_context,
-        is_guest=is_guest,
         session_id=request.session_id,
     )
-    if not is_guest:
-        _fb = await _get_flashback(user_id)
-        if _fb:
-            system_prompt += _fb
-    if not is_guest:
-        relationship_ctx = await _get_relationship_context(user_id)
-        if relationship_ctx:
-            system_prompt = relationship_ctx + "\n\n" + system_prompt
+    _fb = await _get_flashback(user_id)
+    if _fb:
+        system_prompt += _fb
+    relationship_ctx = await _get_relationship_context(user_id)
+    if relationship_ctx:
+        system_prompt = relationship_ctx + "\n\n" + system_prompt
 
     cleaned_b64: str | None = None
     if request.image_base64:
@@ -1403,7 +1281,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
     photo_media_type: str = "image/jpeg"
     if request.image_url:
         # Server-side Premium gate for photo feature
-        if not is_guest and _TIER_RANK.get(tier, 0) < _TIER_RANK["premium"]:
+        if _TIER_RANK.get(tier, 0) < _TIER_RANK["premium"]:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -1413,8 +1291,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                 },
             )
         # Consume an extra quota unit (photos cost 2 messages)
-        if not is_guest:
-            await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
+        await check_message_quota(user_id, tier, req.headers.get("X-Session-Id") or None)
         # Download image for Claude vision.
         # SSRF guard: only allow HTTPS requests to our own Supabase Storage host.
         _supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
@@ -1479,7 +1356,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     payload["audio_base64"] = await _generate_tts_audio(full_text)
 
                     # Persist attached photo to the vault (fail-open, background)
-                    if request.image_base64 and cleaned_b64 and not is_guest and user_id:
+                    if request.image_base64 and cleaned_b64 and user_id:
                         asyncio.create_task(_store_photo_async(user_id, cleaned_b64, request.image_base64))
 
                     if is_free:
@@ -1540,12 +1417,11 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     asyncio.create_task(_bg(
                         future_memory_extractor.extract_and_save(user_id, persona.id, user_message, full_text)
                     ))
-                    if not is_guest:
-                        asyncio.create_task(_bg(
-                            conversation_store.save_exchange(
-                                user_id, persona.id, request.session_id, user_message, full_text
-                            )
-                        ))
+                    asyncio.create_task(_bg(
+                        conversation_store.save_exchange(
+                            user_id, persona.id, request.session_id, user_message, full_text
+                        )
+                    ))
 
                     # ── Personality mapping (power tier only) ──────────────
                     if tier in ("power", "elite"):
@@ -1558,18 +1434,17 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     asyncio.create_task(_bg(
                         relationship.increment_message_count(user_id, persona.id)
                     ))
-                    if not is_guest:
-                        asyncio.create_task(_bg(
-                            _extract_session_facts(user_id, request.session_id, user_message)
-                        ))
-                        asyncio.create_task(_bg(
-                            memory_extractor.extract_and_save_core_facts(
-                                user_id, user_message, full_text
-                            )
-                        ))
-                        asyncio.create_task(_bg(
-                            graphiti_memory.add_episode(user_id, user_message, full_text)
-                        ))
+                    asyncio.create_task(_bg(
+                        _extract_session_facts(user_id, request.session_id, user_message)
+                    ))
+                    asyncio.create_task(_bg(
+                        memory_extractor.extract_and_save_core_facts(
+                            user_id, user_message, full_text
+                        )
+                    ))
+                    asyncio.create_task(_bg(
+                        graphiti_memory.add_episode(user_id, user_message, full_text)
+                    ))
 
                     # Bond Score: analyze every 3 user messages
                     _hist = store.get_history(request.session_id)
