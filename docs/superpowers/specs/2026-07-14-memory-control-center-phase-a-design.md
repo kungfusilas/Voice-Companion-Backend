@@ -64,9 +64,12 @@ and enforce collection rules at the extraction entry points.
 ### 4.1 Data model (Supabase DDL — user runs once)
 
 ```sql
-ALTER TABLE memories   ADD COLUMN IF NOT EXISTS sensitivity text NOT NULL DEFAULT 'none';
-ALTER TABLE core_facts ADD COLUMN IF NOT EXISTS sensitivity text NOT NULL DEFAULT 'none';
-ALTER TABLE profiles   ADD COLUMN IF NOT EXISTS memory_settings jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE memories        ADD COLUMN IF NOT EXISTS sensitivity text NOT NULL DEFAULT 'none';
+ALTER TABLE user_core_facts ADD COLUMN IF NOT EXISTS sensitivity text NOT NULL DEFAULT 'none';
+ALTER TABLE profiles        ADD COLUMN IF NOT EXISTS memory_settings jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+-- NOTE: the core-facts table is `user_core_facts` (the design draft earlier said
+-- `core_facts`). All references below use `user_core_facts`.
 ```
 
 - `sensitivity` is one of the 9 tags. The existing `memories.sensitive boolean` becomes
