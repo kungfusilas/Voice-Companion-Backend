@@ -80,7 +80,9 @@ export function usePushNotifications(): UsePushNotificationsResult {
 
         const sub = await reg.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidKey),
+          // Cast: newer TS types Uint8Array as Uint8Array<ArrayBufferLike>, but the
+          // DOM's applicationServerKey expects a BufferSource (ArrayBufferView<ArrayBuffer>).
+          applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
         });
 
         const json = sub.toJSON() as {
