@@ -62,7 +62,7 @@ def apply_candidate(facts, cand: Candidate, now: date, reg=registry, prohibited=
     """Run a proposed fact through the lifecycle. Returns a NEW list; never mutates input."""
     facts = list(facts)
     if prohibited and f"{cand.subject_type}.{cand.predicate}" in prohibited:
-        return facts
+        return facts  # user prohibited this key from ever being stored
     card = reg.cardinality(cand.predicate)
     stored_sk = reg.sub_key(cand.predicate, cand.value_json) if card == "multi" else None
     ident = identity(cand.subject_type, cand.subject_id, cand.predicate, cand.scope,
@@ -78,11 +78,12 @@ def apply_candidate(facts, cand: Candidate, now: date, reg=registry, prohibited=
         return facts
     cur = peers[0]
     if cur.normalized_value == norm:
-        return facts
+        return facts  # dedup / idempotent — same value, same identity
     cand_from = cand.valid_from or now
     if _CONFIRM_RANK[cand.confirmation_status] < _CONFIRM_RANK[cur.confirmation_status]:
-        return facts
+        return facts  # lower-authority candidate cannot override a higher-authority current fact
     if cur.valid_from and cand_from < cur.valid_from:
+        # candidate is historical (older effective date) → record as superseded, keep current
         facts.append(_new_fact(cand, now, status="superseded", sub_key=stored_sk, cardinality=card))
         return facts
     idx = facts.index(cur)
