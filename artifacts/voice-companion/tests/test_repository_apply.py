@@ -116,3 +116,40 @@ def test_durable_recovers_from_a_real_concurrent_supersede(ledger_db):
     asyncio.run(body())
     rows = _active(inner)
     assert len(rows) == 1 and rows[0]["value_json"] == {"city": "Reading"}
+
+
+def test_durable_multi_supersedes_within_entity_only(ledger_db):
+    ex = PsycopgExecutor(ledger_db)
+
+    def _child(name, age):
+        return Candidate(subject_type="user", subject_id="self", predicate="children",
+                         value_json={"name": name, "age": age},
+                         confirmation_status="explicitly_stated")
+
+    async def body():
+        await apply_candidate_durably(ex, _child("Alice", 8), _ctx("c1"), now=date(2026, 1, 1))
+        await apply_candidate_durably(ex, _child("Bob", 5), _ctx("c2"), now=date(2026, 1, 2))
+        await apply_candidate_durably(ex, _child("Alice", 9), _ctx("c3"), now=date(2026, 2, 1))
+
+    asyncio.run(body())
+    rows = asyncio.run(ex.fetch_active_facts("u1", "user", "self", "children", "global", None))
+    by_name = {r["value_json"]["name"]: r["value_json"]["age"] for r in rows}
+    assert by_name == {"Alice": 9, "Bob": 5} and len(rows) == 2
+
+
+def test_durable_unknown_accumulates_distinct_values(ledger_db):
+    ex = PsycopgExecutor(ledger_db)
+
+    def _friend(name):
+        return Candidate(subject_type="user", subject_id="self", predicate="friend",
+                         value_json={"name": name}, confirmation_status="explicitly_stated")
+
+    async def body():
+        await apply_candidate_durably(ex, _friend("Sue"), _ctx("f1"), now=date(2026, 1, 1))
+        await apply_candidate_durably(ex, _friend("Mike"), _ctx("f2"), now=date(2026, 1, 2))
+        await apply_candidate_durably(ex, _friend("Sue"), _ctx("f3"), now=date(2026, 1, 3))
+
+    asyncio.run(body())
+    rows = asyncio.run(ex.fetch_active_facts("u1", "user", "self", "friend", "global", None))
+    names = sorted(r["value_json"]["name"] for r in rows)
+    assert names == ["Mike", "Sue"] and len(rows) == 2

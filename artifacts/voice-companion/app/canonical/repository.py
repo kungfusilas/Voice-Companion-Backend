@@ -196,7 +196,7 @@ class PostgrestExecutor:
                 "p_inserts": inserts, "p_events": events}
         async with self._client_factory() as client:
             resp = await client.post(f"{self._url}/rest/v1/rpc/apply_canonical_delta",
-                                     headers=self._headers(prefer="return=minimal"), json=body)
+                                     headers=self._headers(), json=body)
         if resp.status_code not in (200, 201, 204):
             self._raise(resp)
         try:
