@@ -33,7 +33,7 @@ def map_canonical(obj, sensitivity: str = "none", now: date | None = None) -> Ca
         return None
 
     conf = obj.get("confirmation_status") or "inferred"
-    if conf not in CONFIRMATION_STATUSES:
+    if not isinstance(conf, str) or conf not in CONFIRMATION_STATUSES:
         conf = "inferred"
 
     return Candidate(

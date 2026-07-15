@@ -43,3 +43,21 @@ def test_bad_dates_are_dropped_not_fatal():
                        "valid_from": "not-a-date"})
     assert c is not None
     assert c.valid_from is None
+
+
+def test_non_string_confirmation_status_does_not_raise():
+    for bad in (["oops"], {"a": 1}, 5):
+        c = map_canonical({"predicate": "home_city", "value_json": {"city": "X"},
+                           "confirmation_status": bad})
+        assert c is not None and c.confirmation_status == "inferred"
+
+
+def test_non_dict_value_json_returns_none():
+    assert map_canonical({"predicate": "home_city", "value_json": ["not", "a", "dict"]}) is None
+    assert map_canonical({"predicate": "home_city", "value_json": "nope"}) is None
+
+
+def test_bad_observed_at_and_valid_until_dropped():
+    c = map_canonical({"predicate": "home_city", "value_json": {"city": "X"},
+                       "observed_at": "garbage", "valid_until": 12345})
+    assert c is not None and c.observed_at is None and c.valid_until is None
