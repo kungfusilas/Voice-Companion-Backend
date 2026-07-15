@@ -688,4 +688,21 @@ Announce and use **superpowers:finishing-a-development-branch** to verify tests,
 3. **Live wiring** — `repository.py` (PostgREST load + `apply_canonical_delta` call with retry-on-`40001`); nested-`canonical` prompt behind the A/B gate; `LegacyOutcome` refactor; per-turn `exchange_id`; always-run `shadow_ledger.run` with timeout + gating. Carries forward the Stage-1 note: align `subject_id` default (`self`).
 4. **Observability** — `ledger_shadow_divergences` + `ledger_shadow_runs` tables (deferred here), receipts, divergence classifier, daily rollup + agreement sample, admin endpoint.
 5. **Privacy & lifecycle** — retention, `delete_account` extension, sensitive-payload metadata-only.
-```
+
+## Carry-forward from the Stage-2 whole-branch review (Stage-3/4 contract)
+
+The substrate merged clean (Opus review: ready-to-merge, no must-fix; the RPC is inert until Stage 3). These are the seams Stage 3 must honor when it wires in `repository.py`:
+
+- **Retry on BOTH `40001` and `23505`.** The RPC raises `40001` on a stale-version CAS conflict, but a genuine cross-transaction double-insert into the same active slot surfaces as the partial-unique-index `unique_violation` (`23505`). Stage 3's retry-on-conflict wrapper must treat both as retryable (reload → recompute → retry). Decide whether to normalize `23505`→`40001` inside the RPC's insert loop (note: that would change `test_events_roll_back_with_a_failed_insert`'s same-call expectation) or handle both in the repository. Add a real 2-connection race test in Stage 3.
+- **Date-aware JSON encoding.** `compute_delta` emits Python `date` objects (supersede `valid_until`; `Fact.valid_from/valid_until/observed_at`). `json.dumps` cannot serialize `date` — the repository MUST use a date-aware encoder before the RPC call or it crashes on the first temporal fact. (The RPC side already parses `NULLIF(...,'')::date`.)
+- **Enrich events before the RPC.** `delta.py:_event` omits `owner_user_id`, `source_exchange_id`, and the mapper/extractor/registry versions. Stage 3 must inject them into each event dict, or `canonical_fact_events_exchange_idx` is useless and events are unattributable.
+- **Never NULL the idempotency-key columns.** `source_exchange_id` + `extractor_version` sit in the non-partial idempotency index; NULLs are distinct, so a NULL there means replays won't dedup (and would instead trip `one_active_single` as `23505`). Stage 3 must always supply both non-null.
+- **`subject_id` default alignment (carried from Stage 1).** DB default `'self'` (migration) vs `Candidate.subject_id` default `'user'` (models.py) — `subject_id` is in every slot index, so a mismatch fragments slots. Align before wiring.
+
+For Stage 4:
+
+- **`fact_deduped` events are intentionally NOT persisted.** The RPC's state-change gate writes no events for a pure no-op/dedup delta (a dedup is not a state change; persisting one per restatement would bloat the audit log). So dedups must be counted via the `ledger_shadow_runs` receipt (Stage 4), never the event log. The engine still *emits* a `fact_deduped` event in `compute_delta`; it is simply dropped at persist time. Reconcile the design spec's `event_type` list to note this.
+
+Design-doc reconciliation (spec `2026-07-14-canonical-ledger-shadow-mode-design.md`): `one_active_multi` uses `COALESCE(sub_key,'')` (matches the engine's `identity()`; strictly better than the spec's bare `sub_key`), and indexes use `''` not `'∅'` for the companion coalesce. Update the spec so the two don't drift.
+
+Optional hardening (later): `CHECK` on `confirmation_status`; the design's supporting indexes (`normalized_value`/`extractor_version`/`created_at`) for Stage-4 analytics; the `updates` path currently only carries `confirmation_status`.
