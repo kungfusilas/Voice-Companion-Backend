@@ -71,3 +71,14 @@ def test_multi_null_sub_key_slot_still_dedups(ledger_db):
 def test_invalid_cardinality_rejected(ledger_db):
     with pytest.raises(psycopg.errors.CheckViolation):
         _insert(ledger_db, **_base(cardinality="bogus"))
+
+
+def test_migration_is_idempotent(ledger_db):
+    import pathlib
+    mig = (pathlib.Path(__file__).parent.parent
+           / "migrations" / "0002_canonical_ledger_shadow.sql").read_text()
+    ledger_db.execute(mig)  # second application on the same DB — must not raise
+    n = ledger_db.execute(
+        "SELECT count(*) FROM pg_indexes WHERE indexname LIKE 'one_active_%'"
+    ).fetchone()[0]
+    assert n == 3  # the three partial unique indexes are present exactly once
