@@ -48,3 +48,34 @@ def test_dedup_is_empty_delta():
     d = compute_delta(before, after, engine_version="v1")
     assert d.is_empty()
     assert [e["event_type"] for e in d.events] == ["fact_deduped"]
+
+
+def test_historical_candidate_is_insert_only_with_candidate_unconfirmed_event():
+    from app.canonical.engine import normalize_value
+    now = date(2027, 6, 1)
+    before = [Fact(id="cur", subject_type="user", subject_id="user", predicate="home_city",
+                   value_json={"city": "Easton"},
+                   normalized_value=normalize_value({"city": "Easton"}),
+                   version=2, cardinality="single", valid_from=date(2027, 1, 1))]
+    cand = Candidate(subject_type="user", predicate="home_city", value_json={"city": "Reading"},
+                     confirmation_status="explicitly_stated", valid_from=date(2026, 1, 1))
+    after = apply_candidate(before, cand, now)
+    d = compute_delta(before, after, engine_version="v1")
+    # historical (older valid_from) candidate → recorded as a superseded insert; current fact untouched → no CAS op
+    assert len(d.inserts) == 1 and d.inserts[0].status == "superseded"
+    assert not d.supersedes
+    assert any(e["event_type"] == "candidate_unconfirmed" for e in d.events)
+
+
+def test_delete_status_change_emits_fact_deleted():
+    from app.canonical.engine import apply_control, normalize_value
+    from app.canonical.models import Control
+    now = date(2027, 6, 1)
+    before = [Fact(id="cur", subject_type="user", subject_id="user", predicate="home_city",
+                   value_json={"city": "Easton"},
+                   normalized_value=normalize_value({"city": "Easton"}),
+                   version=1, cardinality="single", status="active")]
+    after, _ = apply_control(before, Control(op="forget", key="user.home_city"), now)
+    d = compute_delta(before, after, engine_version="v1")
+    assert len(d.supersedes) == 1 and d.supersedes[0]["new_status"] == "deleted"
+    assert any(e["event_type"] == "fact_deleted" for e in d.events)
