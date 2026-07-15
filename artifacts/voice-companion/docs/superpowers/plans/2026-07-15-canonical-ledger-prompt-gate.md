@@ -889,9 +889,10 @@ git commit -m "fix(ledger): carry-forward hardening — error-path facts, config
 4. **Run the gate** in the Replit shell: `cd artifacts/voice-companion && python scripts/ab_prompt_gate.py --runs 2` (`pip install pyyaml` first if missing; costs a few dollars at most). Paste the output. Both GATE A and GATE B must PASS.
 5. **First-light (allowlist, zero real users):** set Secret `CANONICAL_EXTRACTION_ALLOWLIST=<your test account user_id>` → Republish. With your test account, run the scripted conversation:
    - Turn 1: "I live in Bethlehem, Pennsylvania." → expect `home_city=Bethlehem` ACTIVE.
-   - Turn 2: "I moved to Easton last month." → expect Easton ACTIVE, Bethlehem SUPERSEDED (with `valid_until`).
+   - Turn 2: **"I've just moved to Easton — that's home now."** (deliberately NO past-date cue: a phrase like "last month" can make the model stamp a past `valid_from`, which correctly triggers the engine's *historical* branch — Easton stored SUPERSEDED, Bethlehem kept ACTIVE — and would look like a failure when it isn't). Expected: Easton ACTIVE, Bethlehem SUPERSEDED (with `valid_until`). **If the model stamped a past `valid_from` anyway**, Easton appearing as `superseded` with Bethlehem still active is the engine working as designed, not a pipeline failure — rerun the turn with the phrasing above.
    - Turn 3: "My daughters are Emma and Sarah." → expect two ACTIVE `children` rows (sub_keys emma/sarah).
    - Turn 4: repeat Turn 3 verbatim → expect NO new rows (dedup).
+   Keep the passing `scripts/ab_results_<ts>.json` from step 4 as the recorded go/no-go artifact for this flip.
    Verify in Supabase: `select predicate, sub_key, status, value_json, source_exchange_id, extractor_version from canonical_facts order by created_at;` and `select event_type, count(*) from canonical_fact_events group by 1;` — `extractor_version` must be `core-facts-canonical-v1`; every row carries a `source_exchange_id`. This proves prompt → parse → sanitize → map → engine → repository → RPC → ledger → events end-to-end.
 6. **Staged enrollment (optional at current traffic, available):** `CANONICAL_EXTRACTION_PERCENT=5` → observe a day (fact counts, `shadow ledger skipped` warnings in deploy logs, unknown-predicate volume: `select predicate, count(*) from canonical_facts where cardinality='unknown' group by 1;`) → `25` → `100` (or `CANONICAL_EXTRACTION_ENABLED=true`).
 7. **Kill switch:** remove the vars → Republish → instant dormancy; legacy path untouched throughout.
@@ -901,3 +902,15 @@ git commit -m "fix(ledger): carry-forward hardening — error-path facts, config
 
 - **Stage 4 — observability:** `ledger_shadow_runs` receipts + divergences table + classifier + daily rollup + admin endpoint (real admin authz; dedups counted via receipts, NOT the event log).
 - **Stage 5 — privacy/lifecycle:** retention job, `delete_account` extension to ledger tables, sensitive-payload metadata-only enforcement.
+
+## Carry-forward from the Stage-3c whole-branch review (Opus: merge-safe; fixes applied pre-runbook)
+
+Fixed in 3c before finish: `adv-4` reduced to a pure injection (its "I like tea" clause was a legitimate fact on an `expect_facts:false` turn → spurious hard GATE-B fail); `gold_hit_rate` empty-default now honest 0.0 (symmetry with validity); backoff no longer sleeps on the final exhausted attempt; first-light Turn 2 rephrased to avoid the engine's historical-`valid_from` branch (and the runbook now explains that outcome if it occurs).
+
+Deferred, with owners:
+
+- **Stage 4 — make the authority boundary structural.** Extraction safety currently rests on every extraction-path caller wrapping `map_canonical` with `sanitize_extraction_canonical` (2 callers today, both sanitized + tested). Add a `map_extraction_canonical()` wrapper (or a `trusted: bool = False` param on `map_canonical` that strips authority by default) so the safe path is the default path for any future consumer.
+- **Stage 5 — sensitivity is LLM-controlled and now gates a durable ledger.** `shadow_ledger.run` trusts the fact's LLM-assigned `sensitivity` for `should_collect`; an under-reported sensitivity could store a canonical fact the user opted out of by category. Same trust model as the legacy vector path, but canonical rows are durable — revisit with retention/metadata-only enforcement.
+- **Engine (future plan): `valid_from = now` default vs historical supersession.** A same-session prior fact (defaulted to today) beats a later candidate stamped with a past `valid_from` — correct by design but surprising in smoke tests; consider whether observed-at ordering should break ties within a session.
+- **Gate maintenance:** `parse_llm_output`/`_valid_facts` intentionally mirror the extractor's cleaning/validation — if the extractor's parsing ever changes, update the gate in the same PR (or extract a shared helper). `rel-d1`-style near-future turns exercise future-`valid_from` semantics; keep them labeled deliberately.
+- **Cosmetic:** `PsycopgExecutor` docstring reflow.
