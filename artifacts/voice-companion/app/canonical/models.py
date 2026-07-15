@@ -27,6 +27,7 @@ class Fact:
     sub_key: str | None = None
     cardinality: str = "single"
     observed_at: date | None = None
+    version: int = 1
 
 
 @dataclass
