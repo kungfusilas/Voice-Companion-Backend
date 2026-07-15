@@ -10,8 +10,7 @@ import logging
 from datetime import date
 
 from app.canonical.mapper import map_canonical
-from app.canonical.repository import (LedgerContext, apply_candidate_durably,
-                                      ENGINE_VERSION)
+from app.canonical.repository import LedgerContext, apply_candidate_durably
 from app import memory_settings
 
 logger = logging.getLogger(__name__)

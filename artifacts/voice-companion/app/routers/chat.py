@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import asyncio
+import uuid
 import httpx
 import urllib.parse
 import logging as _logging
@@ -13,6 +14,9 @@ from app.models import ChatMessage, ChatRequest, ChatResponse
 from app import store, claude
 from app import memory as mem_store
 from app import memory_extractor
+from app import memory_settings
+from app import shadow_ledger
+from app.canonical.repository import PostgrestExecutor
 from app import bond_analyzer
 from app import personality_extractor
 from app import personality_tracker
@@ -177,6 +181,26 @@ async def _bg(coro, timeout: float = 20.0) -> None:
     finally:
         if task is not None:
             _BG_TASKS.discard(task)
+
+
+SHADOW_TIMEOUT_SECONDS = 8.0
+
+
+async def _extract_and_shadow(user_id: str, message: str, reply: str, exchange_id: str) -> None:
+    """Legacy core-facts write, then the (fail-open, no-op-until-3c) shadow ledger."""
+    try:
+        outcome = await memory_extractor.extract_and_save_core_facts(user_id, message, reply)
+    except Exception:
+        _chat_logger.warning("core-facts extraction failed user=%.8s", user_id)
+        return
+    try:
+        settings = await memory_settings.get_settings(user_id)
+        await asyncio.wait_for(
+            shadow_ledger.run(outcome, owner_user_id=user_id, exchange_id=exchange_id,
+                              executor=PostgrestExecutor(), settings=settings),
+            timeout=SHADOW_TIMEOUT_SECONDS)
+    except Exception:
+        _chat_logger.warning("shadow ledger skipped user=%.8s exchange=%s", user_id, exchange_id)
 
 
 async def drain_background_tasks(timeout: float = 10.0) -> None:
@@ -1186,15 +1210,15 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     ))
     asyncio.create_task(_bg(relationship.increment_message_count(user_id, persona.id)))
     asyncio.create_task(_bg(_extract_session_facts(user_id, request.session_id, request.message)))
-    asyncio.create_task(_bg(
-        memory_extractor.extract_and_save_core_facts(user_id, request.message, reply)
-    ))
+    exchange_id = uuid.uuid4().hex
+    asyncio.create_task(_bg(_extract_and_shadow(user_id, request.message, reply, exchange_id)))
     asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
     # Awaited inline (not fire-and-forget): the conversation archive is the durable
     # source of truth, so it must complete before we return rather than risk being
     # dropped on a redeploy/crash. save_exchange is an idempotent atomic upsert.
     if not await conversation_store.save_exchange(
-        user_id, persona.id, request.session_id, request.message, reply
+        user_id, persona.id, request.session_id, request.message, reply,
+        exchange_id=exchange_id,
     ):
         _chat_logger.warning(
             "conversation not archived: session=%s user=%.8s", request.session_id, user_id
@@ -1450,8 +1474,10 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                     # Awaited inline (after the reply has streamed): guarantees the
                     # durable conversation archive completes before the stream closes
                     # rather than being dropped on a redeploy/crash.
+                    exchange_id = uuid.uuid4().hex
                     if not await conversation_store.save_exchange(
-                        user_id, persona.id, request.session_id, user_message, full_text
+                        user_id, persona.id, request.session_id, user_message, full_text,
+                        exchange_id=exchange_id,
                     ):
                         _chat_logger.warning(
                             "conversation not archived: session=%s user=%.8s",
@@ -1473,9 +1499,7 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         _extract_session_facts(user_id, request.session_id, user_message)
                     ))
                     asyncio.create_task(_bg(
-                        memory_extractor.extract_and_save_core_facts(
-                            user_id, user_message, full_text
-                        )
+                        _extract_and_shadow(user_id, user_message, full_text, exchange_id)
                     ))
                     asyncio.create_task(_bg(
                         graphiti_memory.add_episode(user_id, user_message, full_text)
