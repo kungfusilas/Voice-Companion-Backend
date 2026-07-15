@@ -20,8 +20,12 @@ def test_extract_and_shadow_runs_shadow_after_legacy(monkeypatch):
         calls.append(("shadow", kw["exchange_id"], len(outcome.facts)))
         return {"applied": 0}
 
+    async def fake_settings(user_id):
+        return {}
+
     monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", fake_extract)
     monkeypatch.setattr(chat.shadow_ledger, "run", fake_run)
+    monkeypatch.setattr(chat.memory_settings, "get_settings", fake_settings)
 
     asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))
     assert calls[0] == "legacy"                       # legacy first
@@ -31,7 +35,11 @@ def test_extract_and_shadow_runs_shadow_after_legacy(monkeypatch):
 def test_extract_and_shadow_never_raises(monkeypatch):
     async def boom(*a, **kw):
         raise RuntimeError("down")
+
+    async def fake_settings(user_id):
+        return {}
     monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", boom)
+    monkeypatch.setattr(chat.memory_settings, "get_settings", fake_settings)
     asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))  # must not raise
 
 

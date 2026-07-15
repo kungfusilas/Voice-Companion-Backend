@@ -190,17 +190,19 @@ async def _extract_and_shadow(user_id: str, message: str, reply: str, exchange_i
     """Legacy core-facts write, then the (fail-open, no-op-until-3c) shadow ledger."""
     try:
         outcome = await memory_extractor.extract_and_save_core_facts(user_id, message, reply)
-    except Exception:
-        _chat_logger.warning("core-facts extraction failed user=%.8s", user_id)
+    except Exception as exc:
+        _chat_logger.warning("core-facts extraction failed user=%.8s: %r", user_id, exc)
         return
     try:
-        settings = await memory_settings.get_settings(user_id)
-        await asyncio.wait_for(
-            shadow_ledger.run(outcome, owner_user_id=user_id, exchange_id=exchange_id,
-                              executor=PostgrestExecutor(), settings=settings),
-            timeout=SHADOW_TIMEOUT_SECONDS)
-    except Exception:
-        _chat_logger.warning("shadow ledger skipped user=%.8s exchange=%s", user_id, exchange_id)
+        async def _shadow():
+            settings = await memory_settings.get_settings(user_id)
+            return await shadow_ledger.run(
+                outcome, owner_user_id=user_id, exchange_id=exchange_id,
+                executor=PostgrestExecutor(), settings=settings)
+        await asyncio.wait_for(_shadow(), timeout=SHADOW_TIMEOUT_SECONDS)
+    except Exception as exc:
+        _chat_logger.warning("shadow ledger skipped user=%.8s exchange=%s: %r",
+                             user_id, exchange_id, exc)
 
 
 async def drain_background_tasks(timeout: float = 10.0) -> None:
