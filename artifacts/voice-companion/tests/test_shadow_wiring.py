@@ -8,49 +8,49 @@ import asyncio
 from app.routers import chat
 
 
-def test_extract_and_shadow_runs_shadow_after_legacy(monkeypatch):
+def test_extract_and_shadow_runs_legacy_then_canonical_then_shadow(monkeypatch):
     calls = []
 
-    async def fake_extract(user_id, msg, reply):
+    async def fake_legacy(user_id, msg, reply):
         calls.append("legacy")
         from app.memory_extractor import LegacyOutcome
-        return LegacyOutcome("inserted", [{"fact": "x", "sensitivity": "none",
-                                           "canonical": {"predicate": "home_city",
-                                                         "value_json": {"city": "X"}}}])
+        return LegacyOutcome("inserted", [{"fact": "x", "sensitivity": "none"}])
+
+    async def fake_candidates(user_id, msg, reply):
+        calls.append("canonical")
+        return [{"fact": "x", "sensitivity": "none",
+                 "canonical": {"predicate": "home_city", "value_json": {"city": "X"}}}]
+
+    async def fake_settings(user_id):
+        return {}
 
     async def fake_run(outcome, **kw):
         calls.append(("shadow", kw["exchange_id"], len(outcome.facts)))
         return {"applied": 0}
 
-    async def fake_settings(user_id):
-        return {}
-
-    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", fake_extract)
-    monkeypatch.setattr(chat.shadow_ledger, "run", fake_run)
+    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", fake_legacy)
+    monkeypatch.setattr(chat.canonical_extractor, "canonical_enabled", lambda user_id: True)
+    monkeypatch.setattr(chat.canonical_extractor, "extract_canonical_candidates", fake_candidates)
     monkeypatch.setattr(chat.memory_settings, "get_settings", fake_settings)
+    monkeypatch.setattr(chat.shadow_ledger, "run", fake_run)
 
     asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))
     assert calls[0] == "legacy"                       # legacy first
-    assert calls[1] == ("shadow", "exABC", 1)         # shadow after, same exchange id
+    assert calls[1] == "canonical"                    # then the dedicated canonical call
+    assert calls[2] == ("shadow", "exABC", 1)          # then shadow, same exchange id
 
 
-def test_extract_and_shadow_never_raises(monkeypatch):
-    async def boom(*a, **kw):
-        raise RuntimeError("down")
+def test_disabled_skips_all_canonical_path_work(monkeypatch):
+    legacy_called, candidates_called, settings_called, shadow_called = [], [], [], []
 
-    async def fake_settings(user_id):
-        return {}
-    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", boom)
-    monkeypatch.setattr(chat.memory_settings, "get_settings", fake_settings)
-    asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))  # must not raise
-
-
-def test_no_canonical_skips_settings_and_shadow(monkeypatch):
-    settings_called, shadow_called = [], []
-
-    async def fake_extract(user_id, msg, reply):
+    async def fake_legacy(user_id, msg, reply):
+        legacy_called.append(1)
         from app.memory_extractor import LegacyOutcome
-        return LegacyOutcome("inserted", [{"fact": "x", "sensitivity": "none"}])  # no canonical
+        return LegacyOutcome("inserted", [{"fact": "x", "sensitivity": "none"}])
+
+    async def fake_candidates(user_id, msg, reply):
+        candidates_called.append(1)
+        return []
 
     async def fake_settings(user_id):
         settings_called.append(1)
@@ -60,11 +60,60 @@ def test_no_canonical_skips_settings_and_shadow(monkeypatch):
         shadow_called.append(1)
         return {}
 
-    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", fake_extract)
+    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", fake_legacy)
+    monkeypatch.setattr(chat.canonical_extractor, "canonical_enabled", lambda user_id: False)
+    monkeypatch.setattr(chat.canonical_extractor, "extract_canonical_candidates", fake_candidates)
     monkeypatch.setattr(chat.memory_settings, "get_settings", fake_settings)
     monkeypatch.setattr(chat.shadow_ledger, "run", fake_run)
+
+    asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))
+    assert legacy_called == [1]                       # legacy still ran
+    assert candidates_called == []                    # no dedicated LLM call
+    assert settings_called == []                       # no settings read
+    assert shadow_called == []                         # no shadow/executor work
+
+
+def test_no_canonical_candidate_skips_settings_and_shadow(monkeypatch):
+    settings_called, shadow_called = [], []
+
+    async def fake_legacy(user_id, msg, reply):
+        from app.memory_extractor import LegacyOutcome
+        return LegacyOutcome("inserted", [{"fact": "x", "sensitivity": "none"}])
+
+    async def fake_candidates(user_id, msg, reply):
+        return [{"fact": "x", "sensitivity": "none"}]  # no "canonical" key
+
+    async def fake_settings(user_id):
+        settings_called.append(1)
+        return {}
+
+    async def fake_run(outcome, **kw):
+        shadow_called.append(1)
+        return {}
+
+    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", fake_legacy)
+    monkeypatch.setattr(chat.canonical_extractor, "canonical_enabled", lambda user_id: True)
+    monkeypatch.setattr(chat.canonical_extractor, "extract_canonical_candidates", fake_candidates)
+    monkeypatch.setattr(chat.memory_settings, "get_settings", fake_settings)
+    monkeypatch.setattr(chat.shadow_ledger, "run", fake_run)
+
     asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))
     assert settings_called == [] and shadow_called == []   # zero DB, zero shadow when no canonical
+
+
+def test_extract_and_shadow_never_raises(monkeypatch):
+    async def boom(*a, **kw):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(chat.memory_extractor, "extract_and_save_core_facts", boom)
+    # canonical_enabled is a cheap, unguarded synchronous check (env reads / hash)
+    # per the interface contract — it is not expected to raise, so we exercise
+    # the enabled branch and blow up everything inside the guarded shadow path.
+    monkeypatch.setattr(chat.canonical_extractor, "canonical_enabled", lambda user_id: True)
+    monkeypatch.setattr(chat.canonical_extractor, "extract_canonical_candidates", boom)
+    monkeypatch.setattr(chat.memory_settings, "get_settings", boom)
+    monkeypatch.setattr(chat.shadow_ledger, "run", boom)
+    asyncio.run(chat._extract_and_shadow("u1", "msg", "reply", "exABC"))  # must not raise
 
 
 def test_save_exchange_stamps_message_id(monkeypatch):
