@@ -138,20 +138,25 @@ BEGIN
         inserted := inserted + n;
     END LOOP;
 
-    -- Events: appended in the SAME transaction as the delta.
-    FOR ev IN SELECT * FROM jsonb_array_elements(p_events) LOOP
-        INSERT INTO canonical_fact_events (
-            owner_user_id, source_exchange_id, candidate_id, event_type, fact_id,
-            related_fact_id, predicate, engine_version, mapper_version,
-            extractor_version, registry_version, decision_reason, payload_json)
-        VALUES (
-            ev->>'owner_user_id', ev->>'source_exchange_id', ev->>'candidate_id',
-            ev->>'event_type', NULLIF(ev->>'fact_id','')::uuid,
-            NULLIF(ev->>'related_fact_id','')::uuid, ev->>'predicate',
-            ev->>'engine_version', ev->>'mapper_version', ev->>'extractor_version',
-            ev->>'registry_version', ev->>'decision_reason',
-            COALESCE(ev->'payload', ev->'payload_json', '{}'::jsonb));
-    END LOOP;
+    -- Events: only when the delta changed state (a pure idempotent replay or a
+    -- no-op writes no events — keeps the audit trail replay-safe and unbloated).
+    IF inserted > 0
+       OR jsonb_array_length(p_supersedes) > 0
+       OR jsonb_array_length(p_updates) > 0 THEN
+        FOR ev IN SELECT * FROM jsonb_array_elements(p_events) LOOP
+            INSERT INTO canonical_fact_events (
+                owner_user_id, source_exchange_id, candidate_id, event_type, fact_id,
+                related_fact_id, predicate, engine_version, mapper_version,
+                extractor_version, registry_version, decision_reason, payload_json)
+            VALUES (
+                ev->>'owner_user_id', ev->>'source_exchange_id', ev->>'candidate_id',
+                ev->>'event_type', NULLIF(ev->>'fact_id','')::uuid,
+                NULLIF(ev->>'related_fact_id','')::uuid, ev->>'predicate',
+                ev->>'engine_version', ev->>'mapper_version', ev->>'extractor_version',
+                ev->>'registry_version', ev->>'decision_reason',
+                COALESCE(ev->'payload', ev->'payload_json', '{}'::jsonb));
+        END LOOP;
+    END IF;
 
     RETURN jsonb_build_object('ok', true, 'inserted', inserted);
 END;

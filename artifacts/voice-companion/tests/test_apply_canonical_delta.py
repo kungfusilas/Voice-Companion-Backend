@@ -54,3 +54,13 @@ def test_events_roll_back_with_a_failed_insert(ledger_db):
               events=[{"owner_user_id": "u1", "event_type": "fact_created"}])
     assert _count(ledger_db) == 0
     assert _count(ledger_db, "canonical_fact_events") == 0
+
+
+def test_replay_does_not_duplicate_events(ledger_db):
+    ins = [_fact()]
+    ev = [{"owner_user_id": "u1", "source_exchange_id": "ex1",
+           "event_type": "fact_created", "predicate": "home_city"}]
+    _call(ledger_db, inserts=ins, events=ev)
+    _call(ledger_db, inserts=ins, events=ev)  # replay: insert no-ops, events must not duplicate
+    assert _count(ledger_db) == 1
+    assert _count(ledger_db, "canonical_fact_events") == 1
