@@ -59,3 +59,15 @@ def test_idempotency_key_blocks_same_candidate_replay(ledger_db):
     _insert(ledger_db, **_base(status="superseded", **kw))
     with pytest.raises(psycopg.errors.UniqueViolation):
         _insert(ledger_db, **_base(status="superseded", **kw))  # same idempotency key
+
+
+def test_multi_null_sub_key_slot_still_dedups(ledger_db):
+    m = dict(predicate="children", cardinality="multi", sub_key=None)
+    _insert(ledger_db, **_base(value_json='{"n":1}', normalized_value='{"n":1}', **m))
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        _insert(ledger_db, **_base(value_json='{"n":2}', normalized_value='{"n":2}', **m))
+
+
+def test_invalid_cardinality_rejected(ledger_db):
+    with pytest.raises(psycopg.errors.CheckViolation):
+        _insert(ledger_db, **_base(cardinality="bogus"))

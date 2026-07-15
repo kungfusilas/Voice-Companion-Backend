@@ -15,11 +15,12 @@ CREATE TABLE IF NOT EXISTS canonical_facts (
     subject_type        text NOT NULL DEFAULT 'user',
     subject_id          text NOT NULL DEFAULT 'self',
     predicate           text NOT NULL,
-    cardinality         text NOT NULL,              -- single | multi | unknown (snapshotted)
+    cardinality         text NOT NULL CHECK (cardinality IN ('single','multi','unknown')),
     value_json          jsonb NOT NULL,
     normalized_value    text NOT NULL,
     sub_key             text,
-    status              text NOT NULL DEFAULT 'active',   -- active|superseded|deleted|expired|unconfirmed
+    status              text NOT NULL DEFAULT 'active'
+                        CHECK (status IN ('active','superseded','deleted','expired','unconfirmed')),
     scope               text NOT NULL DEFAULT 'global',
     companion_id        text,
     valid_from          date,
@@ -47,7 +48,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS one_active_single ON canonical_facts
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_multi ON canonical_facts
   (owner_user_id, subject_type, subject_id, predicate, scope,
-   COALESCE(companion_id, ''), sub_key)
+   COALESCE(companion_id, ''), COALESCE(sub_key, ''))
   WHERE status = 'active' AND cardinality = 'multi';
 
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_unknown ON canonical_facts
