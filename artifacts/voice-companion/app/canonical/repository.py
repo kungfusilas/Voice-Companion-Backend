@@ -30,6 +30,8 @@ class LedgerContext:
 
 
 def _as_date(v):
+    if isinstance(v, datetime):        # datetime subclasses date — normalize first
+        return v.date()
     if v is None or isinstance(v, date):
         return v
     try:
@@ -55,6 +57,8 @@ def row_to_fact(row: dict) -> Fact:
 
 
 def _iso(d):
+    if isinstance(d, datetime):
+        d = d.date()
     return d.isoformat() if isinstance(d, date) else None
 
 

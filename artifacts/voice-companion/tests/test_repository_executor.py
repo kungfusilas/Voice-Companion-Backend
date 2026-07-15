@@ -30,18 +30,27 @@ def test_row_to_fact_parses_dates_and_json():
 def test_fact_to_insert_serializes_dates_and_injects_context():
     f = Fact(id="x", subject_type="user", subject_id="self", predicate="home_city",
              value_json={"city": "Easton"}, normalized_value='{"city":"easton"}',
-             cardinality="single", valid_from=date(2026, 6, 1))
+             cardinality="single", valid_from=date(2026, 6, 1),
+             valid_until=date(2026, 12, 31), observed_at=date(2026, 7, 1))
     d = fact_to_insert(f, _ctx())
     assert d["owner_user_id"] == "u1" and d["source_exchange_id"] == "ex1"
     assert d["extractor_version"] == "v1" and d["engine_version"]
-    assert d["valid_from"] == "2026-06-01"          # ISO string, not a date object
-    assert d["value_json"] == {"city": "Easton"}    # jsonb stays structured
+    assert d["valid_from"] == "2026-06-01"
+    assert d["valid_until"] == "2026-12-31" and d["observed_at"] == "2026-07-01"
+    assert d["value_json"] == {"city": "Easton"}
 
 
 def test_enrich_event_injects_owner_and_exchange():
     ev = enrich_event({"event_type": "fact_created", "fact_id": "x"}, _ctx())
     assert ev["owner_user_id"] == "u1" and ev["source_exchange_id"] == "ex1"
     assert ev["event_type"] == "fact_created"
+
+
+def test_as_date_normalizes_datetime():
+    from datetime import datetime
+    from app.canonical.repository import _as_date, _iso
+    assert _as_date(datetime(2026, 7, 1, 13, 30)) == date(2026, 7, 1)
+    assert _iso(datetime(2026, 7, 1, 13, 30)) == "2026-07-01"
 
 
 def _insert_row(**over):
