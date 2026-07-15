@@ -141,3 +141,11 @@ class _NoClient:
         return self
     async def __aexit__(self, *a):
         return False
+
+
+def test_shadow_outer_envelope_exceeds_inner_budget():
+    # the _bg outer timeout at the call sites must exceed the inner shadow budget
+    import inspect
+    src = inspect.getsource(chat)
+    assert "timeout=45.0" in src            # both call sites pass the explicit outer budget
+    assert chat.SHADOW_TIMEOUT_SECONDS < 45.0

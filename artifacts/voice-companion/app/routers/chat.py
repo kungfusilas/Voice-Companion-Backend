@@ -185,6 +185,8 @@ async def _bg(coro, timeout: float = 20.0) -> None:
 
 
 SHADOW_TIMEOUT_SECONDS = 20.0   # now covers the dedicated canonical LLM call
+# inner shadow budget; the _extract_and_shadow _bg task runs with timeout=45.0 so legacy
+# (LLM+writes) + this budget both fit
 
 
 async def _extract_and_shadow(user_id: str, message: str, reply: str, exchange_id: str) -> None:
@@ -1221,7 +1223,8 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     asyncio.create_task(_bg(relationship.increment_message_count(user_id, persona.id)))
     asyncio.create_task(_bg(_extract_session_facts(user_id, request.session_id, request.message)))
     exchange_id = uuid.uuid4().hex
-    asyncio.create_task(_bg(_extract_and_shadow(user_id, request.message, reply, exchange_id)))
+    asyncio.create_task(_bg(_extract_and_shadow(user_id, request.message, reply, exchange_id),
+                            timeout=45.0))
     asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
     # Awaited inline (not fire-and-forget): the conversation archive is the durable
     # source of truth, so it must complete before we return rather than risk being
@@ -1509,7 +1512,8 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         _extract_session_facts(user_id, request.session_id, user_message)
                     ))
                     asyncio.create_task(_bg(
-                        _extract_and_shadow(user_id, user_message, full_text, exchange_id)
+                        _extract_and_shadow(user_id, user_message, full_text, exchange_id),
+                        timeout=45.0
                     ))
                     asyncio.create_task(_bg(
                         graphiti_memory.add_episode(user_id, user_message, full_text)

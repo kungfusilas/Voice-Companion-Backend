@@ -11,7 +11,7 @@ import hashlib
 import logging
 import os
 
-from app import claude
+from app import claude, memory_settings
 from app.memory_extractor import (_CORE_FACTS_SYSTEM, _CORE_FACTS_VALID_CATEGORIES,
                                   _parse_fact_array)
 
@@ -92,10 +92,15 @@ async def extract_canonical_candidates(user_id: str, user_message: str,
         items = _parse_fact_array(raw)
         if not items:
             return []
-        return [f for f in items
-                if isinstance(f, dict)
-                and f.get("category") in _CORE_FACTS_VALID_CATEGORIES
-                and isinstance(f.get("fact"), str) and f["fact"].strip()]
+        return [
+            {**f, "sensitivity": (f.get("sensitivity")
+                                  if f.get("sensitivity") in memory_settings.SENSITIVITY_TAGS
+                                  else "none")}
+            for f in items
+            if isinstance(f, dict)
+            and f.get("category") in _CORE_FACTS_VALID_CATEGORIES
+            and isinstance(f.get("fact"), str) and f["fact"].strip()
+        ]
     except Exception as exc:
         logger.warning("[canonical_extractor] EXCEPTION user=%.8s: %r", user_id[:8], exc)
         return []

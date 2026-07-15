@@ -52,3 +52,18 @@ def test_extract_candidates_never_raises(monkeypatch):
         raise RuntimeError("llm down")
     monkeypatch.setattr(canonical_extractor.claude, "send_message", boom)
     assert asyncio.run(canonical_extractor.extract_canonical_candidates("u1", "m", "r")) == []
+
+
+def test_sensitivity_coerced_to_vocabulary(monkeypatch):
+    payload = [
+        {"category": "health", "fact": "a", "sensitivity": "super-secret-custom"},
+        {"category": "location", "fact": "b", "sensitivity": "location"},
+        {"category": "work", "fact": "c"},
+    ]
+
+    async def fake_send(*a, **kw):
+        return json.dumps(payload)
+
+    monkeypatch.setattr(canonical_extractor.claude, "send_message", fake_send)
+    out = asyncio.run(canonical_extractor.extract_canonical_candidates("u1", "m", "r"))
+    assert [f["sensitivity"] for f in out] == ["none", "location", "none"]
