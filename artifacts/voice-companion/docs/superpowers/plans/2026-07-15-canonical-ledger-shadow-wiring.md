@@ -580,3 +580,12 @@ Announce and use **superpowers:finishing-a-development-branch**. In the finish s
 ## Roadmap — final Stage-3 plan
 
 - **3c — prompt + A/B gate:** extend `_CORE_FACTS_SYSTEM` to emit the nested `canonical{}` object behind a runtime toggle; the offline A/B corpus harness (run with LLM creds) asserting legacy capture-rate/precision/category/sensitivity/JSON-failure don't regress past a threshold; on pass, flip the toggle — the shadow ledger then starts recording real traffic. Carries the 3a checklist's remaining items (autocommit/concurrency docstrings, retry backoff, empty-config guard, an `asyncio.gather` 23505 race test).
+
+## Carry-forward from the Stage-3b whole-branch review (Opus: ready-to-merge, no must-fix)
+
+All five binding invariants verified with honest tests (legacy write byte-identical, shadow fail-open + reaches-no-user, no-op-without-`canonical`, at-most-once/timeout-safe, one `exchange_id`/turn shared with the archive). Fixed before merge: `get_settings` moved inside the `wait_for` timeout; the wiring test made env-independent + hermetic (no network); and the shadow path now **short-circuits before any DB call when no fact carries `canonical`** (true zero-DB in prod until 3c). Deferred (safe, address in 3c):
+
+- **Error-path completeness:** `extract_and_save_core_facts`'s outer `except` returns `facts=[]`, so if the LLM parse succeeded but the Supabase write later throws, the shadow ledger under-records that turn (shadow completeness is coupled to legacy write success). Rare + best-effort; to decouple, capture `parsed` in a scope the `except` sees and return `facts=parsed` on post-parse errors.
+- **Overloaded `"duplicate"` status** (also covers the all-gated-out case) and the happy-path `LegacyOutcome` test not asserting `status` — cosmetic; `shadow_ledger.run` consumes `facts`, never `status`.
+- **The 3a checklist** (autocommit/concurrency docstrings on `PsycopgExecutor`, retry backoff/jitter, empty `SUPABASE_URL`/`SERVICE_KEY` guard, and an `asyncio.gather`-based **23505 insert-race** test against `ledger_db` — the replay test today is sequential) — resolve when 3c makes the path live under real concurrency.
+- **No 50-cap on the ledger (intentional):** `test_capped_legacy_still_shadows` encodes that a legacy 50-fact cap must NOT suppress shadowing — keep this invariant visible in 3c.
