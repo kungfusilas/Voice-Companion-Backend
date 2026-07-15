@@ -215,3 +215,9 @@ def test_observed_at_threads_candidate_to_fact():
                   value_json={"city": "Easton"}, observed_at=date(2027, 3, 5))
     f = engine.apply_candidate([], c, now)[0]
     assert f.observed_at == date(2027, 3, 5)
+
+
+def test_candidate_subject_id_defaults_to_self():
+    from app.canonical.models import Candidate
+    c = Candidate(subject_type="user", predicate="home_city", value_json={"city": "X"})
+    assert c.subject_id == "self"

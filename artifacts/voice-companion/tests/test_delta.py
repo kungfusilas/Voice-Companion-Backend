@@ -11,7 +11,7 @@ def _home(city, conf="explicitly_stated", vf=None):
 
 def _active_home(city, version=1):
     from app.canonical.engine import normalize_value
-    return Fact(id=f"id-{city}", subject_type="user", subject_id="user",
+    return Fact(id=f"id-{city}", subject_type="user", subject_id="self",
                 predicate="home_city", value_json={"city": city},
                 normalized_value=normalize_value({"city": city}), version=version,
                 cardinality="single")
@@ -53,7 +53,7 @@ def test_dedup_is_empty_delta():
 def test_historical_candidate_is_insert_only_with_candidate_unconfirmed_event():
     from app.canonical.engine import normalize_value
     now = date(2027, 6, 1)
-    before = [Fact(id="cur", subject_type="user", subject_id="user", predicate="home_city",
+    before = [Fact(id="cur", subject_type="user", subject_id="self", predicate="home_city",
                    value_json={"city": "Easton"},
                    normalized_value=normalize_value({"city": "Easton"}),
                    version=2, cardinality="single", valid_from=date(2027, 1, 1))]
@@ -71,7 +71,7 @@ def test_delete_status_change_emits_fact_deleted():
     from app.canonical.engine import apply_control, normalize_value
     from app.canonical.models import Control
     now = date(2027, 6, 1)
-    before = [Fact(id="cur", subject_type="user", subject_id="user", predicate="home_city",
+    before = [Fact(id="cur", subject_type="user", subject_id="self", predicate="home_city",
                    value_json={"city": "Easton"},
                    normalized_value=normalize_value({"city": "Easton"}),
                    version=1, cardinality="single", status="active")]
@@ -85,7 +85,7 @@ def test_confirm_produces_update_op_not_dedup():
     from app.canonical.engine import apply_control, normalize_value
     from app.canonical.models import Control
     now = date(2027, 6, 1)
-    before = [Fact(id="cur", subject_type="user", subject_id="user", predicate="home_city",
+    before = [Fact(id="cur", subject_type="user", subject_id="self", predicate="home_city",
                    value_json={"city": "Easton"},
                    normalized_value=normalize_value({"city": "Easton"}),
                    version=1, cardinality="single", status="active",

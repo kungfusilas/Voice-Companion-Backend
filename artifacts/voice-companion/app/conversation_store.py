@@ -132,6 +132,7 @@ async def save_exchange(
     session_id: str,
     user_message: str,
     assistant_reply: str,
+    exchange_id: str | None = None,
 ) -> bool:
     """
     Append this exchange to the permanent conversation archive.
@@ -147,8 +148,10 @@ async def save_exchange(
     try:
         ts = _now_iso()
         new_msgs = [
-            {"role": "user",      "content": user_message,    "ts": ts},
-            {"role": "assistant", "content": assistant_reply, "ts": ts},
+            {"role": "user",      "content": user_message,    "ts": ts,
+             "id": f"{exchange_id}:user" if exchange_id else None},
+            {"role": "assistant", "content": assistant_reply, "ts": ts,
+             "id": f"{exchange_id}:assistant" if exchange_id else None},
         ]
 
         async with httpx.AsyncClient(timeout=10) as client:

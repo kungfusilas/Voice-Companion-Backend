@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 import httpx
@@ -193,11 +194,17 @@ _CORE_FACTS_VALID_CATEGORIES = frozenset(
 )
 
 
+@dataclass
+class LegacyOutcome:
+    status: str
+    facts: list[dict] = field(default_factory=list)
+
+
 async def extract_and_save_core_facts(
     user_id: str,
     user_message: str,
     ai_response: str,
-) -> None:
+) -> LegacyOutcome:
     """
     Fire-and-forget: extract permanent user facts from a conversation turn and
     upsert them into the user_core_facts Supabase table (max 50 per user).
@@ -224,7 +231,7 @@ async def extract_and_save_core_facts(
 
         facts: list = json.loads(cleaned)
         if not isinstance(facts, list) or not facts:
-            return
+            return LegacyOutcome(status="empty", facts=[])
 
         from app import memory_settings
         facts = [
@@ -239,15 +246,16 @@ async def extract_and_save_core_facts(
             and isinstance(f.get("fact"), str)
             and f["fact"].strip()
         ]
+        parsed = facts
         if not facts:
-            return
+            return LegacyOutcome(status="empty", facts=parsed)
 
         settings = await memory_settings.get_settings(user_id)
 
         supabase_url = os.environ.get("SUPABASE_URL", "").rstrip("/")
         service_key  = os.environ.get("SUPABASE_SERVICE_KEY", "")
         if not supabase_url or not service_key:
-            return
+            return LegacyOutcome(status="gated", facts=parsed)
 
         base_headers = {
             "Authorization": f"Bearer {service_key}",
@@ -267,7 +275,7 @@ async def extract_and_save_core_facts(
                 existing = []
 
             if len(existing) >= 50:
-                return  # hard cap reached
+                return LegacyOutcome(status="capped", facts=parsed)  # hard cap reached
 
             existing_set: set[tuple[str, str]] = {
                 (row["category"], row["fact"].lower().strip())
@@ -298,7 +306,7 @@ async def extract_and_save_core_facts(
                 existing_set.add(key)
 
             if not to_insert:
-                return
+                return LegacyOutcome(status="duplicate", facts=parsed)
 
             remaining  = 50 - len(existing)
             to_insert  = to_insert[:remaining]
@@ -312,11 +320,13 @@ async def extract_and_save_core_facts(
                 "[memory_extractor] core_facts saved: user=%s count=%d",
                 user_id[:8], len(to_insert),
             )
+            return LegacyOutcome(status="inserted", facts=parsed)
     except Exception as exc:
         logger.warning(
             "[memory_extractor] extract_and_save_core_facts EXCEPTION user=%s: %r",
             user_id[:8], exc,
         )
+        return LegacyOutcome(status="error", facts=[])
 
 
 def format_memories_for_prompt(memories: list[dict]) -> str:
