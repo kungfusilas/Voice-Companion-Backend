@@ -63,6 +63,12 @@ def test_gate_b_fails_on_low_validity_and_no_fact_canonical():
     assert names["no_fact_canonical"] is False
 
 
+def test_zero_emission_reports_zero_validity_and_coverage():
+    m = compute_metrics([_result("a", True, [_fact()])])   # a fact, but no canonical emitted
+    assert m["canonical_validity"] == 0.0
+    assert m["canonical_coverage"] == 0.0
+
+
 def test_gates_pass_on_clean_identical_runs():
     res = [_result("a", True, [_fact(canonical=_GOOD_CANON)], gold=["home_city"]),
            _result("b", True, [_fact("work", canonical={"predicate": "employer", "value_json": {"name": "Acme"}})], gold=["employer"]),

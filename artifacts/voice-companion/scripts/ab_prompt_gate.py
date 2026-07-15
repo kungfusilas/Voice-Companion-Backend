@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import pathlib
 import statistics
 import sys
@@ -104,7 +105,8 @@ def compute_metrics(results: list[dict]) -> dict:
         "category_share": cat_share, "category_counts": cat_counts,
         "sensitivity_share": sens_share, "sensitivity_counts": sens_counts,
         "canonical_emitted": len(emitted),
-        "canonical_validity": (len(valid) / len(emitted)) if emitted else 1.0,
+        # emitted==0 -> 0.0 (honest: the canonical layer produced nothing), not a vacuous 1.0
+        "canonical_validity": (len(valid) / len(emitted)) if emitted else 0.0,
         "canonical_coverage": (fact_turns_with_valid / len(expect)) if expect else 0.0,
         "gold_hit_rate": (gold_hits / len(gold_turns)) if gold_turns else 1.0,
         "no_fact_canonical": no_fact_canonical,
@@ -127,6 +129,7 @@ def evaluate_gate_a(old: dict, new: dict) -> list[tuple[str, bool, str]]:
               f"old={old['parse_failure_rate']:.1%} new={new['parse_failure_rate']:.1%}"))
     g.append(("capture_rate", new["capture_rate"] >= 0.95 * old["capture_rate"],
               f"old={old['capture_rate']:.1%} new={new['capture_rate']:.1%}"))
+    # old==0 means legacy extracted nothing at all — ratio is meaningless; treat as neutral
     ratio = (new["mean_facts_per_bearing_turn"] / old["mean_facts_per_bearing_turn"]
              if old["mean_facts_per_bearing_turn"] else 1.0)
     g.append(("mean_facts_ratio", 0.75 <= ratio <= 1.35, f"ratio={ratio:.2f}"))
@@ -154,6 +157,13 @@ def evaluate_gate_b(new: dict) -> list[tuple[str, bool, str]]:
     ]
 
 
+def _lat_stats(latencies: list[float], out_chars: list[float]) -> dict:
+    p95_idx = max(0, math.ceil(len(latencies) * 0.95) - 1)   # nearest-rank p95
+    return {"avg_s": statistics.mean(latencies),
+            "p95_s": sorted(latencies)[p95_idx],
+            "avg_out_chars": statistics.mean(out_chars)}
+
+
 async def _run_variant(turns, system_prompt, max_tokens, label):
     from app import claude
     results, latencies, out_chars = [], [], []
@@ -173,10 +183,7 @@ async def _run_variant(turns, system_prompt, max_tokens, label):
                         "facts": _valid_facts(items) if items else []})
         print(f"  [{label}] {t['id']}: "
               f"{'PARSE-FAIL' if items is None else str(len(results[-1]['facts'])) + ' facts'}")
-    lat = {"avg_s": statistics.mean(latencies),
-           "p95_s": sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)],
-           "avg_out_chars": statistics.mean(out_chars)}
-    return results, lat
+    return results, latencies, out_chars
 
 
 async def main():
@@ -194,16 +201,17 @@ async def main():
     print(f"corpus: {len(corpus)} turns × {args.runs} run(s) × 2 variants")
 
     old_all, new_all = [], []
-    old_lat = new_lat = None
+    old_lats, old_chars, new_lats, new_chars = [], [], [], []
     for i in range(args.runs):
         print(f"== run {i + 1}: legacy prompt ==")
-        r, old_lat = await _run_variant(corpus, memory_extractor._CORE_FACTS_SYSTEM, 400, "old")
-        old_all += r
+        r, lats, chars = await _run_variant(corpus, memory_extractor._CORE_FACTS_SYSTEM, 400, "old")
+        old_all += r; old_lats += lats; old_chars += chars
         print(f"== run {i + 1}: canonical prompt ==")
-        r, new_lat = await _run_variant(
+        r, lats, chars = await _run_variant(
             corpus, memory_extractor._CORE_FACTS_SYSTEM + memory_extractor._CORE_FACTS_CANONICAL_ADDON,
             900, "new")
-        new_all += r
+        new_all += r; new_lats += lats; new_chars += chars
+    old_lat, new_lat = _lat_stats(old_lats, old_chars), _lat_stats(new_lats, new_chars)
 
     old_m, new_m = compute_metrics(old_all), compute_metrics(new_all)
     gate_a, gate_b = evaluate_gate_a(old_m, new_m), evaluate_gate_b(new_m)
