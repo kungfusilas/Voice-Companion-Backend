@@ -12,7 +12,8 @@
 
 - **Legacy path unchanged.** The `user_core_facts` write in `extract_and_save_core_facts` must produce byte-identical behavior (same LLM prompt in 3b, same validation, dedup, 50-cap, insert). The refactor only *adds* a return value and reshapes early-returns into outcome returns.
 - **Shadow is invisible + fail-open.** `shadow_ledger.run` catches all exceptions and returns a summary; it never raises into the caller. In `chat.py` it runs inside a `_bg` task wrapped in `asyncio.wait_for(..., timeout)`; a shadow failure/timeout changes nothing the user sees.
-- **No-op without `canonical`.** A fact dict lacking a `canonical` object produces no candidate → no ledger write. Since 3b does not change the prompt, production extraction emits no `canonical` object, so the shadow path is a no-op in prod.
+- **No-op without `canonical`.** A fact dict lacking a `canonical` object produces no candidate → no ledger write. Since 3b does not change the prompt, production extraction emits no `canonical` object, so the shadow path is a no-op in prod. **Stronger claim, tested:** an absent / `null` / `{}` / malformed `canonical` causes **zero** executor (DB) calls.
+- **Timeout-safe / at-most-once.** A timeout or cancellation before, during, or immediately after persistence yields either zero commits or exactly one logical application — never a duplicate fact version or duplicate state transition. This holds because (a) `apply_candidate_durably` reloads and **dedups** (a re-applied candidate whose value is already active is an empty delta / no-op) and (b) the Stage-2 **idempotency index** makes an insert with the same `(owner, source_exchange_id, predicate, scope, companion, normalized_value, extractor_version)` an `ON CONFLICT DO NOTHING`. The persistence layer therefore treats "already applied" as **success, not error**. The per-turn `exchange_id` is that stable key. Proven by a same-`exchange_id` replay test.
 - **Honor 3a's pre-3b checklist:** resolve the `subject_id` default (Task 1); always pass non-null `source_exchange_id` + `extractor_version`; use `should_collect` gating before any shadow write.
 - **All prior tests + benchmark stay green.** Run from `artifacts/voice-companion/` via `./venv/bin/python`.
 
@@ -215,12 +216,30 @@ Create `tests/test_shadow_ledger.py`:
 import asyncio
 from datetime import date
 
+import pytest
+
 from app import shadow_ledger
 from app.memory_extractor import LegacyOutcome
 from app.canonical.repository import PsycopgExecutor
-from app.memory_settings import get_settings  # noqa: F401 (import path check)
 
 EXTRACTOR_VERSION = shadow_ledger.EXTRACTOR_VERSION
+_MISSING = object()
+
+
+class _SpyExecutor:
+    """Counts DB calls; optionally delegates to a real executor."""
+    def __init__(self, inner=None):
+        self.inner = inner
+        self.fetch_calls = 0
+        self.apply_calls = 0
+
+    async def fetch_active_facts(self, *a):
+        self.fetch_calls += 1
+        return await self.inner.fetch_active_facts(*a) if self.inner else []
+
+    async def apply_delta(self, *a, **kw):
+        self.apply_calls += 1
+        return await self.inner.apply_delta(*a, **kw) if self.inner else {"ok": True}
 
 
 def _fact(canonical=None, sensitivity="none"):
@@ -254,10 +273,34 @@ def test_maps_and_applies_a_canonical_fact(ledger_db):
     assert len(_active(ledger_db)) == 1
 
 
-def test_noop_when_no_canonical_object(ledger_db):
-    summ = _run(ledger_db, LegacyOutcome("inserted", [_fact(canonical=None)]))
+@pytest.mark.parametrize("canonical", [_MISSING, None, {}, "garbage", {"predicate": 123}])
+def test_absent_or_malformed_canonical_is_zero_db_activity(ledger_db, canonical):
+    spy = _SpyExecutor(PsycopgExecutor(ledger_db))
+    f = {"category": "personal", "fact": "Ben likes pickleball", "sensitivity": "none"}
+    if canonical is not _MISSING:
+        f["canonical"] = canonical
+    summ = asyncio.run(shadow_ledger.run(
+        LegacyOutcome("inserted", [f]), owner_user_id="u1", exchange_id="ex1",
+        executor=spy, settings=_OPEN, now=date(2026, 1, 1)))
     assert summ["applied"] == 0 and summ["unmapped"] == 1
+    assert spy.fetch_calls == 0 and spy.apply_calls == 0       # dormant plumbing: zero DB activity
     assert len(_active(ledger_db)) == 0
+
+
+def test_idempotent_replay_same_exchange_creates_no_duplicate(ledger_db):
+    # Simulates a timeout-after-commit retry: the SAME exchange_id + fact, applied twice,
+    # must yield exactly one active version (dedup on reload + idempotency index).
+    ex = PsycopgExecutor(ledger_db)
+    out = LegacyOutcome("inserted", [_fact(_HOME)])
+
+    async def body():
+        await shadow_ledger.run(out, owner_user_id="u1", exchange_id="ex1", executor=ex,
+                                settings=_OPEN, now=date(2026, 1, 1))
+        await shadow_ledger.run(out, owner_user_id="u1", exchange_id="ex1", executor=ex,
+                                settings=_OPEN, now=date(2026, 2, 1))  # replay
+
+    asyncio.run(body())
+    assert len(_active(ledger_db)) == 1                          # exactly one — no duplicate
 
 
 def test_gated_fact_is_not_applied(ledger_db):
@@ -350,7 +393,7 @@ async def run(outcome, *, owner_user_id: str, exchange_id: str, executor,
 - [ ] **Step 4: Run to verify it passes**
 
 Run: `./venv/bin/python -m pytest tests/test_shadow_ledger.py -q`
-Expected: PASS (5 passed).
+Expected: PASS (10 passed — the parametrized zero-DB-activity case counts as 5).
 
 - [ ] **Step 5: Commit**
 
@@ -369,7 +412,7 @@ git commit -m "feat(shadow): shadow_ledger.run — gate, map, apply durably, fai
 - Test: `tests/test_shadow_wiring.py`
 
 **Interfaces:**
-- Produces: `_extract_and_shadow(user_id, message, reply, exchange_id)` bg helper in `chat.py` — awaits `extract_and_save_core_facts`, then runs `shadow_ledger.run` (via a `PostgrestExecutor`, `should_collect` settings loaded once, wrapped in `asyncio.wait_for(SHADOW_TIMEOUT)`), swallowing everything. Both chat call sites mint a per-turn `exchange_id = uuid4().hex` and pass it to `_extract_and_shadow` and to `conversation_store.save_exchange`. `save_exchange` stamps each archived message dict with `"id"` derived from the exchange id.
+- Produces: `_extract_and_shadow(user_id, message, reply, exchange_id)` bg helper in `chat.py` — awaits `extract_and_save_core_facts`, then runs `shadow_ledger.run` (via a `PostgrestExecutor`, `should_collect` settings loaded once, wrapped in `asyncio.wait_for(SHADOW_TIMEOUT)`), swallowing everything. The streaming and non-streaming handlers are **mutually exclusive** (a request hits exactly one), so each handler mints **one** `exchange_id = uuid4().hex` for the whole turn and passes that **same variable** to BOTH `_extract_and_shadow` and `conversation_store.save_exchange` — never a fresh id per call. `save_exchange` stamps each archived message dict with `"id"` derived from the exchange id. (A sortable UUIDv7 would be a nice future refinement but is out of scope for 3b.)
 
 - [ ] **Step 1: Write the failing test**
 
