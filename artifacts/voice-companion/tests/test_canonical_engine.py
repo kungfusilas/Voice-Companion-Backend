@@ -34,7 +34,7 @@ def test_normalize_is_case_and_order_insensitive():
 def test_registry_cardinality():
     assert registry.cardinality("home_city") == "single"
     assert registry.cardinality("children") == "multi"
-    assert registry.cardinality("unknown_predicate") == "single"
+    assert registry.cardinality("unknown_predicate") == "unknown"
 
 
 def test_identity_single_ignores_value_multi_uses_subkey():
