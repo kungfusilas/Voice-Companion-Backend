@@ -79,3 +79,21 @@ def test_delete_status_change_emits_fact_deleted():
     d = compute_delta(before, after, engine_version="v1")
     assert len(d.supersedes) == 1 and d.supersedes[0]["new_status"] == "deleted"
     assert any(e["event_type"] == "fact_deleted" for e in d.events)
+
+
+def test_confirm_produces_update_op_not_dedup():
+    from app.canonical.engine import apply_control, normalize_value
+    from app.canonical.models import Control
+    now = date(2027, 6, 1)
+    before = [Fact(id="cur", subject_type="user", subject_id="user", predicate="home_city",
+                   value_json={"city": "Easton"},
+                   normalized_value=normalize_value({"city": "Easton"}),
+                   version=1, cardinality="single", status="active",
+                   confirmation_status="inferred")]
+    after, _ = apply_control(before, Control(op="confirm", key="user.home_city"), now)
+    d = compute_delta(before, after, engine_version="v1")
+    assert not d.is_empty()
+    assert len(d.updates) == 1
+    assert d.updates[0] == {"id": "cur", "expected_version": 1, "confirmation_status": "user_confirmed"}
+    kinds = [e["event_type"] for e in d.events]
+    assert "fact_confirmed" in kinds and "fact_deduped" not in kinds

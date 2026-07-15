@@ -19,10 +19,11 @@ from app.canonical.models import Fact
 class Delta:
     inserts: list[Fact] = field(default_factory=list)
     supersedes: list[dict] = field(default_factory=list)
+    updates: list[dict] = field(default_factory=list)
     events: list[dict] = field(default_factory=list)
 
     def is_empty(self) -> bool:
-        return not self.inserts and not self.supersedes
+        return not self.inserts and not self.supersedes and not self.updates
 
 
 def _event(event_type, fact, *, engine_version, candidate_id, related_fact_id=None):
@@ -58,20 +59,31 @@ def compute_delta(before, after, *, engine_version: str, candidate_id: str | Non
             delta.events.append(_event("candidate_unconfirmed", f, engine_version=engine_version,
                                        candidate_id=candidate_id))
 
-    # Existing rows whose status changed (active -> superseded/deleted).
+    # Existing rows: status transition (supersede/delete) OR confirmation change (CAS field update).
     for f in after:
         prev = before_by_id.get(f.id)
-        if prev is None or prev.status == f.status:
+        if prev is None:
             continue
-        delta.supersedes.append({
-            "id": f.id,
-            "expected_version": prev.version,
-            "new_status": f.status,
-            "valid_until": f.valid_until,
-        })
-        etype = "fact_deleted" if f.status == "deleted" else "fact_superseded"
-        delta.events.append(_event(etype, f, engine_version=engine_version,
-                                   candidate_id=candidate_id))
+        if prev.status != f.status:
+            delta.supersedes.append({
+                "id": f.id,
+                "expected_version": prev.version,
+                "new_status": f.status,
+                "valid_until": f.valid_until,
+            })
+            etype = "fact_deleted" if f.status == "deleted" else "fact_superseded"
+            delta.events.append(_event(etype, f, engine_version=engine_version,
+                                       candidate_id=candidate_id))
+        elif prev.confirmation_status != f.confirmation_status:
+            # same id, same status, confirmation changed — a confirm/correction:
+            # a CAS field update, NOT a dedup. (event vocab: fact_confirmed)
+            delta.updates.append({
+                "id": f.id,
+                "expected_version": prev.version,
+                "confirmation_status": f.confirmation_status,
+            })
+            delta.events.append(_event("fact_confirmed", f, engine_version=engine_version,
+                                       candidate_id=candidate_id))
 
     # Pure dedup / no-op: nothing new, nothing changed.
     if delta.is_empty() and len(after) == len(before) and after_ids == set(before_by_id):
