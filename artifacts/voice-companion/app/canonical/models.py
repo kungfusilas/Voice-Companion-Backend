@@ -35,7 +35,7 @@ class Candidate:
     subject_type: str
     predicate: str
     value_json: dict
-    subject_id: str = "user"
+    subject_id: str = "self"
     scope: str = "global"
     companion_id: str | None = None
     valid_from: date | None = None
@@ -49,6 +49,6 @@ class Candidate:
 class Control:
     op: str                          # forget|confirm|never_remember
     key: str                         # "<subject_type>.<predicate>" shorthand
-    subject_id: str = "user"
+    subject_id: str = "self"
     scope: str = "global"
     companion_id: str | None = None
