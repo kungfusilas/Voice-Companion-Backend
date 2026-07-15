@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 
+CONFIRMATION_STATUSES = frozenset({
+    "disputed", "inferred", "explicitly_stated", "user_confirmed", "user_corrected",
+})
+
 
 @dataclass
 class Fact:
@@ -21,6 +25,9 @@ class Fact:
     confirmation_status: str = "inferred"
     sensitivity: str = "none"
     sub_key: str | None = None
+    cardinality: str = "single"
+    observed_at: date | None = None
+    version: int = 1
 
 
 @dataclass
@@ -35,6 +42,7 @@ class Candidate:
     valid_until: date | None = None
     confirmation_status: str = "inferred"
     sensitivity: str = "none"
+    observed_at: date | None = None
 
 
 @dataclass

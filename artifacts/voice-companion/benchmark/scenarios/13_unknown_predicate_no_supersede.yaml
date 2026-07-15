@@ -1,0 +1,23 @@
+scenario: unknown_predicate_no_supersede
+description: an unregistered (unknown-cardinality) predicate accumulates differing values and never supersedes; identical repeats dedup
+events:
+  - time: "2027-01-01"
+    companion: aeva
+    user: "My friend Susan is great."
+    extraction:
+      - {subject_type: user, predicate: friend, value_json: {name: Susan}, confirmation_status: explicitly_stated}
+  - time: "2027-01-02"
+    companion: aeva
+    user: "My friend Michael too."
+    extraction:
+      - {subject_type: user, predicate: friend, value_json: {name: Michael}, confirmation_status: explicitly_stated}
+  - time: "2027-01-03"
+    companion: aeva
+    user: "Susan again."
+    extraction:
+      - {subject_type: user, predicate: friend, value_json: {name: susan}, confirmation_status: explicitly_stated}
+  - checkpoint: after
+    expected_active:
+      - {key: user.friend, value: {name: Susan}}
+      - {key: user.friend, value: {name: Michael}}
+    expected_counts: {user.friend: 2}

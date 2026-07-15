@@ -34,7 +34,7 @@ def test_normalize_is_case_and_order_insensitive():
 def test_registry_cardinality():
     assert registry.cardinality("home_city") == "single"
     assert registry.cardinality("children") == "multi"
-    assert registry.cardinality("unknown_predicate") == "single"
+    assert registry.cardinality("unknown_predicate") == "unknown"
 
 
 def test_identity_single_ignores_value_multi_uses_subkey():
@@ -159,3 +159,59 @@ def test_expiry_excludes_past_valid_until():
 def test_not_yet_valid_excluded():
     facts = engine.apply_candidate([], _cand(valid_from=date(2027, 1, 1)), now=date(2027, 1, 1))
     assert len(engine.active_facts(facts, date(2026, 6, 1))) == 0
+
+
+# ── T6: unknown cardinality ──────────────────────────────────────────────────
+
+def _friend(name):
+    return Candidate(subject_type="user", predicate="friend",
+                     value_json={"name": name}, confirmation_status="explicitly_stated")
+
+
+def test_unknown_predicate_accumulates_never_supersedes():
+    now = date(2027, 1, 1)
+    facts = engine.apply_candidate([], _friend("Susan"), now)
+    facts = engine.apply_candidate(facts, _friend("Michael"), now)
+    active = engine.active_facts(facts, now)
+    names = sorted(f.value_json["name"] for f in active)
+    assert names == ["Michael", "Susan"]  # both survive; no supersession
+
+
+def test_unknown_predicate_dedups_identical_value():
+    now = date(2027, 1, 1)
+    facts = engine.apply_candidate([], _friend("Susan"), now)
+    facts = engine.apply_candidate(facts, _friend("susan"), now)  # case-insensitive repeat
+    assert len(engine.active_facts(facts, now)) == 1
+
+
+def test_fact_carries_cardinality_and_sub_key_semantics():
+    now = date(2027, 1, 1)
+    facts = engine.apply_candidate([], _friend("Susan"), now)
+    f = engine.active_facts(facts, now)[0]
+    assert f.cardinality == "unknown"
+    assert f.sub_key is None  # unknown uses normalized_value, not sub_key column
+
+
+def test_superseded_multi_fact_retains_sub_key_on_out_of_order():
+    now = date(2027, 6, 1)
+    c1 = Candidate(subject_type="user", predicate="children",
+                   value_json={"name": "Emma", "age": 8},
+                   confirmation_status="explicitly_stated", valid_from=date(2027, 1, 1))
+    facts = engine.apply_candidate([], c1, now)
+    c2 = Candidate(subject_type="user", predicate="children",
+                   value_json={"name": "Emma", "age": 6},
+                   confirmation_status="explicitly_stated", valid_from=date(2026, 1, 1))
+    facts = engine.apply_candidate(facts, c2, now)
+    superseded = [f for f in facts if f.status == "superseded"]
+    assert len(superseded) == 1
+    assert superseded[0].sub_key == "emma"          # retains entity key despite superseded status
+    active = engine.active_facts(facts, now)
+    assert len(active) == 1 and active[0].value_json["age"] == 8
+
+
+def test_observed_at_threads_candidate_to_fact():
+    now = date(2027, 1, 1)
+    c = Candidate(subject_type="user", predicate="home_city",
+                  value_json={"city": "Easton"}, observed_at=date(2027, 3, 5))
+    f = engine.apply_candidate([], c, now)[0]
+    assert f.observed_at == date(2027, 3, 5)
