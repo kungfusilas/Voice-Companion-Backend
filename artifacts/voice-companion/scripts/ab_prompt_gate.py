@@ -27,18 +27,9 @@ VALID_CATEGORIES = {"family", "work", "location", "health", "goals", "personalit
 
 
 def parse_llm_output(raw: str) -> list | None:
-    cleaned = (raw or "").strip()
-    if "```" in cleaned:
-        parts = cleaned.split("```")
-        cleaned = parts[1] if len(parts) > 1 else parts[0]
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
-        cleaned = cleaned.strip()
-    try:
-        data = json.loads(cleaned)
-    except (ValueError, TypeError):
-        return None
-    return data if isinstance(data, list) else None
+    """Mirror of production parsing — delegates to the extractor's tolerant parser."""
+    from app.memory_extractor import _parse_fact_array
+    return _parse_fact_array(raw)
 
 
 def _valid_facts(items: list) -> list[dict]:
@@ -192,11 +183,14 @@ async def _run_variant(turns, system_prompt, max_tokens, label, run_idx):
         latencies.append(time.perf_counter() - t0)
         out_chars.append(len(raw or ""))
         items = parse_llm_output(raw)
-        results.append({"id": t["id"], "run": run_idx, "expect_facts": t["expect_facts"],
-                        "trap": bool(t.get("trap")),
-                        "gold_predicates": t.get("gold_predicates") or [],
-                        "parse_failed": items is None,
-                        "facts": _valid_facts(items) if items else []})
+        result = {"id": t["id"], "run": run_idx, "expect_facts": t["expect_facts"],
+                  "trap": bool(t.get("trap")),
+                  "gold_predicates": t.get("gold_predicates") or [],
+                  "parse_failed": items is None,
+                  "facts": _valid_facts(items) if items else []}
+        if items is None:
+            result["raw_excerpt"] = (raw or "")[:400]
+        results.append(result)
         print(f"  [{label}] {t['id']}: "
               f"{'PARSE-FAIL' if items is None else str(len(results[-1]['facts'])) + ' facts'}")
     return results, latencies, out_chars
@@ -209,12 +203,15 @@ def _per_turn_forensics(results: list[dict]) -> list[dict]:
     for r in results:
         predicates = [_canon_predicate(f["canonical"]) for f in r["facts"]
                       if "canonical" in f and _valid_canonical(f["canonical"])]
-        out.append({
+        entry = {
             "id": r["id"], "run": r["run"], "parse_failed": r["parse_failed"],
             "n_facts": len(r["facts"]), "predicates": predicates,
             "has_canonical_on_expect_false": bool(
                 not r["expect_facts"] and any("canonical" in f for f in r["facts"])),
-        })
+        }
+        if "raw_excerpt" in r:
+            entry["raw_excerpt"] = r["raw_excerpt"]
+        out.append(entry)
     return out
 
 
