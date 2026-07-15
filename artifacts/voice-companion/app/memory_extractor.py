@@ -254,6 +254,7 @@ async def extract_and_save_core_facts(
     upsert them into the user_core_facts Supabase table (max 50 per user).
     Never raises — failures are logged and swallowed.
     """
+    parsed: list = []
     try:
         enabled = _canonical_enabled(user_id)
         raw = await claude.send_message(
@@ -372,7 +373,7 @@ async def extract_and_save_core_facts(
             "[memory_extractor] extract_and_save_core_facts EXCEPTION user=%s: %r",
             user_id[:8], exc,
         )
-        return LegacyOutcome(status="error", facts=[])
+        return LegacyOutcome(status="error", facts=parsed)
 
 
 def format_memories_for_prompt(memories: list[dict]) -> str:

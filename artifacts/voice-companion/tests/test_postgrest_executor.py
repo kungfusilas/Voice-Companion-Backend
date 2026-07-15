@@ -82,3 +82,10 @@ def test_fetch_non_conflict_error_raises_runtimeerror():
     ex, _ = _ex(_FakeResp(500, {"code": "42P01", "message": "undefined_table"}))
     with pytest.raises(RuntimeError):
         asyncio.run(ex.fetch_active_facts("u1", "user", "self", "home_city", "global", None))
+
+
+def test_empty_config_raises_clearly(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="not configured"):
+        PostgrestExecutor()
