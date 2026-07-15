@@ -73,6 +73,20 @@ def test_invalid_cardinality_rejected(ledger_db):
         _insert(ledger_db, **_base(cardinality="bogus"))
 
 
+def test_rls_enabled_on_ledger_tables(ledger_db):
+    rows = ledger_db.execute(
+        "SELECT relname, relrowsecurity FROM pg_class "
+        "WHERE relname IN ('canonical_facts','canonical_fact_events')").fetchall()
+    assert len(rows) == 2 and all(rls for _, rls in rows)
+
+
+def test_rpc_not_executable_by_public(ledger_db):
+    # Default proacl is NULL (= PUBLIC may execute). After REVOKE FROM PUBLIC it is non-null.
+    acl = ledger_db.execute(
+        "SELECT proacl FROM pg_proc WHERE proname = 'apply_canonical_delta'").fetchone()[0]
+    assert acl is not None
+
+
 def test_migration_is_idempotent(ledger_db):
     import pathlib
     mig = (pathlib.Path(__file__).parent.parent
