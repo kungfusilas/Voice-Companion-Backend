@@ -3,7 +3,7 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "scripts"))
 from ab_prompt_gate import (parse_llm_output, compute_metrics,   # noqa: E402
-                            evaluate_gate_a, evaluate_gate_b)
+                            evaluate_gate_b, evaluate_gate_split)
 
 
 def _result(turn_id, expect, facts, parse_failed=False, trap=False, gold=None):
@@ -46,15 +46,6 @@ def test_compute_metrics_core_shapes():
     assert m["canonical_total"] == 1            # only "a"'s fact carries a canonical key
 
 
-def test_gate_a_fails_on_capture_and_trap_regression():
-    old = compute_metrics([_result("a", True, [_fact()]), _result("b", True, [_fact()]),
-                           _result("t", False, [], trap=True)])
-    new = compute_metrics([_result("a", True, []), _result("b", True, [_fact()]),
-                           _result("t", False, [_fact()], trap=True)])
-    names = {n: ok for n, ok, _ in evaluate_gate_a(old, new)}
-    assert names["capture_rate"] is False and names["trap_fp"] is False
-
-
 def test_gate_b_fails_on_low_validity_and_no_fact_canonical():
     new = compute_metrics([
         _result("a", True, [_fact(canonical={"predicate": 123})], gold=["home_city"]),
@@ -92,6 +83,15 @@ def test_gates_pass_on_clean_identical_runs():
            _result("b", True, [_fact("work", canonical={"predicate": "employer", "value_json": {"name": "Acme"}})], gold=["employer"]),
            _result("n", False, []),
            _result("t", False, [], trap=True)]
-    old, new = compute_metrics(res), compute_metrics(res)
-    assert all(ok for _, ok, _ in evaluate_gate_a(old, new))
+    new = compute_metrics(res)
     assert all(ok for _, ok, _ in evaluate_gate_b(new))
+
+
+def test_gate_split_includes_absolute_parse_check():
+    ok = compute_metrics([_result("a", True, [_fact(canonical=_GOOD_CANON)], gold=["home_city"])])
+    names = {n: ok_ for n, ok_, _ in evaluate_gate_split(ok)}
+    assert names["parse_failure_abs"] is True
+    bad = compute_metrics([_result(str(i), True, [_fact(canonical=_GOOD_CANON)], gold=["home_city"],
+                                   parse_failed=(i == 0)) for i in range(10)])   # 10% parse fail
+    names = {n: ok_ for n, ok_, _ in evaluate_gate_split(bad)}
+    assert names["parse_failure_abs"] is False

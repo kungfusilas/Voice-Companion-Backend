@@ -16,6 +16,7 @@ from app import memory as mem_store
 from app import memory_extractor
 from app import memory_settings
 from app import shadow_ledger
+from app import canonical_extractor
 from app.canonical.repository import PostgrestExecutor
 from app import bond_analyzer
 from app import personality_extractor
@@ -183,24 +184,30 @@ async def _bg(coro, timeout: float = 20.0) -> None:
             _BG_TASKS.discard(task)
 
 
-SHADOW_TIMEOUT_SECONDS = 8.0
+SHADOW_TIMEOUT_SECONDS = 20.0   # now covers the dedicated canonical LLM call
+# inner shadow budget; the _extract_and_shadow _bg task runs with timeout=45.0 so legacy
+# (LLM+writes) + this budget both fit
 
 
 async def _extract_and_shadow(user_id: str, message: str, reply: str, exchange_id: str) -> None:
-    """Legacy core-facts write, then the (fail-open, no-op-until-3c) shadow ledger."""
+    """Legacy core-facts write (always, untouched), then — for rollout-enabled
+    users only — the dedicated canonical extraction feeding the shadow ledger."""
     try:
-        outcome = await memory_extractor.extract_and_save_core_facts(user_id, message, reply)
+        await memory_extractor.extract_and_save_core_facts(user_id, message, reply)
     except Exception as exc:
         _chat_logger.warning("core-facts extraction failed user=%.8s: %r", user_id, exc)
-        return
-    if not any(isinstance(f, dict) and f.get("canonical")
-               for f in (getattr(outcome, "facts", None) or [])):
-        return  # no canonical candidates (the prod case until 3c) — skip get_settings + executor
+    if not canonical_extractor.canonical_enabled(user_id):
+        return  # dormant path: no second call, no settings read, no executor
     try:
         async def _shadow():
+            candidates = await canonical_extractor.extract_canonical_candidates(
+                user_id, message, reply)
+            if not any(isinstance(f, dict) and f.get("canonical") for f in candidates):
+                return
             settings = await memory_settings.get_settings(user_id)
-            return await shadow_ledger.run(
-                outcome, owner_user_id=user_id, exchange_id=exchange_id,
+            await shadow_ledger.run(
+                memory_extractor.LegacyOutcome("canonical", candidates),
+                owner_user_id=user_id, exchange_id=exchange_id,
                 executor=PostgrestExecutor(), settings=settings)
         await asyncio.wait_for(_shadow(), timeout=SHADOW_TIMEOUT_SECONDS)
     except Exception as exc:
@@ -1216,7 +1223,8 @@ async def _chat_impl(request: ChatRequest, req: Request, user_id: str) -> JSONRe
     asyncio.create_task(_bg(relationship.increment_message_count(user_id, persona.id)))
     asyncio.create_task(_bg(_extract_session_facts(user_id, request.session_id, request.message)))
     exchange_id = uuid.uuid4().hex
-    asyncio.create_task(_bg(_extract_and_shadow(user_id, request.message, reply, exchange_id)))
+    asyncio.create_task(_bg(_extract_and_shadow(user_id, request.message, reply, exchange_id),
+                            timeout=45.0))
     asyncio.create_task(_bg(graphiti_memory.add_episode(user_id, request.message, reply)))
     # Awaited inline (not fire-and-forget): the conversation archive is the durable
     # source of truth, so it must complete before we return rather than risk being
@@ -1504,7 +1512,8 @@ async def chat_stream(request: ChatRequest, req: Request, user_id: str = Depends
                         _extract_session_facts(user_id, request.session_id, user_message)
                     ))
                     asyncio.create_task(_bg(
-                        _extract_and_shadow(user_id, user_message, full_text, exchange_id)
+                        _extract_and_shadow(user_id, user_message, full_text, exchange_id),
+                        timeout=45.0
                     ))
                     asyncio.create_task(_bg(
                         graphiti_memory.add_episode(user_id, user_message, full_text)
