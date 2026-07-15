@@ -81,10 +81,11 @@ def test_rls_enabled_on_ledger_tables(ledger_db):
 
 
 def test_rpc_not_executable_by_public(ledger_db):
-    # Default proacl is NULL (= PUBLIC may execute). After REVOKE FROM PUBLIC it is non-null.
-    acl = ledger_db.execute(
-        "SELECT proacl FROM pg_proc WHERE proname = 'apply_canonical_delta'").fetchone()[0]
-    assert acl is not None
+    # Direct check: the public pseudo-role must NOT hold EXECUTE on the RPC.
+    ok = ledger_db.execute(
+        "SELECT has_function_privilege('public', "
+        "'apply_canonical_delta(jsonb,jsonb,jsonb,jsonb)', 'EXECUTE')").fetchone()[0]
+    assert ok is False
 
 
 def test_migration_is_idempotent(ledger_db):
