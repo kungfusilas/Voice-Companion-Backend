@@ -69,6 +69,11 @@ def test_zero_emission_reports_zero_validity_and_coverage():
     assert m["canonical_coverage"] == 0.0
 
 
+def test_no_gold_turns_reports_zero_hit():
+    m = compute_metrics([_result("a", True, [_fact(canonical=_GOOD_CANON)])])  # no gold labels
+    assert m["gold_hit_rate"] == 0.0
+
+
 def test_gates_pass_on_clean_identical_runs():
     res = [_result("a", True, [_fact(canonical=_GOOD_CANON)], gold=["home_city"]),
            _result("b", True, [_fact("work", canonical={"predicate": "employer", "value_json": {"name": "Acme"}})], gold=["employer"]),

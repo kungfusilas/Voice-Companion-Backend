@@ -108,7 +108,8 @@ def compute_metrics(results: list[dict]) -> dict:
         # emitted==0 -> 0.0 (honest: the canonical layer produced nothing), not a vacuous 1.0
         "canonical_validity": (len(valid) / len(emitted)) if emitted else 0.0,
         "canonical_coverage": (fact_turns_with_valid / len(expect)) if expect else 0.0,
-        "gold_hit_rate": (gold_hits / len(gold_turns)) if gold_turns else 1.0,
+        # no gold-labeled turns -> 0.0 (forces the corpus to carry gold labels), not a vacuous 1.0
+        "gold_hit_rate": (gold_hits / len(gold_turns)) if gold_turns else 0.0,
         "no_fact_canonical": no_fact_canonical,
     }
 

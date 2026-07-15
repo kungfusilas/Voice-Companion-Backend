@@ -246,6 +246,7 @@ async def apply_candidate_durably(executor, candidate, ctx: LedgerContext,
             return {"ok": True, "changed": True, "result": res}
         except ConflictError as exc:
             last_exc = exc
-            await asyncio.sleep(0.05 * (attempt + 1))
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.05 * (attempt + 1))
             continue
     raise last_exc or ConflictError("retry exhausted")
