@@ -15,7 +15,24 @@ from app import memory_settings
 
 logger = logging.getLogger(__name__)
 
-EXTRACTOR_VERSION = "core-facts-2026-07-14"
+EXTRACTOR_VERSION = "core-facts-canonical-v1"
+
+_EXTRACTION_ALLOWED_CONFIRMATIONS = frozenset({"explicitly_stated", "inferred"})
+_AUTHORITY_KEYS = ("subject_type", "subject_id", "scope", "companion_id")
+
+
+def sanitize_extraction_canonical(obj):
+    """Authority boundary for the EXTRACTION pathway: the LLM proposes information;
+    the application decides subject, scope, and authority. Strips subject/scope keys
+    (mapper defaults apply: user/self/global/None) and clamps confirmation_status to
+    the two informational values — an extractor can never mint user_confirmed."""
+    if not isinstance(obj, dict):
+        return obj
+    out = {k: v for k, v in obj.items() if k not in _AUTHORITY_KEYS}
+    conf = out.get("confirmation_status")
+    if conf is not None and conf not in _EXTRACTION_ALLOWED_CONFIRMATIONS:
+        out["confirmation_status"] = "inferred"
+    return out
 
 
 async def run(outcome, *, owner_user_id: str, exchange_id: str, executor,
@@ -27,7 +44,7 @@ async def run(outcome, *, owner_user_id: str, exchange_id: str, executor,
         try:
             canonical = f.get("canonical") if isinstance(f, dict) else None
             sensitivity = (f.get("sensitivity") if isinstance(f, dict) else None) or "none"
-            candidate = map_canonical(canonical, sensitivity=sensitivity, now=now)
+            candidate = map_canonical(sanitize_extraction_canonical(canonical), sensitivity=sensitivity, now=now)
             if candidate is None:
                 summary["unmapped"] += 1
                 continue
