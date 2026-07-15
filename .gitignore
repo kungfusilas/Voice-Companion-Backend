@@ -63,3 +63,6 @@ voice-companion.zip
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Benchmark runner output (regenerated on every run)
+artifacts/voice-companion/benchmark/results/

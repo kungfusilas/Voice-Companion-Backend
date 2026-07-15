@@ -740,3 +740,17 @@ Announce and use **superpowers:finishing-a-development-branch** to verify tests,
 3. **Live wiring** — nested-`canonical` prompt behind the A/B corpus gate; `extract_and_save_core_facts` → `LegacyOutcome` refactor; per-turn `exchange_id` minting + threading (and `id` on archived messages); always-run `shadow_ledger.run` with timeout + `should_collect` gating; `repository.py` load/persist with retry-on-conflict.
 4. **Observability** — `ledger_shadow_runs` receipts, divergence recording + classifier, daily rollup + 0.5–1% agreement sample, read-only admin endpoint (real admin authz).
 5. **Privacy & lifecycle** — retention job (30–90d on detailed values), `delete_account` extension to all four tables, sensitive-payload metadata-only enforcement.
+
+## Carry-forward items from the Stage 1 whole-branch review (address in later stages)
+
+Fixed in Stage 1: the `confirm` control is now a first-class `updates` op + `fact_confirmed` event in `compute_delta` (was silently dropped / mislabeled `fact_deduped`).
+
+Deferred, with the stage that owns each:
+
+- **Stage 2 — RPC apply ordering (important):** the delta hands the RPC an insert (new `active` row) *and* a supersede op for the same slot. The `apply_canonical_delta` RPC MUST apply supersedes/deletes/updates **before** inserts (or use `DEFERRABLE INITIALLY DEFERRED` constraints) — otherwise both rows are momentarily `active` and violate `one_active_single`/`one_active_multi`. Add a migration test for this.
+- **Stage 2 — `subject_id` default alignment:** the mapper defaults `subject_id="self"` while the `Candidate` dataclass defaults `"user"`. Inert today (all production candidates flow through the mapper), but any non-mapper `Candidate` reaching persistence would fragment a slot (`user.self.*` vs `user.user.*`). Pick one canonical default (design doc points to `"self"`) and align both before persistence.
+- **Stage 3 — engine `decision_reason` to disambiguate no-ops:** `compute_delta` labels every empty-delta outcome `fact_deduped`, which overstates agreement — a `prohibited` or confirmation-rank-`rejected` candidate also produces `before == after`. Distinguishing dedup / prohibited / rejected needs a `decision_reason` emitted by the engine; thread it through when controls/rejections are routed through the ledger. Also refine `candidate_unconfirmed` (currently a catch-all for any non-active insert).
+- **Stage 3 — mapper scope/subject_type clamping:** the mapper validates `confirmation_status` but passes `scope`/`subject_type` through unclamped; a malformed `scope` yields a fact `active_facts` never surfaces (silent phantom divergence). Clamp unknown values to safe defaults.
+- **Stage 4/5 — event payload `sensitivity` + `decision_reason`:** `_event` payloads embed `normalized_value` but no `sensitivity`, so a downstream recorder can't gate without re-joining to the `Fact`. Thread `sensitivity` (and `decision_reason`) into `_event` when observability/privacy land, per the spec's metadata-only-for-sensitive rule.
+- **Spec reconciliation:** add `fact_confirmed` to the `canonical_fact_events.event_type` list in the design doc (it is already in the user's proposed event vocabulary; the enumerated list in the spec omitted it).
+- **Minor test polish:** case-insensitivity/whitespace test for `canonical_predicate`/`cardinality`; assert `sub_key(unregistered) is None`; note that `value_hint` is intentionally partial (several registered predicates have no hint).
