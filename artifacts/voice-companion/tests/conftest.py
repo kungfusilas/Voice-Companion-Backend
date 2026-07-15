@@ -61,3 +61,14 @@ def pg_conn(_pg_server):
         conn.execute("DROP SCHEMA IF EXISTS public CASCADE")
         conn.execute("CREATE SCHEMA public")
         yield conn
+
+
+import pathlib
+
+_MIGRATION = pathlib.Path(__file__).parent.parent / "migrations" / "0002_canonical_ledger_shadow.sql"
+
+
+@pytest.fixture
+def ledger_db(pg_conn):
+    pg_conn.execute(_MIGRATION.read_text())
+    return pg_conn
