@@ -29,12 +29,23 @@ def normalize_value(value_json: dict) -> str:
 
 
 def identity(subject_type, subject_id, predicate, scope, companion_id, value_json, reg=registry) -> tuple:
-    """Identity for supersession/dedup. Single-valued ignores value; multi uses sub_key."""
-    sk = reg.sub_key(predicate, value_json) if reg.cardinality(predicate) == "multi" else None
-    return (subject_type, subject_id, predicate, scope, companion_id, sk)
+    """Slot identity for supersession/dedup.
+    single  -> value-independent (one slot per predicate)
+    multi   -> keyed by sub_key (one slot per entity)
+    unknown -> keyed by normalized_value (each distinct value is its own slot,
+               so differing values accumulate and never supersede)."""
+    card = reg.cardinality(predicate)
+    if card == "multi":
+        disc = reg.sub_key(predicate, value_json)
+    elif card == "unknown":
+        disc = normalize_value(value_json)
+    else:
+        disc = None
+    return (subject_type, subject_id, predicate, scope, companion_id, disc)
 
 
-def _new_fact(cand: Candidate, now: date, status="active", supersedes=None, sub_key=None) -> Fact:
+def _new_fact(cand: Candidate, now: date, status="active", supersedes=None,
+              sub_key=None, cardinality="single") -> Fact:
     return Fact(
         id=str(uuid.uuid4()),
         subject_type=cand.subject_type, subject_id=cand.subject_id, predicate=cand.predicate,
@@ -43,6 +54,7 @@ def _new_fact(cand: Candidate, now: date, status="active", supersedes=None, sub_
         valid_from=cand.valid_from or now, valid_until=cand.valid_until,
         supersedes_fact_id=supersedes, confirmation_status=cand.confirmation_status,
         sensitivity=cand.sensitivity, sub_key=sub_key,
+        cardinality=cardinality, observed_at=cand.observed_at,
     )
 
 
@@ -50,10 +62,11 @@ def apply_candidate(facts, cand: Candidate, now: date, reg=registry, prohibited=
     """Run a proposed fact through the lifecycle. Returns a NEW list; never mutates input."""
     facts = list(facts)
     if prohibited and f"{cand.subject_type}.{cand.predicate}" in prohibited:
-        return facts  # user prohibited this key from ever being stored
+        return facts
+    card = reg.cardinality(cand.predicate)
+    stored_sk = reg.sub_key(cand.predicate, cand.value_json) if card == "multi" else None
     ident = identity(cand.subject_type, cand.subject_id, cand.predicate, cand.scope,
                      cand.companion_id, cand.value_json, reg)
-    sk = ident[-1]
     norm = normalize_value(cand.value_json)
     peers = [
         f for f in facts
@@ -61,21 +74,20 @@ def apply_candidate(facts, cand: Candidate, now: date, reg=registry, prohibited=
         and identity(f.subject_type, f.subject_id, f.predicate, f.scope, f.companion_id, f.value_json, reg) == ident
     ]
     if not peers:
-        facts.append(_new_fact(cand, now, sub_key=sk))
+        facts.append(_new_fact(cand, now, sub_key=stored_sk, cardinality=card))
         return facts
     cur = peers[0]
     if cur.normalized_value == norm:
-        return facts  # dedup / idempotent — same value, same identity
+        return facts
     cand_from = cand.valid_from or now
     if _CONFIRM_RANK[cand.confirmation_status] < _CONFIRM_RANK[cur.confirmation_status]:
-        return facts  # lower-authority candidate cannot override a higher-authority current fact
+        return facts
     if cur.valid_from and cand_from < cur.valid_from:
-        # candidate is historical (older effective date) → record as superseded, keep current
-        facts.append(_new_fact(cand, now, status="superseded"))
+        facts.append(_new_fact(cand, now, status="superseded", sub_key=stored_sk, cardinality=card))
         return facts
     idx = facts.index(cur)
     facts[idx] = Fact(**{**cur.__dict__, "status": "superseded", "valid_until": cand_from})
-    facts.append(_new_fact(cand, now, supersedes=cur.id, sub_key=sk))
+    facts.append(_new_fact(cand, now, supersedes=cur.id, sub_key=stored_sk, cardinality=card))
     return facts
 
 

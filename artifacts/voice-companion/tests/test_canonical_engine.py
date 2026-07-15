@@ -159,3 +159,34 @@ def test_expiry_excludes_past_valid_until():
 def test_not_yet_valid_excluded():
     facts = engine.apply_candidate([], _cand(valid_from=date(2027, 1, 1)), now=date(2027, 1, 1))
     assert len(engine.active_facts(facts, date(2026, 6, 1))) == 0
+
+
+# ── T6: unknown cardinality ──────────────────────────────────────────────────
+
+def _friend(name):
+    return Candidate(subject_type="user", predicate="friend",
+                     value_json={"name": name}, confirmation_status="explicitly_stated")
+
+
+def test_unknown_predicate_accumulates_never_supersedes():
+    now = date(2027, 1, 1)
+    facts = engine.apply_candidate([], _friend("Susan"), now)
+    facts = engine.apply_candidate(facts, _friend("Michael"), now)
+    active = engine.active_facts(facts, now)
+    names = sorted(f.value_json["name"] for f in active)
+    assert names == ["Michael", "Susan"]  # both survive; no supersession
+
+
+def test_unknown_predicate_dedups_identical_value():
+    now = date(2027, 1, 1)
+    facts = engine.apply_candidate([], _friend("Susan"), now)
+    facts = engine.apply_candidate(facts, _friend("susan"), now)  # case-insensitive repeat
+    assert len(engine.active_facts(facts, now)) == 1
+
+
+def test_fact_carries_cardinality_and_sub_key_semantics():
+    now = date(2027, 1, 1)
+    facts = engine.apply_candidate([], _friend("Susan"), now)
+    f = engine.active_facts(facts, now)[0]
+    assert f.cardinality == "unknown"
+    assert f.sub_key is None  # unknown uses normalized_value, not sub_key column
