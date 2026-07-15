@@ -116,7 +116,7 @@ def _json(value: Any) -> str:
 
 
 class PsycopgExecutor:
-    """Test/local executor over a sync psycopg connection (async via to_thread)."""
+    """Test/local executor over a sync psycopg connection (async via to_thread). Requires an AUTOCOMMIT connection; a single instance is NOT safe for concurrent (asyncio.gather) use — use one executor per coroutine."""
 
     _COLS = ("id", "owner_user_id", "subject_type", "subject_id", "predicate",
              "cardinality", "value_json", "normalized_value", "sub_key", "status",
@@ -171,6 +171,8 @@ class PostgrestExecutor:
                  client_factory=None):
         self._url = (base_url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
         self._key = service_key or os.environ.get("SUPABASE_SERVICE_KEY", "")
+        if not self._url or not self._key:
+            raise RuntimeError("PostgrestExecutor: SUPABASE_URL / SUPABASE_SERVICE_KEY not configured")
         self._client_factory = client_factory or _default_client_factory
 
     def _headers(self, prefer="return=representation"):
@@ -221,7 +223,7 @@ async def apply_candidate_durably(executor, candidate, ctx: LedgerContext,
     Reloads + recomputes on a ConflictError (CAS 40001 / race 23505)."""
     now = now or datetime.now(timezone.utc).date()
     last_exc: ConflictError | None = None
-    for _ in range(max_retries):
+    for attempt in range(max_retries):
         rows = await executor.fetch_active_facts(
             ctx.owner_user_id, candidate.subject_type, candidate.subject_id,
             candidate.predicate, candidate.scope, candidate.companion_id)
@@ -244,5 +246,7 @@ async def apply_candidate_durably(executor, candidate, ctx: LedgerContext,
             return {"ok": True, "changed": True, "result": res}
         except ConflictError as exc:
             last_exc = exc
+            if attempt < max_retries - 1:
+                await asyncio.sleep(0.05 * (attempt + 1))
             continue
     raise last_exc or ConflictError("retry exhausted")

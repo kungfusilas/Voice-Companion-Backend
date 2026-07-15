@@ -153,3 +153,22 @@ def test_durable_unknown_accumulates_distinct_values(ledger_db):
     rows = asyncio.run(ex.fetch_active_facts("u1", "user", "self", "friend", "global", None))
     names = sorted(r["value_json"]["name"] for r in rows)
     assert names == ["Mike", "Sue"] and len(rows) == 2
+
+
+def test_concurrent_inserts_same_slot_converge(ledger_db, _pg_server):
+    # Two executors on SEPARATE connections racing the same empty slot: the loser
+    # hits the partial unique index (23505 -> ConflictError), reloads, and resolves
+    # by engine decision. Invariant: exactly one active row survives.
+    import psycopg
+    with psycopg.connect(f"{_pg_server} dbname=postgres", autocommit=True) as conn2:
+        ex1, ex2 = PsycopgExecutor(ledger_db), PsycopgExecutor(conn2)
+
+        async def body():
+            await asyncio.gather(
+                apply_candidate_durably(ex1, _home("Easton"), _ctx("r1"), now=date(2026, 1, 1)),
+                apply_candidate_durably(ex2, _home("Reading"), _ctx("r2"), now=date(2026, 1, 1)),
+            )
+
+        asyncio.run(body())
+        rows = _active(PsycopgExecutor(ledger_db))
+        assert len(rows) == 1

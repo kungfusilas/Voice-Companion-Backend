@@ -47,6 +47,7 @@ _VALUE_HINTS: dict[str, str] = {
     "partner": '{"name": str}',
     "children": '{"name": str, "age"?: int}',
     "pets": '{"name": str, "species"?: str}',
+    "hobbies": '{"name": str}',
     "birthday": '{"date": "YYYY-MM-DD"}',
     "dietary_restriction": '{"restriction": str}',
     "pronouns": '{"pronouns": str}',
@@ -82,3 +83,12 @@ def is_registered(predicate: str) -> bool:
 
 def value_hint(predicate: str) -> str | None:
     return _VALUE_HINTS.get(canonical_predicate(predicate))
+
+
+# Predicates the EXTRACTION PROMPT is encouraged to produce. Deliberately a
+# subset of what the engine supports (e.g. therapy_note / current_trip are
+# engine-supported for scenarios but not solicited from the core-facts prompt).
+EXTRACTION_PREDICATES: tuple[str, ...] = (
+    "home_city", "employer", "job_title", "partner", "children",
+    "pets", "hobbies", "birthday", "dietary_restriction", "pronouns",
+)

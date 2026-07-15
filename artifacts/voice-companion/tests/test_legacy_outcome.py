@@ -60,3 +60,24 @@ def test_never_raises_returns_error_outcome(monkeypatch):
     monkeypatch.setattr(memory_extractor.claude, "send_message", boom)
     out = asyncio.run(memory_extractor.extract_and_save_core_facts("u1", "msg", "reply"))
     assert out.status == "error" and out.facts == []
+
+
+def test_post_parse_error_still_returns_facts(monkeypatch):
+    _fake_llm(monkeypatch, [{"category": "location", "fact": "Lives in Easton",
+                             "sensitivity": "none"}])
+    import httpx
+
+    class _BoomClient:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *a):
+            return False
+        async def get(self, *a, **kw):
+            raise RuntimeError("supabase down")
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **kw: _BoomClient())
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_KEY", "key")
+    out = asyncio.run(memory_extractor.extract_and_save_core_facts("u1", "m", "r"))
+    assert out.status == "error"
+    assert len(out.facts) == 1

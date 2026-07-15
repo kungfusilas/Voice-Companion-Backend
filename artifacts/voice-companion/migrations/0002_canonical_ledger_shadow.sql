@@ -192,3 +192,29 @@ BEGIN
     RETURN jsonb_build_object('ok', true, 'inserted', inserted);
 END;
 $$;
+
+-- ── Lockdown: the ledger is service-key-only (spec: "no user-facing reads") ──
+-- RLS on + zero policies: anon/authenticated get nothing even where legacy
+-- grants exist; service_role bypasses RLS. Role-specific statements are
+-- guarded so this migration also runs on local test Postgres (no such roles).
+
+ALTER TABLE canonical_facts        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE canonical_fact_events  ENABLE ROW LEVEL SECURITY;
+
+REVOKE ALL ON FUNCTION apply_canonical_delta(jsonb, jsonb, jsonb, jsonb) FROM PUBLIC;
+
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        REVOKE ALL ON TABLE canonical_facts, canonical_fact_events FROM anon;
+        REVOKE ALL ON FUNCTION apply_canonical_delta(jsonb, jsonb, jsonb, jsonb) FROM anon;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+        REVOKE ALL ON TABLE canonical_facts, canonical_fact_events FROM authenticated;
+        REVOKE ALL ON FUNCTION apply_canonical_delta(jsonb, jsonb, jsonb, jsonb) FROM authenticated;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+        GRANT ALL ON TABLE canonical_facts, canonical_fact_events TO service_role;
+        GRANT EXECUTE ON FUNCTION apply_canonical_delta(jsonb, jsonb, jsonb, jsonb) TO service_role;
+    END IF;
+END $$;
