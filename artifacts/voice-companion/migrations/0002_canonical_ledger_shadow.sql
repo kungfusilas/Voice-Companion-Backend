@@ -87,3 +87,72 @@ CREATE TABLE IF NOT EXISTS canonical_fact_events (
 
 CREATE INDEX IF NOT EXISTS canonical_fact_events_exchange_idx
   ON canonical_fact_events (owner_user_id, source_exchange_id);
+
+CREATE OR REPLACE FUNCTION apply_canonical_delta(
+    p_supersedes jsonb DEFAULT '[]',
+    p_updates    jsonb DEFAULT '[]',
+    p_inserts    jsonb DEFAULT '[]',
+    p_events     jsonb DEFAULT '[]'
+) RETURNS jsonb
+LANGUAGE plpgsql AS $$
+DECLARE
+    ins jsonb;
+    ev  jsonb;
+    inserted integer := 0;
+    n integer;
+BEGIN
+    -- (Task 4 will add supersede/update handling BEFORE this insert block.)
+
+    -- Inserts: idempotent on the candidate identity; the partial unique indexes
+    -- enforce one active row per slot.
+    FOR ins IN SELECT * FROM jsonb_array_elements(p_inserts) LOOP
+        INSERT INTO canonical_facts (
+            id, owner_user_id, subject_type, subject_id, predicate, cardinality,
+            value_json, normalized_value, sub_key, status, scope, companion_id,
+            valid_from, valid_until, observed_at, supersedes_fact_id,
+            confirmation_status, sensitivity, version, extractor_version,
+            mapper_version, engine_version, registry_version, decision_reason,
+            source_exchange_id)
+        VALUES (
+            COALESCE(NULLIF(ins->>'id','')::uuid, gen_random_uuid()),
+            ins->>'owner_user_id',
+            COALESCE(ins->>'subject_type','user'),
+            COALESCE(ins->>'subject_id','self'),
+            ins->>'predicate', ins->>'cardinality',
+            ins->'value_json', ins->>'normalized_value', ins->>'sub_key',
+            COALESCE(ins->>'status','active'), COALESCE(ins->>'scope','global'),
+            ins->>'companion_id',
+            NULLIF(ins->>'valid_from','')::date,
+            NULLIF(ins->>'valid_until','')::date,
+            NULLIF(ins->>'observed_at','')::date,
+            NULLIF(ins->>'supersedes_fact_id','')::uuid,
+            COALESCE(ins->>'confirmation_status','inferred'),
+            COALESCE(ins->>'sensitivity','none'),
+            COALESCE((ins->>'version')::int, 1),
+            ins->>'extractor_version', ins->>'mapper_version', ins->>'engine_version',
+            ins->>'registry_version', ins->>'decision_reason', ins->>'source_exchange_id')
+        ON CONFLICT (owner_user_id, source_exchange_id, predicate, scope,
+                     COALESCE(companion_id, ''), normalized_value, extractor_version)
+        DO NOTHING;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        inserted := inserted + n;
+    END LOOP;
+
+    -- Events: appended in the SAME transaction as the delta.
+    FOR ev IN SELECT * FROM jsonb_array_elements(p_events) LOOP
+        INSERT INTO canonical_fact_events (
+            owner_user_id, source_exchange_id, candidate_id, event_type, fact_id,
+            related_fact_id, predicate, engine_version, mapper_version,
+            extractor_version, registry_version, decision_reason, payload_json)
+        VALUES (
+            ev->>'owner_user_id', ev->>'source_exchange_id', ev->>'candidate_id',
+            ev->>'event_type', NULLIF(ev->>'fact_id','')::uuid,
+            NULLIF(ev->>'related_fact_id','')::uuid, ev->>'predicate',
+            ev->>'engine_version', ev->>'mapper_version', ev->>'extractor_version',
+            ev->>'registry_version', ev->>'decision_reason',
+            COALESCE(ev->'payload', ev->'payload_json', '{}'::jsonb));
+    END LOOP;
+
+    RETURN jsonb_build_object('ok', true, 'inserted', inserted);
+END;
+$$;
