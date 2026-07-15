@@ -101,7 +101,38 @@ DECLARE
     inserted integer := 0;
     n integer;
 BEGIN
-    -- (Task 4 will add supersede/update handling BEFORE this insert block.)
+    -- Supersedes/deletes FIRST (frees the active slot before inserts), under
+    -- optimistic CAS: a mismatched expected_version means a concurrent writer
+    -- moved the row — abort the whole call so the caller reloads and retries.
+    FOR ins IN SELECT * FROM jsonb_array_elements(p_supersedes) LOOP
+        UPDATE canonical_facts
+           SET status      = COALESCE(ins->>'new_status', 'superseded'),
+               valid_until = NULLIF(ins->>'valid_until','')::date,
+               version     = version + 1,
+               updated_at  = now()
+         WHERE id = (ins->>'id')::uuid
+           AND version = (ins->>'expected_version')::int;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        IF n = 0 THEN
+            RAISE EXCEPTION 'cas_conflict superseding fact %', ins->>'id'
+                USING ERRCODE = '40001';
+        END IF;
+    END LOOP;
+
+    -- Updates (confirmations/corrections): CAS field update, no status change.
+    FOR ins IN SELECT * FROM jsonb_array_elements(p_updates) LOOP
+        UPDATE canonical_facts
+           SET confirmation_status = ins->>'confirmation_status',
+               version    = version + 1,
+               updated_at = now()
+         WHERE id = (ins->>'id')::uuid
+           AND version = (ins->>'expected_version')::int;
+        GET DIAGNOSTICS n = ROW_COUNT;
+        IF n = 0 THEN
+            RAISE EXCEPTION 'cas_conflict updating fact %', ins->>'id'
+                USING ERRCODE = '40001';
+        END IF;
+    END LOOP;
 
     -- Inserts: idempotent on the candidate identity; the partial unique indexes
     -- enforce one active row per slot.

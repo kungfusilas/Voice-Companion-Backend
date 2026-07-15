@@ -24,6 +24,12 @@ def _count(conn, table="canonical_facts"):
     return conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
 
 
+def _one_active(conn):
+    return conn.execute(
+        "SELECT id, version, value_json->>'city' FROM canonical_facts "
+        "WHERE status='active'").fetchall()
+
+
 def test_insert_creates_fact_and_event(ledger_db):
     _call(ledger_db,
           inserts=[_fact()],
@@ -64,3 +70,51 @@ def test_replay_does_not_duplicate_events(ledger_db):
     _call(ledger_db, inserts=ins, events=ev)  # replay: insert no-ops, events must not duplicate
     assert _count(ledger_db) == 1
     assert _count(ledger_db, "canonical_fact_events") == 1
+
+
+def test_supersede_then_insert_moves_the_slot(ledger_db):
+    ins = _fact(id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    _call(ledger_db, inserts=[ins])
+    # Now supersede the old and insert the new (Easton -> Reading), one call.
+    _call(ledger_db,
+          supersedes=[{"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                       "expected_version": 1, "new_status": "superseded"}],
+          inserts=[_fact(source_exchange_id="ex2", value_json={"city": "Reading"},
+                         normalized_value='{"city":"reading"}',
+                         supersedes_fact_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")])
+    active = _one_active(ledger_db)
+    assert len(active) == 1 and active[0][2] == "Reading"
+
+
+def test_stale_version_supersede_raises_and_rolls_back(ledger_db):
+    ins = _fact(id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+    _call(ledger_db, inserts=[ins])
+    with pytest.raises(psycopg.errors.SerializationFailure):
+        _call(ledger_db,
+              supersedes=[{"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                           "expected_version": 99, "new_status": "superseded"}],
+              inserts=[_fact(source_exchange_id="ex3", value_json={"city": "Reading"},
+                             normalized_value='{"city":"reading"}')])
+    # Nothing changed: old fact still active v1, the new insert did not land.
+    active = _one_active(ledger_db)
+    assert len(active) == 1 and active[0][1] == 1 and active[0][2] == "Easton"
+
+
+def test_update_confirmation_bumps_version_via_cas(ledger_db):
+    ins = _fact(id="cccccccc-cccc-cccc-cccc-cccccccccccc")
+    _call(ledger_db, inserts=[ins])
+    _call(ledger_db, updates=[{"id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+                               "expected_version": 1,
+                               "confirmation_status": "user_confirmed"}])
+    row = ledger_db.execute(
+        "SELECT confirmation_status, version FROM canonical_facts").fetchone()
+    assert row[0] == "user_confirmed" and row[1] == 2
+
+
+def test_stale_update_raises(ledger_db):
+    ins = _fact(id="dddddddd-dddd-dddd-dddd-dddddddddddd")
+    _call(ledger_db, inserts=[ins])
+    with pytest.raises(psycopg.errors.SerializationFailure):
+        _call(ledger_db, updates=[{"id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                                   "expected_version": 5,
+                                   "confirmation_status": "user_confirmed"}])
