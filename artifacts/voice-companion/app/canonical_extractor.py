@@ -75,7 +75,22 @@ _CORE_FACTS_CANONICAL_ADDON = (
     '"confirmation_status": "explicitly_stated"}}]'
 )
 
-CANONICAL_EXTRACTION_SYSTEM = _CORE_FACTS_SYSTEM + _CORE_FACTS_CANONICAL_ADDON
+# Recall mandate: the dedicated extractor serves ONLY the ledger, so unlike the
+# shared-prompt era we can push recall hard with zero legacy-behavior risk.
+# Gate evidence (2026-07-15): misses cluster in soft categories (goals,
+# personality, hobbies, religion/politics, finance, identity, past events).
+_RECALL_MANDATE = (
+    "\nRECALL MANDATE: you are a dedicated memory extractor — completeness matters as "
+    "much as precision. Extract EVERY qualifying self-asserted fact, emphatically "
+    "including the commonly under-extracted categories: goals and aspirations the user "
+    "states for themselves, hobbies and interests, personality traits, identity details, "
+    "financial milestones, religious or political affiliations, and past life events. "
+    "A missed real fact is a permanently lost memory. Reserve omission for the excluded "
+    "cases above (fantasies and idle wishes, negations, sarcasm, quotations, unrelated "
+    "third parties).\n"
+)
+
+CANONICAL_EXTRACTION_SYSTEM = _CORE_FACTS_SYSTEM + _CORE_FACTS_CANONICAL_ADDON + _RECALL_MANDATE
 
 
 async def extract_canonical_candidates(user_id: str, user_message: str,
