@@ -118,3 +118,24 @@ def test_stale_update_raises(ledger_db):
         _call(ledger_db, updates=[{"id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
                                    "expected_version": 5,
                                    "confirmation_status": "user_confirmed"}])
+
+
+def test_earlier_supersede_rolls_back_when_later_update_is_stale(ledger_db):
+    # Two active facts in different slots. A call supersedes the first (would
+    # succeed) but its second op is a stale update -> the whole call aborts, so
+    # the already-applied supersede is rolled back too. Nothing persists.
+    a = _fact(id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+    b = _fact(id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", predicate="employer",
+              value_json={"name": "Acme"}, normalized_value='{"name":"acme"}',
+              source_exchange_id="exb")
+    _call(ledger_db, inserts=[a, b])
+    with pytest.raises(psycopg.errors.SerializationFailure):
+        _call(ledger_db,
+              supersedes=[{"id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                           "expected_version": 1, "new_status": "superseded"}],
+              updates=[{"id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                        "expected_version": 99, "confirmation_status": "user_confirmed"}])
+    row = ledger_db.execute(
+        "SELECT status, version FROM canonical_facts "
+        "WHERE id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'").fetchone()
+    assert row == ("active", 1)  # the successful supersede was undone by the abort
