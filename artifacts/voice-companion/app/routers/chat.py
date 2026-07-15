@@ -193,6 +193,9 @@ async def _extract_and_shadow(user_id: str, message: str, reply: str, exchange_i
     except Exception as exc:
         _chat_logger.warning("core-facts extraction failed user=%.8s: %r", user_id, exc)
         return
+    if not any(isinstance(f, dict) and f.get("canonical")
+               for f in (getattr(outcome, "facts", None) or [])):
+        return  # no canonical candidates (the prod case until 3c) — skip get_settings + executor
     try:
         async def _shadow():
             settings = await memory_settings.get_settings(user_id)
