@@ -42,6 +42,32 @@ _SALIENCE_SYSTEM = (
 )
 
 
+def _parse_fact_array(raw: str) -> list | None:
+    """Parse the LLM's fact array, tolerating code fences and surrounding prose.
+    Returns the list, or None if no JSON array can be recovered."""
+    cleaned = (raw or "").strip()
+    if "```" in cleaned:
+        parts = cleaned.split("```")
+        cleaned = parts[1] if len(parts) > 1 else parts[0]
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+    try:
+        data = json.loads(cleaned)
+        return data if isinstance(data, list) else None
+    except (ValueError, TypeError):
+        pass
+    # Fallback: recover the outermost [...] span from prose-wrapped output.
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start != -1 and end > start:
+        try:
+            data = json.loads(cleaned[start:end + 1])
+            return data if isinstance(data, list) else None
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def _sanitize_memory_content(content: str) -> str:
     """
     Sanitize memory content before injection into the system prompt.
@@ -236,8 +262,8 @@ _CORE_FACTS_CANONICAL_ADDON = (
     "Do not treat hypotheticals, wishes or hypothetical plans (\"I'd love to\", \"maybe someday\"), "
     "negations (\"I'm not\", \"we don't\"), sarcasm, quoted sayings, or statements about "
     "unrelated third parties (coworkers, neighbors, celebrities) as facts about the user.\n"
-    "Always return ONLY a valid JSON array — return [] with no other text when there are "
-    "no qualifying facts.\n"
+    "Respond with the JSON array only. Never add explanations, notes, or any text before or "
+    "after the array — when no facts qualify, output exactly [] and nothing else.\n"
     'Example: [{"category": "location", "fact": "Lives in Easton, Pennsylvania", '
     '"sensitivity": "location", "canonical": {"predicate": "home_city", '
     '"value_json": {"city": "Easton", "state": "Pennsylvania"}, '
@@ -275,17 +301,10 @@ async def extract_and_save_core_facts(
             model="claude-haiku-4-5-20251001",
             max_tokens=900 if enabled else 400,
         )
-        cleaned = raw.strip()
-        if "```" in cleaned:
-            parts = cleaned.split("```")
-            cleaned = parts[1] if len(parts) > 1 else parts[0]
-            if cleaned.startswith("json"):
-                cleaned = cleaned[4:]
-            cleaned = cleaned.strip()
-
-        facts: list = json.loads(cleaned)
-        if not isinstance(facts, list) or not facts:
+        parsed_list = _parse_fact_array(raw)
+        if not parsed_list:
             return LegacyOutcome(status="empty", facts=[])
+        facts: list = parsed_list
 
         from app import memory_settings
         facts = [

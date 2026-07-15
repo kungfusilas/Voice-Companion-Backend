@@ -81,3 +81,25 @@ def test_post_parse_error_still_returns_facts(monkeypatch):
     out = asyncio.run(memory_extractor.extract_and_save_core_facts("u1", "m", "r"))
     assert out.status == "error"
     assert len(out.facts) == 1
+
+
+def test_parse_fact_array_tolerates_prose_and_fences():
+    from app.memory_extractor import _parse_fact_array
+    good = '[{"category": "work", "fact": "a", "sensitivity": "none"}]'
+    assert _parse_fact_array(good) is not None
+    assert _parse_fact_array(f"```json\n{good}\n```") is not None
+    assert _parse_fact_array(f"Here are the facts I extracted:\n{good}\nLet me know!") is not None
+    assert _parse_fact_array("No facts qualify here. []") == []
+    assert _parse_fact_array("I could not find any facts.") is None
+    assert _parse_fact_array('{"an": "object"}') is None
+
+
+def test_prose_wrapped_llm_output_still_extracts(monkeypatch):
+    async def fake_send(*a, **kw):
+        return ('Based on the conversation, here is the extraction:\n'
+                '[{"category": "location", "fact": "Lives in Easton", "sensitivity": "none"}]\n'
+                'Note: I excluded the sarcastic remark.')
+    monkeypatch.setattr(memory_extractor.claude, "send_message", fake_send)
+    _fake_supabase(monkeypatch)
+    out = asyncio.run(memory_extractor.extract_and_save_core_facts("u1", "m", "r"))
+    assert len(out.facts) == 1 and out.facts[0]["fact"] == "Lives in Easton"
