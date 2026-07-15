@@ -47,6 +47,7 @@ _VALUE_HINTS: dict[str, str] = {
     "partner": '{"name": str}',
     "children": '{"name": str, "age"?: int}',
     "pets": '{"name": str, "species"?: str}',
+    "hobbies": '{"name": str}',
     "birthday": '{"date": "YYYY-MM-DD"}',
     "dietary_restriction": '{"restriction": str}',
     "pronouns": '{"pronouns": str}',

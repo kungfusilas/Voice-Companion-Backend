@@ -196,7 +196,7 @@ _CORE_FACTS_VALID_CATEGORIES = frozenset(
 
 
 def _canonical_enabled(user_id: str) -> bool:
-    """Stage-3c rollout: allowlist -> percent bucket -> global flag. Read per call."""
+    """Stage-3c rollout: allowlist -> global flag -> percent bucket. Read per call."""
     allow = os.environ.get("CANONICAL_EXTRACTION_ALLOWLIST", "")
     if user_id and user_id in {u.strip() for u in allow.split(",") if u.strip()}:
         return True
