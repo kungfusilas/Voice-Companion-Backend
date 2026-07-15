@@ -41,7 +41,9 @@ def test_compute_metrics_core_shapes():
     assert m["canonical_coverage"] == 0.5               # 1 of 2 fact-turns had a valid canonical
     assert m["canonical_validity"] == 1.0
     assert m["gold_hit_rate"] == 1.0
-    assert m["no_fact_canonical"] == 0
+    assert m["no_fact_canonical"] == 0          # trap turn no longer counted here
+    assert m["trap_canonical_count"] == 0       # trap turn's fact has no canonical
+    assert m["canonical_total"] == 1            # only "a"'s fact carries a canonical key
 
 
 def test_gate_a_fails_on_capture_and_trap_regression():
@@ -61,6 +63,17 @@ def test_gate_b_fails_on_low_validity_and_no_fact_canonical():
     names = {n: ok for n, ok, _ in evaluate_gate_b(new)}
     assert names["canonical_validity"] is False
     assert names["no_fact_canonical"] is False
+
+
+def test_trap_canonicals_gate():
+    # 1 trap canonical out of 2 total canonicals = 50% > 3% -> fail
+    new = compute_metrics([
+        _result("a", True, [_fact(canonical=_GOOD_CANON)], gold=["home_city"]),
+        _result("t", False, [_fact(canonical=_GOOD_CANON)], trap=True),
+    ])
+    names = {n: ok for n, ok, _ in evaluate_gate_b(new)}
+    assert names["trap_unsupported"] is False
+    assert names["no_fact_canonical"] is True      # trap turns no longer counted here
 
 
 def test_zero_emission_reports_zero_validity_and_coverage():

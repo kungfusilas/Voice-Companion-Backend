@@ -231,6 +231,13 @@ _CORE_FACTS_CANONICAL_ADDON = (
     + _canonical_hint_lines() + "\n"
     "If none fits, use a short snake_case predicate of your own. If you cannot produce a "
     "confident canonical object, omit the \"canonical\" key for that fact — never guess.\n"
+    "Extract facts only when the user directly asserts the information as true about "
+    "themselves or an explicitly identified person in their own life (partner, child, pet). "
+    "Do not treat hypotheticals, wishes or hypothetical plans (\"I'd love to\", \"maybe someday\"), "
+    "negations (\"I'm not\", \"we don't\"), sarcasm, quoted sayings, or statements about "
+    "unrelated third parties (coworkers, neighbors, celebrities) as facts about the user.\n"
+    "Always return ONLY a valid JSON array — return [] with no other text when there are "
+    "no qualifying facts.\n"
     'Example: [{"category": "location", "fact": "Lives in Easton, Pennsylvania", '
     '"sensitivity": "location", "canonical": {"predicate": "home_city", '
     '"value_json": {"city": "Easton", "state": "Pennsylvania"}, '
