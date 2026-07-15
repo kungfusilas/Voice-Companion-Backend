@@ -1,8 +1,11 @@
-"""A/B gate for the canonical extraction prompt (Stage 3c deploy gate).
+"""Single-arm quality gate for the dedicated canonical extraction prompt.
 
-Runs scripts/ab_corpus.yaml against BOTH prompt variants using the app's real
-claude.send_message. Ships only on GATE A (legacy preserved) AND GATE B
-(canonical quality) both passing.
+Canonical extraction now runs as its own call (app/canonical_extractor.py,
+CANONICAL_EXTRACTION_SYSTEM) and never touches the legacy core-facts prompt,
+which is unconditional and untouched by construction. The old regression arm
+(comparing against the legacy prompt) is therefore obsolete — this gate runs
+scripts/ab_corpus.yaml through the canonical prompt ONLY, using the app's real
+claude.send_message, and ships only when every canonical-quality check passes.
 
 Run from artifacts/voice-companion (needs ANTHROPIC_API_KEY — e.g. Replit shell):
     python scripts/ab_prompt_gate.py [--runs 2] [--quick]
@@ -113,40 +116,6 @@ def compute_metrics(results: list[dict]) -> dict:
     }
 
 
-def _max_share_shift(old_share, new_share, old_counts, new_counts, floor=3):
-    keys = set(old_share) | set(new_share)
-    shifts = [abs(old_share.get(k, 0.0) - new_share.get(k, 0.0))
-              for k in keys
-              if max(old_counts.get(k, 0), new_counts.get(k, 0)) >= floor]
-    return max(shifts) if shifts else 0.0
-
-
-def evaluate_gate_a(old: dict, new: dict) -> list[tuple[str, bool, str]]:
-    g = []
-    old_rate, new_rate = old["parse_failure_rate"], new["parse_failure_rate"]
-    parse_detail = (
-        f"old={old_rate:.1%} new={new_rate:.1%}"
-        + (" [note: absolute rate >5% — pre-existing legacy behavior, tracked separately]"
-           if max(old_rate, new_rate) > 0.05 else "")
-    )
-    g.append(("parse_failure", new_rate <= old_rate + 0.02, parse_detail))
-    g.append(("capture_rate", new["capture_rate"] >= 0.95 * old["capture_rate"],
-              f"old={old['capture_rate']:.1%} new={new['capture_rate']:.1%}"))
-    # old==0 means legacy extracted nothing at all — ratio is meaningless; treat as neutral
-    ratio = (new["mean_facts_per_bearing_turn"] / old["mean_facts_per_bearing_turn"]
-             if old["mean_facts_per_bearing_turn"] else 1.0)
-    g.append(("mean_facts_ratio", 0.75 <= ratio <= 1.35, f"ratio={ratio:.2f}"))
-    cat = _max_share_shift(old["category_share"], new["category_share"],
-                           old["category_counts"], new["category_counts"])
-    g.append(("category_shift", cat <= 0.15, f"max shift={cat:.1%}"))
-    sens = _max_share_shift(old["sensitivity_share"], new["sensitivity_share"],
-                            old["sensitivity_counts"], new["sensitivity_counts"])
-    g.append(("sensitivity_shift", sens <= 0.15, f"max shift={sens:.1%}"))
-    g.append(("trap_fp", new["trap_fp_rate"] <= old["trap_fp_rate"] + 0.10,
-              f"old={old['trap_fp_rate']:.1%} new={new['trap_fp_rate']:.1%}"))
-    return g
-
-
 def evaluate_gate_b(new: dict) -> list[tuple[str, bool, str]]:
     trap_ct, canon_tot = new["trap_canonical_count"], new["canonical_total"]
     trap_rate = (trap_ct / canon_tot) if canon_tot else 0.0
@@ -162,6 +131,16 @@ def evaluate_gate_b(new: dict) -> list[tuple[str, bool, str]]:
         ("trap_unsupported", trap_rate <= 0.03,
          f"{trap_ct}/{canon_tot} = {trap_rate:.1%} (<=3%)"),
     ]
+
+
+def evaluate_gate_split(new: dict) -> list[tuple[str, bool, str]]:
+    """Single-arm gate: the canonical-quality checks PLUS an absolute parse-failure
+    ceiling. Now enforceable — the dedicated canonical prompt carries no legacy
+    baggage, so there is no "old" arm to relativize the parse-failure rate against."""
+    g = evaluate_gate_b(new)
+    rate = new["parse_failure_rate"]
+    g.append(("parse_failure_abs", rate <= 0.05, f"{rate:.1%} (<=5% absolute)"))
+    return g
 
 
 def _lat_stats(latencies: list[float], out_chars: list[float]) -> dict:
@@ -231,7 +210,7 @@ def _gold_misses(results: list[dict]) -> list[dict]:
 
 async def main():
     import yaml
-    from app import memory_extractor
+    from app.canonical_extractor import CANONICAL_EXTRACTION_SYSTEM
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=2)
@@ -241,53 +220,42 @@ async def main():
     corpus = yaml.safe_load((pathlib.Path(__file__).parent / "ab_corpus.yaml").read_text())["turns"]
     if args.quick:
         corpus = [t for t in corpus if t.get("tier") == 1]
-    print(f"corpus: {len(corpus)} turns × {args.runs} run(s) × 2 variants")
+    print(f"corpus: {len(corpus)} turns × {args.runs} run(s), canonical prompt only")
 
-    old_all, new_all = [], []
-    old_lats, old_chars, new_lats, new_chars = [], [], [], []
+    canon_all: list[dict] = []
+    canon_lats: list[float] = []
+    canon_chars: list[float] = []
     for i in range(args.runs):
-        print(f"== run {i + 1}: legacy prompt ==")
-        r, lats, chars = await _run_variant(corpus, memory_extractor._CORE_FACTS_SYSTEM, 400,
-                                             "old", i + 1)
-        old_all += r; old_lats += lats; old_chars += chars
         print(f"== run {i + 1}: canonical prompt ==")
-        r, lats, chars = await _run_variant(
-            corpus, memory_extractor._CORE_FACTS_SYSTEM + memory_extractor._CORE_FACTS_CANONICAL_ADDON,
-            900, "new", i + 1)
-        new_all += r; new_lats += lats; new_chars += chars
-    old_lat, new_lat = _lat_stats(old_lats, old_chars), _lat_stats(new_lats, new_chars)
+        r, lats, chars = await _run_variant(corpus, CANONICAL_EXTRACTION_SYSTEM, 900, "canon", i + 1)
+        canon_all += r; canon_lats += lats; canon_chars += chars
+    canon_lat = _lat_stats(canon_lats, canon_chars)
 
-    old_m, new_m = compute_metrics(old_all), compute_metrics(new_all)
-    gate_a, gate_b = evaluate_gate_a(old_m, new_m), evaluate_gate_b(new_m)
+    canon_m = compute_metrics(canon_all)
+    gate = evaluate_gate_split(canon_m)
 
-    print("\n== GATE A: legacy preservation ==")
-    for n, ok, d in gate_a:
+    print("\n== GATE: canonical quality (single-arm) ==")
+    for n, ok, d in gate:
         print(f"  [{'PASS' if ok else 'FAIL'}] {n}: {d}")
-    print("== GATE B: canonical quality ==")
-    for n, ok, d in gate_b:
-        print(f"  [{'PASS' if ok else 'FAIL'}] {n}: {d}")
-    print(f"  [report] capture vs gold: old={old_m['capture_rate']:.1%} new={new_m['capture_rate']:.1%}")
-    print(f"  [report] latency old avg/p95: {old_lat['avg_s']:.2f}/{old_lat['p95_s']:.2f}s; "
-          f"new: {new_lat['avg_s']:.2f}/{new_lat['p95_s']:.2f}s; "
-          f"out chars old/new: {old_lat['avg_out_chars']:.0f}/{new_lat['avg_out_chars']:.0f}")
+    print(f"  [report] capture vs gold: {canon_m['capture_rate']:.1%}")
+    print(f"  [report] latency avg/p95: {canon_lat['avg_s']:.2f}/{canon_lat['p95_s']:.2f}s; "
+          f"out chars avg: {canon_lat['avg_out_chars']:.0f}")
 
-    old_m["per_turn"] = _per_turn_forensics(old_all)
-    new_m["per_turn"] = _per_turn_forensics(new_all)
-    gold_misses = _gold_misses(new_all)
+    canon_m["per_turn"] = _per_turn_forensics(canon_all)
+    gold_misses = _gold_misses(canon_all)
 
     out = {"ts": datetime.now(timezone.utc).isoformat(), "runs": args.runs,
-           "quick": args.quick, "old": old_m, "new": new_m,
-           "gate_a": [{"name": n, "ok": ok, "detail": d} for n, ok, d in gate_a],
-           "gate_b": [{"name": n, "ok": ok, "detail": d} for n, ok, d in gate_b],
-           "latency": {"old": old_lat, "new": new_lat},
+           "quick": args.quick, "canon": canon_m,
+           "gate": [{"name": n, "ok": ok, "detail": d} for n, ok, d in gate],
+           "latency": {"canon": canon_lat},
            "gold_misses": gold_misses}
     path = pathlib.Path(__file__).parent / f"ab_results_{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.json"
     path.write_text(json.dumps(out, indent=2))
     print(f"\nresults: {path}")
-    if all(ok for _, ok, _ in gate_a) and all(ok for _, ok, _ in gate_b):
+    if all(ok for _, ok, _ in gate):
         print("GATE: PASS — proceed to first-light (allowlist), then staged percent rollout.")
         return 0
-    print("GATE: FAIL — do NOT enroll users. Fallback per spec: separate extraction call (own plan).")
+    print("GATE: FAIL — do NOT enroll users. Iterate the dedicated canonical prompt.")
     return 1
 
 
