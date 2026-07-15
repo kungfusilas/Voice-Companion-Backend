@@ -9,8 +9,78 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Protocol
+
+from app.canonical.models import Fact
+
+
+ENGINE_VERSION = "engine-2026-07-14"
+MAPPER_VERSION = "mapper-2026-07-14"
+REGISTRY_VERSION = "registry-2026-07-14"
+
+
+@dataclass
+class LedgerContext:
+    owner_user_id: str
+    source_exchange_id: str
+    extractor_version: str
+    sensitivity: str = "none"
+
+
+def _as_date(v):
+    if v is None or isinstance(v, date):
+        return v
+    try:
+        return date.fromisoformat(str(v)[:10])
+    except (ValueError, TypeError):
+        return None
+
+
+def row_to_fact(row: dict) -> Fact:
+    return Fact(
+        id=str(row["id"]),
+        subject_type=row["subject_type"], subject_id=row["subject_id"],
+        predicate=row["predicate"], value_json=row["value_json"],
+        normalized_value=row["normalized_value"], status=row.get("status", "active"),
+        scope=row.get("scope", "global"), companion_id=row.get("companion_id"),
+        valid_from=_as_date(row.get("valid_from")), valid_until=_as_date(row.get("valid_until")),
+        observed_at=_as_date(row.get("observed_at")),
+        supersedes_fact_id=(str(row["supersedes_fact_id"]) if row.get("supersedes_fact_id") else None),
+        confirmation_status=row.get("confirmation_status", "inferred"),
+        sensitivity=row.get("sensitivity", "none"), sub_key=row.get("sub_key"),
+        cardinality=row.get("cardinality", "single"), version=int(row.get("version", 1)),
+    )
+
+
+def _iso(d):
+    return d.isoformat() if isinstance(d, date) else None
+
+
+def fact_to_insert(f: Fact, ctx: LedgerContext) -> dict:
+    return {
+        "id": f.id, "owner_user_id": ctx.owner_user_id,
+        "subject_type": f.subject_type, "subject_id": f.subject_id,
+        "predicate": f.predicate, "cardinality": f.cardinality,
+        "value_json": f.value_json, "normalized_value": f.normalized_value,
+        "sub_key": f.sub_key, "status": f.status, "scope": f.scope,
+        "companion_id": f.companion_id, "valid_from": _iso(f.valid_from),
+        "valid_until": _iso(f.valid_until), "observed_at": _iso(f.observed_at),
+        "supersedes_fact_id": f.supersedes_fact_id,
+        "confirmation_status": f.confirmation_status, "sensitivity": f.sensitivity,
+        "version": f.version, "extractor_version": ctx.extractor_version,
+        "mapper_version": MAPPER_VERSION, "engine_version": ENGINE_VERSION,
+        "registry_version": REGISTRY_VERSION, "source_exchange_id": ctx.source_exchange_id,
+    }
+
+
+def enrich_event(ev: dict, ctx: LedgerContext) -> dict:
+    return {**ev, "owner_user_id": ctx.owner_user_id,
+            "source_exchange_id": ctx.source_exchange_id,
+            "extractor_version": ev.get("extractor_version", ctx.extractor_version),
+            "mapper_version": ev.get("mapper_version", MAPPER_VERSION),
+            "registry_version": ev.get("registry_version", REGISTRY_VERSION)}
 
 
 class ConflictError(Exception):

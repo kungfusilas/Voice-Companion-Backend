@@ -1,9 +1,47 @@
 import asyncio
 import pathlib
+from datetime import date
 
-from app.canonical.repository import PsycopgExecutor, ConflictError
+from app.canonical.repository import (PsycopgExecutor, ConflictError, LedgerContext,
+                                      row_to_fact, fact_to_insert, enrich_event)
+from app.canonical.models import Fact
 
 _MIG = pathlib.Path(__file__).parent.parent / "migrations" / "0002_canonical_ledger_shadow.sql"
+
+
+def _ctx():
+    return LedgerContext(owner_user_id="u1", source_exchange_id="ex1",
+                         extractor_version="v1", sensitivity="none")
+
+
+def test_row_to_fact_parses_dates_and_json():
+    f = row_to_fact({"id": "abc", "subject_type": "user", "subject_id": "self",
+                     "predicate": "home_city", "cardinality": "single",
+                     "value_json": {"city": "Easton"}, "normalized_value": '{"city":"easton"}',
+                     "sub_key": None, "status": "active", "scope": "global",
+                     "companion_id": None, "valid_from": "2026-06-01", "valid_until": None,
+                     "observed_at": date(2026, 7, 1), "supersedes_fact_id": None,
+                     "confirmation_status": "inferred", "sensitivity": "none", "version": 3})
+    assert f.id == "abc" and f.value_json == {"city": "Easton"}
+    assert f.valid_from == date(2026, 6, 1) and f.observed_at == date(2026, 7, 1)
+    assert f.version == 3
+
+
+def test_fact_to_insert_serializes_dates_and_injects_context():
+    f = Fact(id="x", subject_type="user", subject_id="self", predicate="home_city",
+             value_json={"city": "Easton"}, normalized_value='{"city":"easton"}',
+             cardinality="single", valid_from=date(2026, 6, 1))
+    d = fact_to_insert(f, _ctx())
+    assert d["owner_user_id"] == "u1" and d["source_exchange_id"] == "ex1"
+    assert d["extractor_version"] == "v1" and d["engine_version"]
+    assert d["valid_from"] == "2026-06-01"          # ISO string, not a date object
+    assert d["value_json"] == {"city": "Easton"}    # jsonb stays structured
+
+
+def test_enrich_event_injects_owner_and_exchange():
+    ev = enrich_event({"event_type": "fact_created", "fact_id": "x"}, _ctx())
+    assert ev["owner_user_id"] == "u1" and ev["source_exchange_id"] == "ex1"
+    assert ev["event_type"] == "fact_created"
 
 
 def _insert_row(**over):
