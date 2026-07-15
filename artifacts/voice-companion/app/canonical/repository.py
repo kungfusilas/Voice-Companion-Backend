@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any, Protocol
@@ -156,6 +157,62 @@ class PsycopgExecutor:
             if getattr(exc, "sqlstate", None) in _CONFLICT_SQLSTATES:
                 raise ConflictError(str(exc)) from exc
             raise
+
+
+def _default_client_factory():
+    import httpx
+    return httpx.AsyncClient(timeout=15.0)
+
+
+class PostgrestExecutor:
+    """Production executor over Supabase PostgREST (mirrors app.conversation_store)."""
+
+    def __init__(self, base_url: str | None = None, service_key: str | None = None,
+                 client_factory=None):
+        self._url = (base_url or os.environ.get("SUPABASE_URL", "")).rstrip("/")
+        self._key = service_key or os.environ.get("SUPABASE_SERVICE_KEY", "")
+        self._client_factory = client_factory or _default_client_factory
+
+    def _headers(self, prefer="return=representation"):
+        return {"apikey": self._key, "Authorization": f"Bearer {self._key}",
+                "Content-Type": "application/json", "Prefer": prefer}
+
+    async def fetch_active_facts(self, owner_user_id, subject_type, subject_id,
+                                 predicate, scope, companion_id):
+        params = {"owner_user_id": f"eq.{owner_user_id}",
+                  "subject_type": f"eq.{subject_type}", "subject_id": f"eq.{subject_id}",
+                  "predicate": f"eq.{predicate}", "scope": f"eq.{scope}",
+                  "status": "eq.active", "select": "*"}
+        params["companion_id"] = f"eq.{companion_id}" if companion_id else "is.null"
+        async with self._client_factory() as client:
+            resp = await client.get(f"{self._url}/rest/v1/canonical_facts",
+                                    headers=self._headers(prefer=""), params=params)
+        if resp.status_code not in (200, 206):
+            self._raise(resp)
+        return resp.json()
+
+    async def apply_delta(self, supersedes, updates, inserts, events):
+        body = {"p_supersedes": supersedes, "p_updates": updates,
+                "p_inserts": inserts, "p_events": events}
+        async with self._client_factory() as client:
+            resp = await client.post(f"{self._url}/rest/v1/rpc/apply_canonical_delta",
+                                     headers=self._headers(prefer="return=minimal"), json=body)
+        if resp.status_code not in (200, 201, 204):
+            self._raise(resp)
+        try:
+            return resp.json()
+        except Exception:
+            return {"ok": True}
+
+    def _raise(self, resp):
+        code = None
+        try:
+            code = (resp.json() or {}).get("code")
+        except Exception:
+            pass
+        if code in _CONFLICT_SQLSTATES:
+            raise ConflictError(f"ledger conflict {code}")
+        raise RuntimeError(f"ledger error HTTP {resp.status_code}: {resp.text[:300]}")
 
 
 async def apply_candidate_durably(executor, candidate, ctx: LedgerContext,
