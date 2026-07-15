@@ -14,6 +14,8 @@ from datetime import date, datetime, timezone
 from typing import Any, Protocol
 
 from app.canonical.models import Fact
+from app.canonical.engine import apply_candidate
+from app.canonical.delta import compute_delta
 
 
 ENGINE_VERSION = "engine-2026-07-14"
@@ -154,3 +156,36 @@ class PsycopgExecutor:
             if getattr(exc, "sqlstate", None) in _CONFLICT_SQLSTATES:
                 raise ConflictError(str(exc)) from exc
             raise
+
+
+async def apply_candidate_durably(executor, candidate, ctx: LedgerContext,
+                                  now: date | None = None, max_retries: int = 3) -> dict:
+    """Load the candidate's active slot, run the engine, persist the delta.
+    Reloads + recomputes on a ConflictError (CAS 40001 / race 23505)."""
+    now = now or datetime.now(timezone.utc).date()
+    last_exc: ConflictError | None = None
+    for _ in range(max_retries):
+        rows = await executor.fetch_active_facts(
+            ctx.owner_user_id, candidate.subject_type, candidate.subject_id,
+            candidate.predicate, candidate.scope, candidate.companion_id)
+        before = [row_to_fact(r) for r in rows]
+        after = apply_candidate(before, candidate, now)
+        delta = compute_delta(before, after, engine_version=ENGINE_VERSION,
+                              candidate_id=ctx.source_exchange_id)
+        if delta.is_empty():
+            return {"ok": True, "changed": False}
+        # Everything handed to the executor must be JSON-safe (no date objects):
+        # fact_to_insert already ISO-encodes insert dates; supersede ops still carry
+        # a raw date valid_until from compute_delta, so encode it here — otherwise
+        # PostgrestExecutor's httpx json= would crash on a temporal supersession.
+        supersedes = [{**op, "valid_until": _iso(op.get("valid_until"))}
+                      for op in delta.supersedes]
+        inserts = [fact_to_insert(f, ctx) for f in delta.inserts]
+        events = [enrich_event(e, ctx) for e in delta.events]
+        try:
+            res = await executor.apply_delta(supersedes, delta.updates, inserts, events)
+            return {"ok": True, "changed": True, "result": res}
+        except ConflictError as exc:
+            last_exc = exc
+            continue
+    raise last_exc or ConflictError("retry exhausted")
