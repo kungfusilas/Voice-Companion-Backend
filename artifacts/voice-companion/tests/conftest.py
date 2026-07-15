@@ -21,8 +21,10 @@ def _free_port() -> str:
 
 
 def _run(*args):
-    subprocess.run(args, check=True, env=_ENV,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    r = subprocess.run(args, env=_ENV, stdout=subprocess.PIPE,
+                       stderr=subprocess.STDOUT, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"{args[0]} failed (exit {r.returncode}):\n{r.stdout}")
 
 
 @pytest.fixture(scope="session")
@@ -32,9 +34,13 @@ def _pg_server():
     tmp = tempfile.mkdtemp(prefix="ledger_pg.")
     data = os.path.join(tmp, "data")
     log = os.path.join(tmp, "log")
-    port = _free_port()
-    _run(os.path.join(PG_BIN, "initdb"), "-D", data, "-U", "postgres", "--auth=trust")
-    _run(os.path.join(PG_BIN, "pg_ctl"), "-D", data, "-l", log, "-o", f"-p {port}", "-w", "start")
+    try:
+        _run(os.path.join(PG_BIN, "initdb"), "-D", data, "-U", "postgres", "--auth=trust")
+        port = _free_port()
+        _run(os.path.join(PG_BIN, "pg_ctl"), "-D", data, "-l", log, "-o", f"-p {port}", "-w", "start")
+    except Exception:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
 
     def _stop():
         subprocess.run([os.path.join(PG_BIN, "pg_ctl"), "-D", data, "-w", "stop"],
