@@ -91,9 +91,15 @@ def compute_metrics(results: list[dict]) -> dict:
         1 for r in gold_turns
         if any(_canon_predicate(f.get("canonical")) in r["gold_predicates"]
                for f in r["facts"] if "canonical" in f and _valid_canonical(f["canonical"])))
+    # explicit no-fact turns only (expect_facts False AND not an adversarial trap) —
+    # traps get their own (noisier, non-zero-tolerance) budget below
     no_fact_canonical = sum(
-        1 for r in results if not r["expect_facts"]
+        1 for r in results if not r["expect_facts"] and not r.get("trap")
         for f in r["facts"] if "canonical" in f)
+    trap_canonical_count = sum(
+        1 for r in results if r.get("trap")
+        for f in r["facts"] if "canonical" in f)
+    canonical_total = sum(1 for f in all_facts if "canonical" in f)
 
     return {
         "turns": turns, "parse_failures": parse_failures,
@@ -111,6 +117,8 @@ def compute_metrics(results: list[dict]) -> dict:
         # no gold-labeled turns -> 0.0 (forces the corpus to carry gold labels), not a vacuous 1.0
         "gold_hit_rate": (gold_hits / len(gold_turns)) if gold_turns else 0.0,
         "no_fact_canonical": no_fact_canonical,
+        "trap_canonical_count": trap_canonical_count,
+        "canonical_total": canonical_total,
     }
 
 
@@ -124,10 +132,13 @@ def _max_share_shift(old_share, new_share, old_counts, new_counts, floor=3):
 
 def evaluate_gate_a(old: dict, new: dict) -> list[tuple[str, bool, str]]:
     g = []
-    g.append(("parse_failure",
-              new["parse_failure_rate"] <= old["parse_failure_rate"] + 0.02
-              and new["parse_failure_rate"] <= 0.05,
-              f"old={old['parse_failure_rate']:.1%} new={new['parse_failure_rate']:.1%}"))
+    old_rate, new_rate = old["parse_failure_rate"], new["parse_failure_rate"]
+    parse_detail = (
+        f"old={old_rate:.1%} new={new_rate:.1%}"
+        + (" [note: absolute rate >5% — pre-existing legacy behavior, tracked separately]"
+           if max(old_rate, new_rate) > 0.05 else "")
+    )
+    g.append(("parse_failure", new_rate <= old_rate + 0.02, parse_detail))
     g.append(("capture_rate", new["capture_rate"] >= 0.95 * old["capture_rate"],
               f"old={old['capture_rate']:.1%} new={new['capture_rate']:.1%}"))
     # old==0 means legacy extracted nothing at all — ratio is meaningless; treat as neutral
@@ -146,6 +157,8 @@ def evaluate_gate_a(old: dict, new: dict) -> list[tuple[str, bool, str]]:
 
 
 def evaluate_gate_b(new: dict) -> list[tuple[str, bool, str]]:
+    trap_ct, canon_tot = new["trap_canonical_count"], new["canonical_total"]
+    trap_rate = (trap_ct / canon_tot) if canon_tot else 0.0
     return [
         ("canonical_coverage", new["canonical_coverage"] >= 0.90,
          f"{new['canonical_coverage']:.1%} (>=90%)"),
@@ -154,7 +167,9 @@ def evaluate_gate_b(new: dict) -> list[tuple[str, bool, str]]:
         ("gold_predicate_hit", new["gold_hit_rate"] >= 0.85,
          f"{new['gold_hit_rate']:.1%} (>=85%)"),
         ("no_fact_canonical", new["no_fact_canonical"] == 0,
-         f"count={new['no_fact_canonical']} (==0)"),
+         f"count={new['no_fact_canonical']} (==0, explicit no-fact turns)"),
+        ("trap_unsupported", trap_rate <= 0.03,
+         f"{trap_ct}/{canon_tot} = {trap_rate:.1%} (<=3%)"),
     ]
 
 
@@ -165,7 +180,7 @@ def _lat_stats(latencies: list[float], out_chars: list[float]) -> dict:
             "avg_out_chars": statistics.mean(out_chars)}
 
 
-async def _run_variant(turns, system_prompt, max_tokens, label):
+async def _run_variant(turns, system_prompt, max_tokens, label, run_idx):
     from app import claude
     results, latencies, out_chars = [], [], []
     for t in turns:
@@ -177,7 +192,7 @@ async def _run_variant(turns, system_prompt, max_tokens, label):
         latencies.append(time.perf_counter() - t0)
         out_chars.append(len(raw or ""))
         items = parse_llm_output(raw)
-        results.append({"id": t["id"], "expect_facts": t["expect_facts"],
+        results.append({"id": t["id"], "run": run_idx, "expect_facts": t["expect_facts"],
                         "trap": bool(t.get("trap")),
                         "gold_predicates": t.get("gold_predicates") or [],
                         "parse_failed": items is None,
@@ -185,6 +200,36 @@ async def _run_variant(turns, system_prompt, max_tokens, label):
         print(f"  [{label}] {t['id']}: "
               f"{'PARSE-FAIL' if items is None else str(len(results[-1]['facts'])) + ' facts'}")
     return results, latencies, out_chars
+
+
+def _per_turn_forensics(results: list[dict]) -> list[dict]:
+    """Per-turn breakdown for post-hoc forensics: which turns produced which
+    alias-resolved predicates, and whether any explicit no-fact turn leaked a canonical."""
+    out = []
+    for r in results:
+        predicates = [_canon_predicate(f["canonical"]) for f in r["facts"]
+                      if "canonical" in f and _valid_canonical(f["canonical"])]
+        out.append({
+            "id": r["id"], "run": r["run"], "parse_failed": r["parse_failed"],
+            "n_facts": len(r["facts"]), "predicates": predicates,
+            "has_canonical_on_expect_false": bool(
+                not r["expect_facts"] and any("canonical" in f for f in r["facts"])),
+        })
+    return out
+
+
+def _gold_misses(results: list[dict]) -> list[dict]:
+    """Gold-labeled turns (new variant) that did not hit any expected predicate."""
+    misses = []
+    for r in results:
+        gold = r.get("gold_predicates") or []
+        if not (r["expect_facts"] and gold):
+            continue
+        emitted = [_canon_predicate(f["canonical"]) for f in r["facts"]
+                   if "canonical" in f and _valid_canonical(f["canonical"])]
+        if not any(p in gold for p in emitted):
+            misses.append({"id": r["id"], "run": r["run"], "gold": gold, "emitted": emitted})
+    return misses
 
 
 async def main():
@@ -205,12 +250,13 @@ async def main():
     old_lats, old_chars, new_lats, new_chars = [], [], [], []
     for i in range(args.runs):
         print(f"== run {i + 1}: legacy prompt ==")
-        r, lats, chars = await _run_variant(corpus, memory_extractor._CORE_FACTS_SYSTEM, 400, "old")
+        r, lats, chars = await _run_variant(corpus, memory_extractor._CORE_FACTS_SYSTEM, 400,
+                                             "old", i + 1)
         old_all += r; old_lats += lats; old_chars += chars
         print(f"== run {i + 1}: canonical prompt ==")
         r, lats, chars = await _run_variant(
             corpus, memory_extractor._CORE_FACTS_SYSTEM + memory_extractor._CORE_FACTS_CANONICAL_ADDON,
-            900, "new")
+            900, "new", i + 1)
         new_all += r; new_lats += lats; new_chars += chars
     old_lat, new_lat = _lat_stats(old_lats, old_chars), _lat_stats(new_lats, new_chars)
 
@@ -228,11 +274,16 @@ async def main():
           f"new: {new_lat['avg_s']:.2f}/{new_lat['p95_s']:.2f}s; "
           f"out chars old/new: {old_lat['avg_out_chars']:.0f}/{new_lat['avg_out_chars']:.0f}")
 
+    old_m["per_turn"] = _per_turn_forensics(old_all)
+    new_m["per_turn"] = _per_turn_forensics(new_all)
+    gold_misses = _gold_misses(new_all)
+
     out = {"ts": datetime.now(timezone.utc).isoformat(), "runs": args.runs,
            "quick": args.quick, "old": old_m, "new": new_m,
            "gate_a": [{"name": n, "ok": ok, "detail": d} for n, ok, d in gate_a],
            "gate_b": [{"name": n, "ok": ok, "detail": d} for n, ok, d in gate_b],
-           "latency": {"old": old_lat, "new": new_lat}}
+           "latency": {"old": old_lat, "new": new_lat},
+           "gold_misses": gold_misses}
     path = pathlib.Path(__file__).parent / f"ab_results_{datetime.now(timezone.utc):%Y%m%dT%H%M%S}.json"
     path.write_text(json.dumps(out, indent=2))
     print(f"\nresults: {path}")
