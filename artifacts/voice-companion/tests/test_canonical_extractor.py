@@ -67,3 +67,9 @@ def test_sensitivity_coerced_to_vocabulary(monkeypatch):
     monkeypatch.setattr(canonical_extractor.claude, "send_message", fake_send)
     out = asyncio.run(canonical_extractor.extract_canonical_candidates("u1", "m", "r"))
     assert [f["sensitivity"] for f in out] == ["none", "location", "none"]
+
+
+def test_extraction_model_is_sonnet():
+    # Pinned deliberately: Haiku demonstrably cannot hold recall + formatting
+    # constraints simultaneously (11-invocation gate history, 2026-07-15/16).
+    assert canonical_extractor.CANONICAL_EXTRACTION_MODEL == "claude-sonnet-5"

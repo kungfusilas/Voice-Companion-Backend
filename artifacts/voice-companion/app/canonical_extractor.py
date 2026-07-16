@@ -95,6 +95,12 @@ _RECALL_MANDATE = (
 
 CANONICAL_EXTRACTION_SYSTEM = _CORE_FACTS_SYSTEM + _CORE_FACTS_CANONICAL_ADDON + _RECALL_MANDATE
 
+# Sonnet, not Haiku: 11 gate invocations showed Haiku cannot hold maximal soft-
+# category recall AND zero-caution formatting in one prompt (coverage seesaw
+# 84↔97). The dedicated call runs only for enrolled users, in the background —
+# the stronger model is the structural fix, not more prompt wording.
+CANONICAL_EXTRACTION_MODEL = "claude-sonnet-5"
+
 
 async def extract_canonical_candidates(user_id: str, user_message: str,
                                        ai_response: str) -> list[dict]:
@@ -104,7 +110,7 @@ async def extract_canonical_candidates(user_id: str, user_message: str,
             history=[],
             user_message=(f"User said: {user_message}\n\n"
                           f"Companion replied: {ai_response}"),
-            model="claude-haiku-4-5-20251001",
+            model=CANONICAL_EXTRACTION_MODEL,
             max_tokens=900,
         )
         items = _parse_fact_array(raw)
