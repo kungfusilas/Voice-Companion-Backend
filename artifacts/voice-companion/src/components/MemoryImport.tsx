@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Upload, CheckCircle, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
+import { apiFetch } from "@/lib/api";
 
 interface MemoryImportProps {
   userId: string;
@@ -17,10 +18,10 @@ export function MemoryImport({ userId }: MemoryImportProps) {
     setStatus("loading");
     setError("");
     try {
-      const res = await fetch("/companion/api/import-memories", {
+      const res = await apiFetch("/companion/api/import-memories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, user_id: userId }),
+        body: JSON.stringify({ text }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
