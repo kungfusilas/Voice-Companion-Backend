@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BookOpen, PenLine, ChevronRight, Loader, CheckCircle } from "lucide-react";
+import { apiFetch } from "@/lib/api";
 
 interface OnboardingFlowProps {
   userId: string;
@@ -28,10 +29,10 @@ export function OnboardingFlow({ userId, companionName, onComplete }: Onboarding
     setStatus("loading");
     setError("");
     try {
-      const res = await fetch("/companion/api/import-memories", {
+      const res = await apiFetch("/companion/api/import-memories", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, user_id: userId }),
+        body: JSON.stringify({ text }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
