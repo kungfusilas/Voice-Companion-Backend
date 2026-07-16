@@ -150,7 +150,7 @@ def _lat_stats(latencies: list[float], out_chars: list[float]) -> dict:
             "avg_out_chars": statistics.mean(out_chars)}
 
 
-async def _run_variant(turns, system_prompt, max_tokens, label, run_idx):
+async def _run_variant(turns, system_prompt, max_tokens, label, run_idx, model):
     from app import claude
     results, latencies, out_chars = [], [], []
     for t in turns:
@@ -158,7 +158,7 @@ async def _run_variant(turns, system_prompt, max_tokens, label, run_idx):
         raw = await claude.send_message(
             system_prompt=system_prompt, history=[],
             user_message=f"User said: {t['user']}\n\nCompanion replied: {t['reply']}",
-            model="claude-haiku-4-5-20251001", max_tokens=max_tokens)
+            model=model, max_tokens=max_tokens)
         latencies.append(time.perf_counter() - t0)
         out_chars.append(len(raw or ""))
         items = parse_llm_output(raw)
@@ -210,7 +210,7 @@ def _gold_misses(results: list[dict]) -> list[dict]:
 
 async def main():
     import yaml
-    from app.canonical_extractor import CANONICAL_EXTRACTION_SYSTEM
+    from app.canonical_extractor import CANONICAL_EXTRACTION_SYSTEM, CANONICAL_EXTRACTION_MODEL
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=2)
@@ -227,7 +227,8 @@ async def main():
     canon_chars: list[float] = []
     for i in range(args.runs):
         print(f"== run {i + 1}: canonical prompt ==")
-        r, lats, chars = await _run_variant(corpus, CANONICAL_EXTRACTION_SYSTEM, 900, "canon", i + 1)
+        r, lats, chars = await _run_variant(corpus, CANONICAL_EXTRACTION_SYSTEM, 900, "canon",
+                                            i + 1, CANONICAL_EXTRACTION_MODEL)
         canon_all += r; canon_lats += lats; canon_chars += chars
     canon_lat = _lat_stats(canon_lats, canon_chars)
 
