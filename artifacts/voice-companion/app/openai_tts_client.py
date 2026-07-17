@@ -52,8 +52,8 @@ def get_async_client() -> AsyncOpenAI:
 
 async def synthesize(text: str, voice: str = TTS_VOICE) -> bytes:
     """Convert text to speech via OpenAI TTS and return full audio as bytes (mp3)."""
-    client = get_async_client()
     try:
+        client = get_async_client()
         response = await client.audio.speech.create(
             model=TTS_MODEL,
             voice=voice,
@@ -66,8 +66,8 @@ async def synthesize(text: str, voice: str = TTS_VOICE) -> bytes:
 
 async def synthesize_stream(text: str, voice: str = TTS_VOICE) -> AsyncGenerator[bytes, None]:
     """Stream audio chunks as they arrive from OpenAI TTS."""
-    client = get_async_client()
     try:
+        client = get_async_client()
         async with client.audio.speech.with_streaming_response.create(
             model=TTS_MODEL,
             voice=voice,
