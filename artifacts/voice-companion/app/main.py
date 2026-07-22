@@ -14,7 +14,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app import selfie_pool
 
-from app.routers import chat, personas, sessions, memories
+from app.routers import chat, personas, sessions, tts, memories
 from app.routers import import_memories
 from app.routers import vault as vault_router
 from app.routers import relationship_profile as relationship_profile_router
@@ -237,6 +237,7 @@ app.add_middleware(_StripCompanionPrefix)
 app.include_router(chat.router,               prefix="/api/chat",               tags=["chat"])
 app.include_router(personas.router,           prefix="/api/personas",           tags=["personas"])
 app.include_router(sessions.router,           prefix="/api/sessions",           tags=["sessions"])
+app.include_router(tts.router,                prefix="/api/tts",                tags=["tts"])
 app.include_router(memories.router,           prefix="/api/memories",           tags=["memories"])
 app.include_router(import_memories.router)
 app.include_router(vault_router.router)
